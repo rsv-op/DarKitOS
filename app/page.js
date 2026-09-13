@@ -50,6 +50,12 @@ const Icons = {
       <polyline points="23 6 13.5 15.5 8.5 10.5 1 18" />
       <polyline points="17 6 23 6 23 12" />
     </svg>
+  ),
+  Eye: () => (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+      <circle cx="12" cy="12" r="3" />
+    </svg>
   )
 };
 
@@ -83,6 +89,47 @@ export default function FunnelApp() {
     e.preventDefault();
     setSubmitted(true);
   };
+
+  const templatePreviews = {
+    'Service Business': {
+      title: 'Vance Advisory & Partners',
+      tagline: 'High-Impact Strategic Consulting',
+      heroImage: 'https://images.unsplash.com/photo-1486406146926-c627a92ad1ab?auto=format&fit=crop&w=600&q=80',
+      accentColor: '#2563eb',
+      buttonText: 'Book Strategy Call',
+      badge: 'B2B & CONSULTING',
+      stats: ['99.4% Client Retention', '$48M Client Value']
+    },
+    'E-Commerce Store': {
+      title: 'Aura Modern Living',
+      tagline: 'Minimalist Goods & Home Decor',
+      heroImage: 'https://images.unsplash.com/photo-1513519245088-0e12902e5a38?auto=format&fit=crop&w=600&q=80',
+      accentColor: '#ec4899',
+      buttonText: 'Shop New Arrivals',
+      badge: 'DIRECT SALES & RETAIL',
+      stats: ['Free 2-Day Shipping', '4.9★ Customer Rating']
+    },
+    'Portfolio & Agency': {
+      title: 'Kinesis Creative Lab',
+      tagline: 'Brand Systems & Visual Direction',
+      heroImage: 'https://images.unsplash.com/photo-1507238691740-187a5b1d37b8?auto=format&fit=crop&w=600&q=80',
+      accentColor: '#818cf8',
+      buttonText: 'View Selected Works',
+      badge: 'CREATIVE & DIGITAL',
+      stats: ['14 Design Awards', 'Over 80 Case Studies']
+    },
+    'Clinic & Wellness': {
+      title: 'Lumina Integrative Health',
+      tagline: 'Modern Medicine & Holistic Care',
+      heroImage: 'https://images.unsplash.com/photo-1629909613654-28e377c37b09?auto=format&fit=crop&w=600&q=80',
+      accentColor: '#10b981',
+      buttonText: 'Schedule Appointment',
+      badge: 'HEALTHCARE & WELLNESS',
+      stats: ['Same-Day Intake', 'Board-Certified Specialists']
+    }
+  };
+
+  const currentPreview = templatePreviews[selectedTemplateType];
 
   const pricingTiers = [
     {
@@ -267,14 +314,16 @@ export default function FunnelApp() {
     );
   }
 
-  // --- VIEW: SPEED CHECK & BASE TEMPLATE PREVIEW ---
+  // --- VIEW: SPEED CHECK & VISUAL BASE TEMPLATE PREVIEW ---
   if (mode === 'speed_check') {
     return (
       <main style={styles.container}>
         <div style={styles.card}>
-          <span style={styles.badge}>INSTANT BASE TEMPLATE ESTIMATOR</span>
-          <h2 style={{ ...styles.title, marginTop: '8px' }}>Check Your Build Speed</h2>
-          <p style={styles.subtitle}>Select your project type to see how fast we create your custom base foundation.</p>
+          <div style={{ textAlign: 'center', marginBottom: '14px' }}>
+            <span style={styles.badge}>INTERACTIVE TEMPLATE PREVIEW</span>
+            <h2 style={{ ...styles.title, marginTop: '8px' }}>Explore Base Templates</h2>
+            <p style={styles.subtitle}>Tap a category below to preview its live design, layout, and style.</p>
+          </div>
 
           <div style={styles.templatePicker}>
             {['Service Business', 'E-Commerce Store', 'Portfolio & Agency', 'Clinic & Wellness'].map((type) => (
@@ -288,23 +337,69 @@ export default function FunnelApp() {
             ))}
           </div>
 
-          <div style={styles.speedResultBox}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px' }}>
-              <Icons.CheckCircle />
-              <span style={{ fontSize: '14px', fontWeight: '700', color: '#34d399' }}>Base Structure Ready in 24 Hours</span>
+          <div style={styles.previewBrowserWindow}>
+            <div style={styles.browserHeader}>
+              <div style={styles.browserDots}>
+                <span style={{ ...styles.dot, backgroundColor: '#ef4444' }} />
+                <span style={{ ...styles.dot, backgroundColor: '#eab308' }} />
+                <span style={{ ...styles.dot, backgroundColor: '#22c55e' }} />
+              </div>
+              <div style={styles.browserUrlPill}>
+                preview.{selectedTemplateType.toLowerCase().replace(/\s+/g, '')}.com
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center' }}>
+                <Icons.Eye />
+              </div>
             </div>
-            <p style={{ fontSize: '12px', color: '#94a3b8', margin: 0, lineHeight: '1.4' }}>
-              Your complete layout, typography rules, and responsive styling for <strong>{selectedTemplateType}</strong> are ready for your live review within 24 hours of checkout.
+
+            <div style={styles.mockupHeroContainer}>
+              <img src={currentPreview.heroImage} alt={currentPreview.title} style={styles.mockupImage} />
+              <div style={styles.mockupHeroOverlay} />
+              <div style={styles.mockupHeroContent}>
+                <span style={{ ...styles.mockupBadge, backgroundColor: `${currentPreview.accentColor}33`, borderColor: currentPreview.accentColor }}>
+                  {currentPreview.badge}
+                </span>
+                <h3 style={styles.mockupHeading}>{currentPreview.title}</h3>
+                <p style={styles.mockupSubtext}>{currentPreview.tagline}</p>
+                <div style={{ display: 'flex', gap: '8px', marginTop: '6px' }}>
+                  <button style={{ ...styles.mockupActionBtn, backgroundColor: currentPreview.accentColor }}>
+                    {currentPreview.buttonText}
+                  </button>
+                  <button style={styles.mockupSecondaryBtn}>
+                    Learn More
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div style={styles.mockupStatsBar}>
+              {currentPreview.stats.map((stat, i) => (
+                <span key={i} style={styles.mockupStatItem}>
+                  ✓ {stat}
+                </span>
+              ))}
+            </div>
+          </div>
+
+          <div style={styles.speedResultBox}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
+              <Icons.CheckCircle />
+              <span style={{ fontSize: '13px', fontWeight: '700', color: '#34d399' }}>
+                {selectedTemplateType} Foundation Ready in 24 Hours
+              </span>
+            </div>
+            <p style={{ fontSize: '11px', color: '#94a3b8', margin: 0, lineHeight: '1.4' }}>
+              We deploy this fully customized responsive layout and color profile to your private preview portal within 24 hours of project kickoff.
             </p>
           </div>
 
           <div style={styles.gatedNoticeBox}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '4px' }}>
               <Icons.Lock />
-              <span style={{ fontSize: '13px', fontWeight: '600', color: '#fbbf24' }}>Registration Required to Save</span>
+              <span style={{ fontSize: '12px', fontWeight: '700', color: '#fbbf24' }}>Sign Up to Save This Base Template</span>
             </div>
-            <p style={{ fontSize: '12px', color: '#cbd5e1', margin: 0 }}>
-              To save this base template and lock your 7-day launch window with LaunchSeven Studio, complete our quick 2-minute project questionnaire.
+            <p style={{ fontSize: '11px', color: '#cbd5e1', margin: 0, lineHeight: '1.35' }}>
+              Complete the quick 2-minute questionnaire to reserve this layout and start your guaranteed 7-day launch.
             </p>
           </div>
 
@@ -315,7 +410,7 @@ export default function FunnelApp() {
               setMode('questionnaire');
             }}
           >
-            Save & Lock This Base Template →
+            Save This Template & Sign Up →
           </button>
 
           <button style={styles.backBtn} onClick={() => setMode('landing')}>
@@ -362,27 +457,77 @@ export default function FunnelApp() {
     );
   }
 
-  // --- VIEW: LANDING HOME PAGE ---
+  // --- VIEW: LANDING HOME PAGE (VIVID SHOWCASE BACKGROUND) ---
   if (mode === 'landing') {
     return (
       <main style={styles.container}>
+        {/* Crisp, clearly visible background grid of live websites */}
         <div style={styles.bgGridContainer}>
-          <div style={styles.bgImageCard}>
-            <img src="https://images.unsplash.com/photo-1460925895917-afdab827c52f?auto=format&fit=crop&w=600&q=80" alt="Web Showcase 1" style={styles.bgImage} />
+          {/* Mockup 1: Modern SaaS / App Platform */}
+          <div style={styles.bgBrowserCard}>
+            <div style={styles.bgBrowserBar}>
+              <span style={{ ...styles.bgDot, backgroundColor: '#f87171' }} />
+              <span style={{ ...styles.bgDot, backgroundColor: '#fbbf24' }} />
+              <span style={{ ...styles.bgDot, backgroundColor: '#34d399' }} />
+              <span style={styles.bgBrowserDomain}>zenith-platform.io</span>
+            </div>
+            <img 
+              src="https://images.unsplash.com/photo-1460925895917-afdab827c52f?auto=format&fit=crop&w=700&q=85" 
+              alt="Website Showcase 1" 
+              style={styles.bgImage} 
+            />
           </div>
-          <div style={styles.bgImageCard}>
-            <img src="https://images.unsplash.com/photo-1507238691740-187a5b1d37b8?auto=format&fit=crop&w=600&q=80" alt="Web Showcase 2" style={styles.bgImage} />
+
+          {/* Mockup 2: Design Studio & Agency Portfolio */}
+          <div style={styles.bgBrowserCard}>
+            <div style={styles.bgBrowserBar}>
+              <span style={{ ...styles.bgDot, backgroundColor: '#f87171' }} />
+              <span style={{ ...styles.bgDot, backgroundColor: '#fbbf24' }} />
+              <span style={{ ...styles.bgDot, backgroundColor: '#34d399' }} />
+              <span style={styles.bgBrowserDomain}>kinesis-creative.com</span>
+            </div>
+            <img 
+              src="https://images.unsplash.com/photo-1507238691740-187a5b1d37b8?auto=format&fit=crop&w=700&q=85" 
+              alt="Website Showcase 2" 
+              style={styles.bgImage} 
+            />
           </div>
-          <div style={styles.bgImageCard}>
-            <img src="https://images.unsplash.com/photo-1522542550221-31fd19575a2d?auto=format&fit=crop&w=600&q=80" alt="Web Showcase 3" style={styles.bgImage} />
+
+          {/* Mockup 3: E-Commerce Store */}
+          <div style={styles.bgBrowserCard}>
+            <div style={styles.bgBrowserBar}>
+              <span style={{ ...styles.bgDot, backgroundColor: '#f87171' }} />
+              <span style={{ ...styles.bgDot, backgroundColor: '#fbbf24' }} />
+              <span style={{ ...styles.bgDot, backgroundColor: '#34d399' }} />
+              <span style={styles.bgBrowserDomain}>aura-living.shop</span>
+            </div>
+            <img 
+              src="https://images.unsplash.com/photo-1513519245088-0e12902e5a38?auto=format&fit=crop&w=700&q=85" 
+              alt="Website Showcase 3" 
+              style={styles.bgImage} 
+            />
           </div>
-          <div style={styles.bgImageCard}>
-            <img src="https://images.unsplash.com/photo-1551288049-bebda4e38f71?auto=format&fit=crop&w=600&q=80" alt="Web Showcase 4" style={styles.bgImage} />
+
+          {/* Mockup 4: Professional Architecture / Corporate */}
+          <div style={styles.bgBrowserCard}>
+            <div style={styles.bgBrowserBar}>
+              <span style={{ ...styles.bgDot, backgroundColor: '#f87171' }} />
+              <span style={{ ...styles.bgDot, backgroundColor: '#fbbf24' }} />
+              <span style={{ ...styles.bgDot, backgroundColor: '#34d399' }} />
+              <span style={styles.bgBrowserDomain}>vance-corp.com</span>
+            </div>
+            <img 
+              src="https://images.unsplash.com/photo-1486406146926-c627a92ad1ab?auto=format&fit=crop&w=700&q=85" 
+              alt="Website Showcase 4" 
+              style={styles.bgImage} 
+            />
           </div>
         </div>
 
+        {/* Balanced Translucent Vignette (Keeps websites clearly visible around the card) */}
         <div style={styles.bgOverlay} />
 
+        {/* Floating Glassmorphic Control Card */}
         <div style={styles.cardRelative}>
           <div style={{ textAlign: 'center', marginBottom: '16px' }}>
             <span style={styles.brandBadge}>LAUNCHSEVEN STUDIO</span>
@@ -403,12 +548,12 @@ export default function FunnelApp() {
               Build My Website Now
             </button>
 
-            <button style={styles.pricingBtn} onClick={() => setMode('pricing')}>
-              🏷 View Pricing ($449 - $1,049)
+            <button style={styles.highlightBtn} onClick={() => setMode('speed_check')}>
+              ⏱ Preview Templates & Speed
             </button>
 
-            <button style={styles.highlightBtn} onClick={() => setMode('speed_check')}>
-              ⏱ Check Template Speed & Preview
+            <button style={styles.pricingBtn} onClick={() => setMode('pricing')}>
+              🏷 View Pricing ($449 - $1,049)
             </button>
 
             <button style={styles.secondaryBtn} onClick={() => setMode('browse')}>
@@ -557,25 +702,86 @@ export default function FunnelApp() {
 }
 
 const styles = {
-  container: { position: 'relative', minHeight: '100vh', backgroundColor: '#090d16', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px', boxSizing: 'border-box', overflow: 'hidden' },
+  container: { position: 'relative', minHeight: '100vh', backgroundColor: '#060910', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px', boxSizing: 'border-box', overflow: 'hidden' },
   
-  bgGridContainer: { position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '12px', padding: '12px', opacity: 0.22, pointerEvents: 'none', zIndex: 1 },
-  bgImageCard: { width: '100%', height: '100%', borderRadius: '12px', overflow: 'hidden' },
-  bgImage: { width: '100%', height: '100%', objectFit: 'cover' },
-  bgOverlay: { position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', background: 'radial-gradient(circle at center, rgba(15,23,42,0.82) 0%, rgba(9,13,22,0.97) 100%)', zIndex: 2 },
+  // Vivid Background Showcase Grid
+  bgGridContainer: { 
+    position: 'fixed', 
+    top: 0, 
+    left: 0, 
+    right: 0, 
+    bottom: 0, 
+    display: 'grid', 
+    gridTemplateColumns: 'repeat(2, 1fr)', 
+    gap: '14px', 
+    padding: '12px', 
+    opacity: 0.72, // Raised from 0.22 to 0.72 for strong visibility
+    pointerEvents: 'none', 
+    zIndex: 1 
+  },
+  bgBrowserCard: { 
+    width: '100%', 
+    height: '100%', 
+    borderRadius: '10px', 
+    overflow: 'hidden', 
+    border: '1px solid rgba(255, 255, 255, 0.25)', 
+    backgroundColor: '#1e293b', 
+    boxShadow: '0 8px 24px rgba(0,0,0,0.6)', 
+    display: 'flex', 
+    flexDirection: 'column' 
+  },
+  bgBrowserBar: { 
+    height: '18px', 
+    backgroundColor: '#0f172a', 
+    display: 'flex', 
+    alignItems: 'center', 
+    gap: '4px', 
+    padding: '0 8px', 
+    borderBottom: '1px solid rgba(255,255,255,0.1)' 
+  },
+  bgDot: { width: '5px', height: '5px', borderRadius: '50%' },
+  bgBrowserDomain: { fontSize: '8px', color: '#94a3b8', marginLeft: '6px', fontFamily: 'monospace' },
+  bgImage: { width: '100%', height: '100%', objectFit: 'cover', flex: 1 },
 
+  // Subtle radial vignette so cards in the background pop behind the center card
+  bgOverlay: { 
+    position: 'fixed', 
+    top: 0, 
+    left: 0, 
+    right: 0, 
+    bottom: 0, 
+    background: 'radial-gradient(circle at center, rgba(6, 9, 16, 0.55) 0%, rgba(6, 9, 16, 0.85) 100%)', 
+    zIndex: 2, 
+    pointerEvents: 'none' 
+  },
+
+  // Glassmorphic Card (Translucent so background is visible behind it)
+  cardRelative: { 
+    position: 'relative', 
+    zIndex: 3, 
+    backgroundColor: 'rgba(23, 32, 51, 0.88)', 
+    backdropFilter: 'blur(16px)', 
+    WebkitBackdropFilter: 'blur(16px)',
+    width: '100%', 
+    maxWidth: '440px', 
+    borderRadius: '16px', 
+    padding: '26px 22px', 
+    color: '#f8fafc', 
+    boxShadow: '0 20px 45px rgba(0,0,0,0.7)', 
+    border: '1px solid rgba(255,255,255,0.15)', 
+    boxSizing: 'border-box' 
+  },
   card: { position: 'relative', zIndex: 3, backgroundColor: '#1e293b', width: '100%', maxWidth: '440px', borderRadius: '14px', padding: '24px', color: '#f8fafc', boxShadow: '0 10px 30px rgba(0,0,0,0.6)', boxSizing: 'border-box' },
-  cardRelative: { position: 'relative', zIndex: 3, backgroundColor: 'rgba(30, 41, 59, 0.95)', backdropFilter: 'blur(10px)', width: '100%', maxWidth: '440px', borderRadius: '16px', padding: '26px 22px', color: '#f8fafc', boxShadow: '0 15px 35px rgba(0,0,0,0.6)', border: '1px solid rgba(255,255,255,0.08)', boxSizing: 'border-box' },
   
   title: { fontSize: '24px', fontWeight: '800', marginBottom: '6px', textAlign: 'center', letterSpacing: '-0.5px' },
-  subtitle: { fontSize: '13px', color: '#94a3b8', marginBottom: '18px', textAlign: 'center', lineHeight: '1.4' },
-  brandBadge: { fontSize: '11px', letterSpacing: '1.5px', fontWeight: '800', color: '#38bdf8', backgroundColor: '#0284c722', padding: '5px 12px', borderRadius: '999px', border: '1px solid #0284c755', display: 'inline-block' },
+  subtitle: { fontSize: '13px', color: '#cbd5e1', marginBottom: '18px', textAlign: 'center', lineHeight: '1.4' },
+  brandBadge: { fontSize: '11px', letterSpacing: '1.5px', fontWeight: '800', color: '#38bdf8', backgroundColor: '#0284c733', padding: '5px 12px', borderRadius: '999px', border: '1px solid #38bdf888', display: 'inline-block' },
   badge: { fontSize: '10px', letterSpacing: '1px', fontWeight: '700', color: '#38bdf8', backgroundColor: '#0284c722', padding: '4px 10px', borderRadius: '999px', border: '1px solid #0284c744', display: 'inline-block' },
   tierBadge: { fontSize: '9px', fontWeight: '700', color: '#94a3b8', backgroundColor: '#334155', padding: '2px 6px', borderRadius: '4px', letterSpacing: '0.5px' },
   popularBadge: { fontSize: '9px', fontWeight: '800', color: '#38bdf8', backgroundColor: '#0369a133', padding: '2px 6px', borderRadius: '4px', border: '1px solid #0284c7' },
   selectedTierBadge: { fontSize: '11px', fontWeight: '600', color: '#38bdf8', backgroundColor: '#0284c722', padding: '2px 8px', borderRadius: '4px' },
   
-  statsPill: { display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '8px', fontSize: '11px', color: '#cbd5e1', backgroundColor: '#0f172a', padding: '8px 12px', borderRadius: '8px', marginBottom: '20px', border: '1px solid #334155' },
+  statsPill: { display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '8px', fontSize: '11px', color: '#e2e8f0', backgroundColor: '#0f172aee', padding: '8px 12px', borderRadius: '8px', marginBottom: '20px', border: '1px solid #334155' },
   
   buttonGroup: { display: 'flex', flexDirection: 'column', gap: '10px' },
   primaryBtn: { width: '100%', padding: '14px', backgroundColor: '#2563eb', color: '#ffffff', border: 'none', borderRadius: '8px', fontWeight: '700', fontSize: '15px', cursor: 'pointer' },
@@ -583,17 +789,38 @@ const styles = {
   highlightBtn: { width: '100%', padding: '13px', backgroundColor: '#1e1b4b', color: '#c7d2fe', border: '1px solid #4f46e5', borderRadius: '8px', fontWeight: '600', fontSize: '14px', cursor: 'pointer' },
   secondaryBtn: { width: '100%', padding: '13px', backgroundColor: 'transparent', color: '#cbd5e1', border: '1px solid #334155', borderRadius: '8px', fontWeight: '600', fontSize: '14px', cursor: 'pointer' },
 
+  // Pricing Styles
   roiBanner: { backgroundColor: '#064e3b22', border: '1px solid #059669', borderRadius: '8px', padding: '12px', marginBottom: '14px' },
   pricingCard: { padding: '14px', borderRadius: '10px', border: '1px solid #334155', display: 'flex', flexDirection: 'column', gap: '8px' },
   roiTag: { fontSize: '11px', fontWeight: '600', color: '#34d399', backgroundColor: '#064e3b33', padding: '4px 8px', borderRadius: '4px' },
   tierList: { listStyle: 'none', padding: 0, margin: '6px 0', display: 'flex', flexDirection: 'column', gap: '6px' },
   tierItem: { display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', color: '#cbd5e1' },
 
+  // Speed & Template Browser Preview UI
   templatePicker: { display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '8px', marginBottom: '14px' },
-  templateBtn: { padding: '10px 8px', backgroundColor: '#0f172a', color: '#cbd5e1', border: '1px solid #334155', borderRadius: '6px', fontSize: '12px', fontWeight: '500', cursor: 'pointer' },
-  templateBtnActive: { padding: '10px 8px', backgroundColor: '#2563eb', color: '#ffffff', border: '1px solid #38bdf8', borderRadius: '6px', fontSize: '12px', fontWeight: '700', cursor: 'pointer' },
-  speedResultBox: { backgroundColor: '#064e3b22', border: '1px solid #059669', borderRadius: '8px', padding: '12px', marginBottom: '12px' },
-  gatedNoticeBox: { backgroundColor: '#78350f22', border: '1px solid #d97706', borderRadius: '8px', padding: '12px', marginBottom: '16px' },
+  templateBtn: { padding: '10px 8px', backgroundColor: '#0f172a', color: '#cbd5e1', border: '1px solid #334155', borderRadius: '6px', fontSize: '12px', fontWeight: '500', cursor: 'pointer', textAlign: 'center' },
+  templateBtnActive: { padding: '10px 8px', backgroundColor: '#2563eb', color: '#ffffff', border: '1px solid #38bdf8', borderRadius: '6px', fontSize: '12px', fontWeight: '700', cursor: 'pointer', textAlign: 'center' },
+  
+  previewBrowserWindow: { backgroundColor: '#0f172a', borderRadius: '10px', border: '1px solid #334155', overflow: 'hidden', marginBottom: '14px' },
+  browserHeader: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 12px', backgroundColor: '#1e293b', borderBottom: '1px solid #334155' },
+  browserDots: { display: 'flex', gap: '6px' },
+  dot: { width: '8px', height: '8px', borderRadius: '50%' },
+  browserUrlPill: { backgroundColor: '#0f172a', color: '#94a3b8', fontSize: '10px', padding: '2px 10px', borderRadius: '4px', border: '1px solid #334155' },
+  
+  mockupHeroContainer: { position: 'relative', height: '170px', overflow: 'hidden' },
+  mockupImage: { width: '100%', height: '100%', objectFit: 'cover' },
+  mockupHeroOverlay: { position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', background: 'linear-gradient(to top, rgba(15,23,42,0.95) 15%, rgba(15,23,42,0.4) 100%)' },
+  mockupHeroContent: { position: 'absolute', bottom: 12, left: 12, right: 12 },
+  mockupBadge: { fontSize: '9px', fontWeight: '800', color: '#f8fafc', padding: '2px 6px', borderRadius: '4px', border: '1px solid', letterSpacing: '0.5px' },
+  mockupHeading: { fontSize: '15px', fontWeight: '800', margin: '4px 0 2px 0', color: '#ffffff' },
+  mockupSubtext: { fontSize: '11px', color: '#cbd5e1', margin: 0 },
+  mockupActionBtn: { padding: '6px 12px', color: '#ffffff', border: 'none', borderRadius: '4px', fontSize: '11px', fontWeight: '700', cursor: 'pointer' },
+  mockupSecondaryBtn: { padding: '6px 10px', backgroundColor: 'rgba(255,255,255,0.1)', color: '#cbd5e1', border: '1px solid rgba(255,255,255,0.2)', borderRadius: '4px', fontSize: '11px', fontWeight: '600' },
+  mockupStatsBar: { display: 'flex', justifyContent: 'space-around', padding: '8px 10px', backgroundColor: '#0b1120', borderTop: '1px solid #1e293b' },
+  mockupStatItem: { fontSize: '10px', color: '#38bdf8', fontWeight: '600' },
+
+  speedResultBox: { backgroundColor: '#064e3b22', border: '1px solid #059669', borderRadius: '8px', padding: '10px', marginBottom: '10px' },
+  gatedNoticeBox: { backgroundColor: '#78350f22', border: '1px solid #d97706', borderRadius: '8px', padding: '10px', marginBottom: '14px' },
 
   serviceGrid: { display: 'flex', flexDirection: 'column', gap: '10px', marginBottom: '18px' },
   serviceCard: { display: 'flex', alignItems: 'flex-start', gap: '12px', padding: '12px', backgroundColor: '#0f172a88', borderRadius: '10px', border: '1px solid #334155' },
