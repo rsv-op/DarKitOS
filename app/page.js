@@ -4,7 +4,7 @@
 
 import React, { useState, useEffect } from 'react';
 
-// Custom SVG Vector Icons
+// Inline SVG Vector Icons
 const Icons = {
   SpeedDelivery: () => (
     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -23,15 +23,9 @@ const Icons = {
       <polyline points="17 6 23 6 23 12" />
     </svg>
   ),
-  Share: () => (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <circle cx="18" cy="5" r="3" /><circle cx="6" cy="12" r="3" /><circle cx="18" cy="19" r="3" />
-      <line x1="8.59" y1="13.51" x2="15.42" y2="17.49" /><line x1="15.41" y1="6.51" x2="8.59" y2="10.49" />
-    </svg>
-  ),
-  Sparkles: () => (
-    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#f472b6" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z" />
+  ShieldCheck: () => (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" /><polyline points="9 12 11 14 15 10" />
     </svg>
   ),
   Eye: () => (
@@ -39,9 +33,20 @@ const Icons = {
       <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" /><circle cx="12" cy="12" r="3" />
     </svg>
   ),
-  ShieldCheck: () => (
-    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" /><polyline points="9 12 11 14 15 10" />
+  Sparkles: () => (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#f472b6" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z" />
+    </svg>
+  ),
+  ArrowRight: () => (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+      <line x1="5" y1="12" x2="19" y2="12" /><polyline points="12 5 19 12 12 19" />
+    </svg>
+  ),
+  Calendar: () => (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
+      <line x1="16" y1="2" x2="16" y2="6" /><line x1="8" y1="2" x2="8" y2="6" /><line x1="3" y1="10" x2="21" y2="10" />
     </svg>
   ),
   Laptop: () => (
@@ -49,21 +54,37 @@ const Icons = {
       <rect x="2" y="3" width="20" height="14" rx="2" ry="2" /><line x1="2" y1="20" x2="22" y2="20" />
     </svg>
   ),
+  Tablet: () => (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="4" y="2" width="16" height="20" rx="2" ry="2" /><line x1="12" y1="18" x2="12.01" y2="18" />
+    </svg>
+  ),
   Smartphone: () => (
     <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <rect x="5" y="2" width="14" height="20" rx="2" ry="2" /><line x1="12" y1="18" x2="12.01" y2="18" />
+    </svg>
+  ),
+  Share: () => (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="18" cy="5" r="3" /><circle cx="6" cy="12" r="3" /><circle cx="18" cy="19" r="3" />
+      <line x1="8.59" y1="13.51" x2="15.42" y2="17.49" /><line x1="15.41" y1="6.51" x2="8.59" y2="10.49" />
     </svg>
   )
 };
 
 export default function LaunchSevenApp() {
-  const [mode, setMode] = useState('landing');
+  // Navigation: 1 = About, 2 = Date & Timeline, 3 = Action Hub, 4 = Templates Gallery
+  const [navPage, setNavPage] = useState(1);
+  const [activeCategory, setActiveCategory] = useState('B2B & Professional');
+  const [inspectingTemplate, setInspectingTemplate] = useState(null); // Full-screen device preview
+  const [previewDevice, setPreviewDevice] = useState('desktop'); // desktop | tablet | mobile
+  const [deliveryDate, setDeliveryDate] = useState('');
+  const [shareNotice, setShareNotice] = useState(false);
+
+  // Sub-views from Action Hub
+  const [subView, setSubView] = useState(null); // 'pricing' | 'creator' | 'questionnaire'
   const [step, setStep] = useState(1);
   const [selectedTier, setSelectedTier] = useState('Growth Engine');
-  const [previewDevice, setPreviewDevice] = useState('desktop');
-  const [activePortfolioIndex, setActivePortfolioIndex] = useState(0);
-  const [shareNotice, setShareNotice] = useState(false);
-  const [deliveryDate, setDeliveryDate] = useState('');
 
   const [formData, setFormData] = useState({
     tier: 'Growth Engine',
@@ -101,7 +122,7 @@ export default function LaunchSevenApp() {
       try {
         await navigator.share({
           title: 'LaunchSeven Studio',
-          text: 'Get a custom, professional website launched in 7 days with personal control!',
+          text: 'Custom websites delivered in seven days with full personal control.',
           url: window.location.href,
         });
       } catch (err) {}
@@ -112,70 +133,281 @@ export default function LaunchSevenApp() {
     }
   };
 
-  // Distinct Real-World Generic Portfolios (Avoids trademark loopholes)
-  const portfolioProjects = [
-    {
-      businessType: 'B2B Enterprise & Logistics',
-      brand: 'Apex Transit Dynamics',
-      tagline: 'High-Velocity Global Supply Chain Infrastructure',
-      badge: 'ENTERPRISE TECH',
-      accentColor: '#38bdf8',
-      heroImage: 'https://images.unsplash.com/photo-1586528116311-ad8dd3c8310d?auto=format&fit=crop&w=900&q=80',
-      stats: ['Sub-Second Dispatch Routing', '42 Global Nodes', '99.99% Telemetry Uptime'],
-      layoutStyle: 'High-density telemetry dashboard with active tracking modules.',
-      actionCta: 'Access Partner Terminal'
-    },
-    {
-      businessType: 'Artisan Retail & Roastery',
-      brand: 'Solstice Botanical Goods',
-      tagline: 'Hand-Harvested Small Batch Organics & Pantry',
-      badge: 'E-COMMERCE STUDIO',
-      accentColor: '#fb923c',
-      heroImage: 'https://images.unsplash.com/photo-1509785307050-d4066910ec1e?auto=format&fit=crop&w=900&q=80',
-      stats: ['Direct Farm Sourcing', 'Zero Waste Packaging', '4.9★ Customer Loyalty'],
-      layoutStyle: 'Warm terracotta visual storytelling with integrated 1-click cart.',
-      actionCta: 'Explore Seasonal Reserve'
-    },
-    {
-      businessType: 'Deep-Tech & Automation',
-      brand: 'Kinesis Robotics Lab',
-      tagline: 'Autonomous Fabrication & Industrial Neural Systems',
-      badge: 'HARDWARE & AI',
-      accentColor: '#a855f7',
-      heroImage: 'https://images.unsplash.com/photo-1485827404703-89b55fcc595e?auto=format&fit=crop&w=900&q=80',
-      stats: ['12ms Actuator Response', 'ISO-Certified Architecture', '24/7 Remote Diagnostics'],
-      layoutStyle: 'Obsidian dark-mode with high-contrast technical schematics.',
-      actionCta: 'Inspect Engineering Specs'
-    },
-    {
-      businessType: 'Healthcare & Specialized Clinic',
-      brand: 'Aegis Medical Collective',
-      tagline: 'Evidence-Based Preventative & Regenerative Medicine',
-      badge: 'CLINICAL PRACTICE',
-      accentColor: '#34d399',
-      heroImage: 'https://images.unsplash.com/photo-1629909613654-28e377c37b09?auto=format&fit=crop&w=900&q=80',
-      stats: ['Same-Day Intake Guarantee', 'Board-Certified Specialists', 'HIPAA Verified Portal'],
-      layoutStyle: 'Clinical slate design with instant calendar appointment scheduling.',
-      actionCta: 'Book Medical Consultation'
-    }
-  ];
+  // 5 Major Business Types with 5 Completely Different Websites Each (25 Unique Designs)
+  const templateCatalog = {
+    'B2B & Professional': [
+      {
+        id: 'b2b-1',
+        name: 'Apex Transit Dynamics',
+        tagline: 'Global Autonomous Supply Chain & Freight Logistics',
+        badge: 'ENTERPRISE FREIGHT',
+        accentColor: '#0284c7',
+        heroImage: 'https://images.unsplash.com/photo-1586528116311-ad8dd3c8310d?auto=format&fit=crop&w=900&q=80',
+        stats: ['42 Global Logistics Hubs', 'Sub-Second Route Telemetry', '99.99% Node SLA'],
+        layoutStyle: 'High-density telemetry dashboard with real-time schedule tracking.'
+      },
+      {
+        id: 'b2b-2',
+        name: 'Vance Advisory Group',
+        tagline: 'Private Equity M&A Due Diligence & Portfolio Governance',
+        badge: 'FINANCIAL ADVISORY',
+        accentColor: '#3b82f6',
+        heroImage: 'https://images.unsplash.com/photo-1486406146926-c627a92ad1ab?auto=format&fit=crop&w=900&q=80',
+        stats: ['$4.2B Capital Deployed', '28 Global Deal Exits', 'Institutional Confidentiality'],
+        layoutStyle: 'Sleek corporate editorial aesthetic with gated document download rooms.'
+      },
+      {
+        id: 'b2b-3',
+        name: 'Aura Architecture Lab',
+        tagline: 'Sustainable Biophilic Commercial & Civic Structural Design',
+        badge: 'ARCHITECTURAL DESIGN',
+        accentColor: '#14b8a6',
+        heroImage: 'https://images.unsplash.com/photo-1503387762-592deb58ef4e?auto=format&fit=crop&w=900&q=80',
+        stats: ['LEED Platinum Standard', '18 Architectural Awards', 'Carbon-Neutral Scaffolding'],
+        layoutStyle: 'Clean minimalist grid showcasing full-screen structural project photos.'
+      },
+      {
+        id: 'b2b-4',
+        name: 'Blackstone Legal Counsel',
+        tagline: 'Corporate Litigation, Regulatory Compliance & IP Defense',
+        badge: 'CORPORATE LAW',
+        accentColor: '#d97706',
+        heroImage: 'https://images.unsplash.com/photo-1479142506502-19b3a3b7ff33?auto=format&fit=crop&w=900&q=80',
+        stats: ['Over 300 Trial Verdicts', 'Cross-Border Patent Defense', '24/7 Crisis Hotline'],
+        layoutStyle: 'Executive dark typography with confidential case consultation booking.'
+      },
+      {
+        id: 'b2b-5',
+        name: 'Synthetix Human Capital',
+        tagline: 'Executive Search & Technical Engineering Headhunting',
+        badge: 'EXECUTIVE TALENT',
+        accentColor: '#8b5cf6',
+        heroImage: 'https://images.unsplash.com/photo-1522071820081-009f0129c71c?auto=format&fit=crop&w=900&q=80',
+        stats: ['96% 1-Year Retention', 'Average 18-Day Placement', 'Fortune 500 Network'],
+        layoutStyle: 'High-conversion talent search portal with instant candidate inquiry intake.'
+      }
+    ],
 
-  const activeProject = portfolioProjects[activePortfolioIndex];
+    'Retail & E-Commerce': [
+      {
+        id: 'ret-1',
+        name: 'Solstice Botanical Roastery',
+        tagline: 'Ethically Sourced Micro-Lot Coffee & Pantry Provisions',
+        badge: 'DIRECT TO CONSUMER',
+        accentColor: '#f97316',
+        heroImage: 'https://images.unsplash.com/photo-1509785307050-d4066910ec1e?auto=format&fit=crop&w=900&q=80',
+        stats: ['Single-Origin Beans', 'Compostable Packaging', '4.9★ Over 8,000 Reviews'],
+        layoutStyle: 'Warm terracotta artisan storytelling with 1-click subscription checkout.'
+      },
+      {
+        id: 'ret-2',
+        name: 'Kroma Nordic Ceramics',
+        tagline: 'Wheel-Thrown Stoneware & Minimalist Interior Vessels',
+        badge: 'STUDIO CRAFT',
+        accentColor: '#a1a1aa',
+        heroImage: 'https://images.unsplash.com/photo-1612196808214-b8e1d6145a8c?auto=format&fit=crop&w=900&q=80',
+        stats: ['Handmade in Batches', 'Lead-Free Mineral Glazes', 'Global Express Delivery'],
+        layoutStyle: 'Nordic museum gallery layout with high-resolution image zoom inspection.'
+      },
+      {
+        id: 'ret-3',
+        name: 'Lumina Clean Skincare',
+        tagline: 'Dermatologist-Formulated Botanical Serums & Barrier Oils',
+        badge: 'BEAUTY & WELLNESS',
+        accentColor: '#ec4899',
+        heroImage: 'https://images.unsplash.com/photo-1556228720-195a672e8a03?auto=format&fit=crop&w=900&q=80',
+        stats: ['Clinical Efficacy Trials', '100% Vegan Certified', 'Carbon-Neutral Production'],
+        layoutStyle: 'Soft pastel radiance with interactive skin quiz and customized routines.'
+      },
+      {
+        id: 'ret-4',
+        name: 'Aero Craft Tailoring',
+        tagline: 'Technical Merino Wool Apparel Engineered for Travel',
+        badge: 'TECHNICAL APPAREL',
+        accentColor: '#0ea5e9',
+        heroImage: 'https://images.unsplash.com/photo-1490481651871-ab68de25d43d?auto=format&fit=crop&w=900&q=80',
+        stats: ['Odor-Resistant Fiber', '4-Way Dynamic Stretch', 'Lifetime Stitch Warranty'],
+        layoutStyle: 'High-contrast editorial lookbook with live size recommendation module.'
+      },
+      {
+        id: 'ret-5',
+        name: 'Velox Precision Watches',
+        tagline: 'Mechanical Horology & Aviation Chronometers',
+        badge: 'LUXURY TIMEPIECES',
+        accentColor: '#eab308',
+        heroImage: 'https://images.unsplash.com/photo-1522335789203-aabd1fc54bc9?auto=format&fit=crop&w=900&q=80',
+        stats: ['Swiss Automatic Movement', '300m Water Resistance', 'Numbered Editions'],
+        layoutStyle: 'Obsidian luxury framing with dynamic 360-degree case rotation gallery.'
+      }
+    ],
 
-  // Simplified & Concise Pricing Tiers
+    'Health & Wellness': [
+      {
+        id: 'hlth-1',
+        name: 'Aegis Medical Collective',
+        tagline: 'Evidence-Based Preventative Care & Metabolic Optimization',
+        badge: 'CLINICAL PRACTICE',
+        accentColor: '#10b981',
+        heroImage: 'https://images.unsplash.com/photo-1629909613654-28e377c37b09?auto=format&fit=crop&w=900&q=80',
+        stats: ['Same-Day Intake Slots', 'Board-Certified Care', 'HIPAA Secure Vault'],
+        layoutStyle: 'Modern clinical calm with instant patient scheduling and lab result portal.'
+      },
+      {
+        id: 'hlth-2',
+        name: 'Pureform Sports Physical Therapy',
+        tagline: 'Biomechanics Rehabilitation & Elite Athletic Conditioning',
+        badge: 'SPORTS RECOVERY',
+        accentColor: '#06b6d4',
+        heroImage: 'https://images.unsplash.com/photo-1574680096145-d05b474e2155?auto=format&fit=crop&w=900&q=80',
+        stats: ['Olympic-Level Therapists', 'Force-Plate Diagnostics', 'Accelerated Protocols'],
+        layoutStyle: 'High-energy recovery aesthetic with direct injury assessment intake form.'
+      },
+      {
+        id: 'hlth-3',
+        name: 'Sonoma Mind Sanctuary',
+        tagline: 'Holistic Mental Health, Somatic Therapy & Wellness Retreats',
+        badge: 'PSYCHOLOGY & RETREAT',
+        accentColor: '#84cc16',
+        heroImage: 'https://images.unsplash.com/photo-1544367567-0f2fcb009e0b?auto=format&fit=crop&w=900&q=80',
+        stats: ['Licensed Psychologists', 'Private Woodland Setting', 'Confidential Inquiries'],
+        layoutStyle: 'Organic earthy calming tones with guided retreat itinerary and bookings.'
+      },
+      {
+        id: 'hlth-4',
+        name: 'Radiance Dental Spa',
+        tagline: 'Cosmetic Dentistry, Clear Aligners & Gentle Oral Care',
+        badge: 'DENTAL PRACTICE',
+        accentColor: '#0ea5e9',
+        heroImage: 'https://images.unsplash.com/photo-1588776814546-1ffcf47267a5?auto=format&fit=crop&w=900&q=80',
+        stats: ['Digital 3D Smile Preview', 'Sedation Dentistry Options', 'Zero Anxiety Care'],
+        layoutStyle: 'Bright hygienic layout with interactive before-and-after smile transformations.'
+      },
+      {
+        id: 'hlth-5',
+        name: 'Kinetic Movement Pilates',
+        tagline: 'Reformer Studio, Private Coaching & Posture Alignment',
+        badge: 'FITNESS STUDIO',
+        accentColor: '#f43f5e',
+        heroImage: 'https://images.unsplash.com/photo-1518611012118-696072aa579a?auto=format&fit=crop&w=900&q=80',
+        stats: ['Small Classes (Max 6)', 'Certified Master Trainers', 'Custom Reformer Gear'],
+        layoutStyle: 'Minimal chic studio vibe with real-time class pass and seat reservation.'
+      }
+    ],
+
+    'Technology & AI': [
+      {
+        id: 'tech-1',
+        name: 'Kinesis Robotics Lab',
+        tagline: 'Autonomous Industrial Fabrication & Neural Actuators',
+        badge: 'HARDWARE & AI',
+        accentColor: '#a855f7',
+        heroImage: 'https://images.unsplash.com/photo-1485827404703-89b55fcc595e?auto=format&fit=crop&w=900&q=80',
+        stats: ['12ms Actuator Response', 'ISO-Certified Firmware', '24/7 Diagnostics'],
+        layoutStyle: 'Obsidian dark terminal with high-contrast hardware technical specs.'
+      },
+      {
+        id: 'tech-2',
+        name: 'CyberDefend Security',
+        tagline: 'Automated Threat Intelligence & Zero-Trust Architecture',
+        badge: 'CYBERSECURITY',
+        accentColor: '#22c55e',
+        heroImage: 'https://images.unsplash.com/photo-1550751827-4bd374c3f58b?auto=format&fit=crop&w=900&q=80',
+        stats: ['Real-Time SOC Telemetry', 'Sub-Second Anomaly Blocks', 'SOC2 Compliant'],
+        layoutStyle: 'Cyber-ops dashboard with live incident response audit request engine.'
+      },
+      {
+        id: 'tech-3',
+        name: 'HyperScale Cloud Engine',
+        tagline: 'Serverless Edge Compute & Distributed Redis Infrastructure',
+        badge: 'CLOUD PLATFORM',
+        accentColor: '#38bdf8',
+        heroImage: 'https://images.unsplash.com/photo-1451187580459-43490279c0fa?auto=format&fit=crop&w=900&q=80',
+        stats: ['99.999% Regional Uptime', '35ms Global Edge P99', 'Unlimited Scaling'],
+        layoutStyle: 'Interactive code snippet previews with developer documentation builder.'
+      },
+      {
+        id: 'tech-4',
+        name: 'Cognitive Data Systems',
+        tagline: 'Enterprise Large Language Model Scaffolding & Vector Stores',
+        badge: 'AI APPLIED LAB',
+        accentColor: '#6366f1',
+        heroImage: 'https://images.unsplash.com/photo-1518770660439-4636190af475?auto=format&fit=crop&w=900&q=80',
+        stats: ['Private VPC Isolation', 'Zero Data Leakage Model', 'Enterprise RAG Ready'],
+        layoutStyle: 'Deep tech blueprint with interactive model accuracy benchmarks.'
+      },
+      {
+        id: 'tech-5',
+        name: 'Voxel Simulation Engine',
+        tagline: 'Real-Time Physics Simulations & Spatial Computing SDK',
+        badge: 'SPATIAL COMPUTE',
+        accentColor: '#f43f5e',
+        heroImage: 'https://images.unsplash.com/photo-1526374965328-7f61d4dc18c5?auto=format&fit=crop&w=900&q=80',
+        stats: ['120 FPS Rendering', 'WebGPU Native Acceleration', 'Cross-Platform SDK'],
+        layoutStyle: 'Futuristic 3D wireframe layout with interactive sandbox playground.'
+      }
+    ],
+
+    'Creators & Hospitality': [
+      {
+        id: 'cre-1',
+        name: 'Maison Noir Private Bistro',
+        tagline: 'Seasonal Tasting Menus & Natural Wine Cellar',
+        badge: 'FINE DINING',
+        accentColor: '#e11d48',
+        heroImage: 'https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?auto=format&fit=crop&w=900&q=80',
+        stats: ['Michelin Guide Featured', 'Farm-Direct Daily Harvest', 'Cellar of 400 Labels'],
+        layoutStyle: 'Sensory dark photography with integrated table reservation engine.'
+      },
+      {
+        id: 'cre-2',
+        name: 'The Highland Atelier',
+        tagline: 'Boutique Mountain Hotel & Nordic Spa Sanctuary',
+        badge: 'BOUTIQUE HOTEL',
+        accentColor: '#059669',
+        heroImage: 'https://images.unsplash.com/photo-1566073771259-6a8506099945?auto=format&fit=crop&w=900&q=80',
+        stats: ['14 Private Chalets', 'Geothermal Heated Springs', 'Panoramic Alpine Views'],
+        layoutStyle: 'Expansive imagery layout with real-time suite availability calendars.'
+      },
+      {
+        id: 'cre-3',
+        name: 'Kinesis Film & Media Lab',
+        tagline: 'Commercial Cinematography & Color Grading Studio',
+        badge: 'FILM PRODUCTION',
+        accentColor: '#f59e0b',
+        heroImage: 'https://images.unsplash.com/photo-1492691527719-9d1e07e534b4?auto=format&fit=crop&w=900&q=80',
+        stats: ['Cinema 8K RAW Cameras', 'Dolby Vision Mastering', 'Cannes Shortlist'],
+        layoutStyle: 'Cinematic wide-ratio video reel player with commercial deck download.'
+      },
+      {
+        id: 'cre-4',
+        name: 'Elena Rostova Portfolio',
+        tagline: 'Visual Brand Identity & Editorial Typography Direction',
+        badge: 'CREATOR PORTFOLIO',
+        accentColor: '#ec4899',
+        heroImage: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=900&q=80',
+        stats: ['Over 120 Brand Projects', 'Tokyo & Paris Exhibitions', 'Published in Monocle'],
+        layoutStyle: 'Bold editorial typography catalog showcasing client campaigns and links.'
+      },
+      {
+        id: 'cre-5',
+        name: 'The Foundry Co-Working Hub',
+        tagline: 'Curated Workspaces, Private Studios & Creator Podcast Pods',
+        badge: 'CREATIVE CLUB',
+        accentColor: '#0284c7',
+        heroImage: 'https://images.unsplash.com/photo-1497366216548-37526070297c?auto=format&fit=crop&w=900&q=80',
+        stats: ['Fiber 1Gbps Dedicated', 'Soundproof Recording Pods', 'Artisan Espresso Bar'],
+        layoutStyle: 'Modern collaborative club aesthetic with direct day-pass and tour booking.'
+      }
+    ]
+  };
+
   const pricingPlans = [
     {
       name: 'Starter Launch',
       price: '$449',
       tagline: 'Complete launch foundation for local services and personal brands.',
       badge: 'ENTRY',
-      features: [
-        'Guaranteed 7-day turnaround',
-        'Mobile-first responsive build',
-        'My Site Manager: Text & Color studio',
-        'Lead capture & appointment form',
-        '100% Code & Content Ownership'
-      ],
+      features: ['Guaranteed 7-day turnaround', 'Mobile-first responsive build', 'My Site Manager: Text & Color studio', 'Lead capture & appointment form', '100% Code & Content Ownership'],
       highlight: false
     },
     {
@@ -183,13 +415,7 @@ export default function LaunchSevenApp() {
       price: '$749',
       tagline: 'Optimized for customer acquisition, booking, and sales growth.',
       badge: 'MOST POPULAR',
-      features: [
-        'Everything in Starter Launch',
-        'Full Media Studio: Cloud image uploads',
-        'Multi-section catalog or booking engine',
-        'SMS milestone updates to your phone',
-        'Local Google search SEO configuration'
-      ],
+      features: ['Everything in Starter Launch', 'Full Media Studio: Cloud image uploads', 'Multi-section catalog or booking engine', 'SMS milestone updates to your phone', 'Local Google search SEO configuration'],
       highlight: true
     },
     {
@@ -197,35 +423,32 @@ export default function LaunchSevenApp() {
       price: '$1,049',
       tagline: 'Enterprise multi-page layout with unlimited customization.',
       badge: 'UNLIMITED UPDATES',
-      features: [
-        'Dynamic multi-page architecture',
-        'UNLIMITED revision and modulation requests',
-        'VIP priority staging deployment',
-        'AI progress tracking assistant',
-        'Custom domain setup & speed acceleration'
-      ],
+      features: ['Dynamic multi-page architecture', 'UNLIMITED revision and modulation requests', 'VIP priority staging deployment', 'AI progress tracking assistant', 'Custom domain setup & speed acceleration'],
       highlight: false
     }
   ];
 
-  // Dynamic Background Gradient Generator based on current page view
-  const getDynamicBackground = () => {
-    switch (mode) {
-      case 'creator_brand':
-        return 'radial-gradient(circle at 80% 20%, rgba(219, 39, 119, 0.35) 0%, rgba(88, 28, 135, 0.28) 40%, rgba(5, 8, 17, 0.95) 100%)';
-      case 'portfolio':
-        return 'radial-gradient(circle at 20% 20%, rgba(6, 182, 212, 0.32) 0%, rgba(16, 185, 129, 0.22) 45%, rgba(5, 8, 17, 0.95) 100%)';
-      case 'pricing':
-        return 'radial-gradient(circle at 50% 10%, rgba(37, 99, 235, 0.38) 0%, rgba(15, 23, 42, 0.9) 70%, rgba(5, 8, 17, 0.98) 100%)';
+  // Dynamic Ambient Gradients
+  const getAmbientBackground = () => {
+    if (inspectingTemplate) return '#050811';
+    switch (navPage) {
+      case 1:
+        return 'radial-gradient(circle at 50% 20%, rgba(37, 99, 235, 0.4) 0%, rgba(15, 23, 42, 0.9) 60%, rgba(5, 8, 17, 0.98) 100%)';
+      case 2:
+        return 'radial-gradient(circle at 50% 20%, rgba(14, 165, 233, 0.4) 0%, rgba(15, 23, 42, 0.9) 60%, rgba(5, 8, 17, 0.98) 100%)';
+      case 3:
+        return 'radial-gradient(circle at 50% 20%, rgba(168, 85, 247, 0.35) 0%, rgba(15, 23, 42, 0.9) 60%, rgba(5, 8, 17, 0.98) 100%)';
+      case 4:
+        return 'radial-gradient(circle at 50% 15%, rgba(6, 182, 212, 0.35) 0%, rgba(15, 23, 42, 0.92) 65%, rgba(5, 8, 17, 0.98) 100%)';
       default:
-        return 'radial-gradient(circle at center, rgba(30, 58, 138, 0.28) 0%, rgba(15, 23, 42, 0.85) 50%, rgba(5, 8, 17, 0.97) 100%)';
+        return '#050811';
     }
   };
 
   // --- VIEW: SUBMISSION STAGED ---
   if (submitted) {
     return (
-      <main style={{ ...styles.container, background: getDynamicBackground() }}>
+      <main style={{ ...styles.container, background: getAmbientBackground() }}>
         <div style={styles.card}>
           <h2 style={styles.title}>You are almost there!</h2>
           <p style={styles.text}>
@@ -246,84 +469,56 @@ export default function LaunchSevenApp() {
     );
   }
 
-  // --- VIEW: OWN YOUR BRAND HUB (CREATORS & CATALOGS) ---
-  if (mode === 'creator_brand') {
+  // --- FULL-SCREEN INTERACTIVE DEVICE PREVIEW MODAL (CALLED FROM TEMPLATES) ---
+  if (inspectingTemplate) {
+    const t = inspectingTemplate;
     return (
-      <main style={{ ...styles.container, background: getDynamicBackground() }}>
-        <div style={styles.vibrantOrbPink} />
-        <div style={styles.vibrantOrbPurple} />
-
-        <div style={{ ...styles.cardRelative, maxWidth: '520px' }}>
-          <div style={{ textAlign: 'center', marginBottom: '18px' }}>
-            <span style={styles.creatorPill}>✨ CREATORS, ARTISTS & PERSONAL BRANDS</span>
-            <h2 style={{ ...styles.title, marginTop: '8px' }}>Own Your Brand Hub</h2>
-            <p style={styles.brandSubheading}>
-              Stop sending followers to generic link-in-bio trees. Own a high-converting portfolio and product catalog on your own custom domain.
-            </p>
-          </div>
-
-          <div style={styles.creatorGrid}>
-            <div style={styles.creatorCard}>
-              <h4 style={{ ...styles.creatorCardTitle, color: '#f472b6' }}>📸 Visual Catalog & Portfolio</h4>
-              <p style={styles.creatorCardText}>Present your work, photography, designs, or physical goods with responsive high-definition galleries.</p>
+      <main style={{ ...styles.container, background: '#050811', padding: '12px' }}>
+        <div style={{ width: '100%', maxWidth: '1040px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+          
+          {/* Top Inspector Controls */}
+          <div style={styles.inspectorTopBar}>
+            <div>
+              <span style={{ fontSize: '10px', color: t.accentColor, fontWeight: '800', letterSpacing: '1px' }}>{t.badge}</span>
+              <h3 style={{ fontSize: '16px', fontWeight: '800', margin: 0, color: '#ffffff' }}>{t.name}</h3>
             </div>
-            <div style={styles.creatorCard}>
-              <h4 style={{ ...styles.creatorCardTitle, color: '#c084fc' }}>🔗 Centralized Social Hub</h4>
-              <p style={styles.creatorCardText}>Bring your YouTube, Instagram, TikTok, podcasts, and newsletter together under one branded roof.</p>
-            </div>
-            <div style={styles.creatorCard}>
-              <h4 style={{ ...styles.creatorCardTitle, color: '#38bdf8' }}>💼 Direct Brand Partnerships</h4>
-              <p style={styles.creatorCardText}>Capture corporate sponsorships and direct inquiries with automated intake forms and zero platform cuts.</p>
-            </div>
-          </div>
 
-          <button
-            style={styles.primaryBtn}
-            onClick={() => {
-              updateField('vertical', 'Creator & Personal Brand');
-              setMode('questionnaire');
-            }}
-          >
-            Build My Creator Brand Site →
-          </button>
-
-          <button style={styles.backBtn} onClick={() => setMode('landing')}>
-            ← Back to Home
-          </button>
-        </div>
-      </main>
-    );
-  }
-
-  // --- VIEW: UNIQUE REAL-WORLD PORTFOLIO PAGE ---
-  if (mode === 'portfolio') {
-    return (
-      <main style={{ ...styles.container, background: getDynamicBackground() }}>
-        <div style={styles.vibrantOrbCyan} />
-        <div style={styles.vibrantOrbEmerald} />
-
-        <div style={{ ...styles.cardRelative, maxWidth: '820px', width: '100%' }}>
-          <div style={{ textAlign: 'center', marginBottom: '16px' }}>
-            <span style={styles.portfolioBadge}>REAL-WORLD ARCHITECTURES</span>
-            <h2 style={{ ...styles.title, marginTop: '6px' }}>Live Client Portfolios</h2>
-            <p style={styles.brandSubheading}>Every business requires a custom layout. Inspect our production models below.</p>
-          </div>
-
-          {/* Business Type Tabs */}
-          <div style={styles.portfolioTabs}>
-            {portfolioProjects.map((proj, idx) => (
+            {/* Device Frame Viewport Toggle */}
+            <div style={styles.deviceToggleGroup}>
               <button
-                key={proj.brand}
-                style={activePortfolioIndex === idx ? styles.portfolioTabActive : styles.portfolioTab}
-                onClick={() => setActivePortfolioIndex(idx)}
+                style={previewDevice === 'desktop' ? styles.deviceBtnActive : styles.deviceBtn}
+                onClick={() => setPreviewDevice('desktop')}
+                title="Desktop View"
               >
-                {proj.businessType}
+                <Icons.Laptop /> <span style={{ fontSize: '11px', marginLeft: '4px' }}>Desktop</span>
               </button>
-            ))}
+              <button
+                style={previewDevice === 'tablet' ? styles.deviceBtnActive : styles.deviceBtn}
+                onClick={() => setPreviewDevice('tablet')}
+                title="Tablet View"
+              >
+                <Icons.Tablet /> <span style={{ fontSize: '11px', marginLeft: '4px' }}>Tablet</span>
+              </button>
+              <button
+                style={previewDevice === 'mobile' ? styles.deviceBtnActive : styles.deviceBtn}
+                onClick={() => setPreviewDevice('mobile')}
+                title="Mobile View"
+              >
+                <Icons.Smartphone /> <span style={{ fontSize: '11px', marginLeft: '4px' }}>Mobile</span>
+              </button>
+            </div>
+
+            <button style={styles.closeInspectorBtn} onClick={() => setInspectingTemplate(null)}>
+              ✕ Close
+            </button>
           </div>
 
-          {/* Live Interactive Canvas Box */}
-          <div style={styles.portfolioPreviewBox}>
+          {/* Rendered Device Wrapper */}
+          <div style={
+            previewDevice === 'mobile' ? styles.frameMobile :
+            previewDevice === 'tablet' ? styles.frameTablet : styles.frameDesktop
+          }>
+            {/* Simulated Browser Bar */}
             <div style={styles.browserHeader}>
               <div style={styles.browserDots}>
                 <span style={{ ...styles.dot, backgroundColor: '#ef4444' }} />
@@ -331,90 +526,91 @@ export default function LaunchSevenApp() {
                 <span style={{ ...styles.dot, backgroundColor: '#22c55e' }} />
               </div>
               <div style={styles.browserUrlPill}>
-                {activeProject.brand.toLowerCase().replace(/\s+/g, '')}.com
+                preview.{t.name.toLowerCase().replace(/[^a-z0-9]/g, '')}.com
               </div>
-              <span style={{ fontSize: '10px', color: activeProject.accentColor, fontWeight: '700' }}>
-                {activeProject.badge}
-              </span>
+              <span style={{ fontSize: '10px', color: t.accentColor, fontWeight: '700' }}>SSL ENCRYPTED</span>
             </div>
 
-            <div style={styles.portfolioHero}>
-              <img src={activeProject.heroImage} alt={activeProject.brand} style={styles.portfolioHeroImg} />
-              <div style={styles.portfolioHeroOverlay} />
-              <div style={styles.portfolioHeroDetails}>
-                <span style={{ ...styles.mockupBadge, borderColor: activeProject.accentColor, color: activeProject.accentColor }}>
-                  {activeProject.businessType}
+            {/* Simulated Website Body */}
+            <div style={styles.simulatedHero}>
+              <img src={t.heroImage} alt={t.name} style={styles.simulatedHeroImg} />
+              <div style={styles.simulatedHeroOverlay} />
+              <div style={styles.simulatedHeroContent}>
+                <span style={{ ...styles.mockupBadge, borderColor: t.accentColor, color: t.accentColor }}>
+                  {t.badge}
                 </span>
-                <h3 style={styles.portfolioHeroTitle}>{activeProject.brand}</h3>
-                <p style={styles.portfolioHeroSub}>{activeProject.tagline}</p>
-                
-                <div style={{ display: 'flex', gap: '8px', marginTop: '10px' }}>
-                  <button style={{ ...styles.mockupActionBtn, backgroundColor: activeProject.accentColor }}>
-                    {activeProject.actionCta}
+                <h2 style={styles.simulatedHeading}>{t.name}</h2>
+                <p style={styles.simulatedSubtext}>{t.tagline}</p>
+                <div style={{ display: 'flex', gap: '8px', marginTop: '10px', flexWrap: 'wrap' }}>
+                  <button style={{ ...styles.mockupActionBtn, backgroundColor: t.accentColor }}>
+                    Get Started
                   </button>
                   <button style={styles.mockupSecondaryBtn}>
-                    View Case Study
+                    Learn More
                   </button>
                 </div>
               </div>
             </div>
 
-            <div style={styles.portfolioStatsRow}>
-              {activeProject.stats.map((s, i) => (
-                <span key={i} style={{ fontSize: '11px', color: '#cbd5e1', fontWeight: '500' }}>
+            {/* Proof Points Strip */}
+            <div style={styles.simulatedStatsStrip}>
+              {t.stats.map((s, idx) => (
+                <span key={idx} style={{ fontSize: '11px', color: '#cbd5e1', fontWeight: '500' }}>
                   ✓ {s}
                 </span>
               ))}
             </div>
 
-            <div style={styles.portfolioLayoutNote}>
-              <span style={{ color: activeProject.accentColor, fontWeight: '700' }}>Layout Design: </span>
-              {activeProject.layoutStyle}
+            {/* Layout Architecture Explainer */}
+            <div style={styles.simulatedFooterNote}>
+              <span style={{ color: t.accentColor, fontWeight: '700' }}>Architecture Note: </span>
+              {t.layoutStyle}
             </div>
           </div>
 
-          <div style={{ display: 'flex', gap: '10px', marginTop: '16px' }}>
+          {/* Action to Adopt Template */}
+          <div style={{ display: 'flex', gap: '10px' }}>
             <button
               style={{ ...styles.primaryBtn, flex: 1 }}
               onClick={() => {
-                updateField('vertical', activeProject.businessType);
-                setMode('questionnaire');
+                updateField('vertical', t.name);
+                setInspectingTemplate(null);
+                setSubView('questionnaire');
               }}
             >
-              Build a Website Like This →
+              Adopt This Template & Start 7-Day Sprint →
             </button>
-            <button style={{ ...styles.secondaryBtn, width: 'auto', padding: '0 20px' }} onClick={() => setMode('landing')}>
-              Back
+            <button style={{ ...styles.secondaryBtn, width: 'auto', padding: '0 20px' }} onClick={() => setInspectingTemplate(null)}>
+              Back to Catalog
             </button>
           </div>
+
         </div>
       </main>
     );
   }
 
-  // --- VIEW: CONCISE & SIMPLIFIED PRICING ---
-  if (mode === 'pricing') {
+  // --- SUB-VIEW: CONCISE PRICING ---
+  if (subView === 'pricing') {
     return (
-      <main style={{ ...styles.container, background: getDynamicBackground() }}>
-        <div style={{ ...styles.cardRelative, maxWidth: '540px' }}>
+      <main style={{ ...styles.container, background: getAmbientBackground() }}>
+        <div style={{ ...styles.cardRelative, maxWidth: '520px' }}>
           <div style={{ textAlign: 'center', marginBottom: '14px' }}>
-            <span style={styles.badge}>CONCISE PRICING</span>
+            <span style={styles.badge}>TRANSPARENT PRICING</span>
             <h2 style={{ ...styles.title, marginTop: '6px' }}>Full Website Starting at $449</h2>
-            <p style={styles.brandSubheading}>Transparent one-time investments with zero monthly platform lock-in.</p>
+            <p style={styles.brandSubheading}>One-time investment. 100% code ownership with zero monthly lock-in.</p>
           </div>
 
-          {/* Market ROI Callout */}
           <div style={styles.roiBanner}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '2px' }}>
               <Icons.TrendingUp />
               <span style={{ fontSize: '12px', fontWeight: '700', color: '#34d399' }}>Verified Industry Benchmark</span>
             </div>
             <p style={{ fontSize: '11px', color: '#cbd5e1', margin: 0 }}>
-              Businesses launching a dedicated site report earning an average of <strong>39% more revenue</strong> and grow <strong>2.8x faster</strong>.
+              Businesses with a dedicated website report earning an average of <strong>39% more revenue</strong> and grow <strong>2.8x faster</strong>.
             </p>
           </div>
 
-          {/* Concise Plan Cards */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginBottom: '16px' }}>
             {pricingPlans.map((plan) => (
               <div
@@ -452,7 +648,7 @@ export default function LaunchSevenApp() {
                   onClick={() => {
                     updateField('tier', plan.name);
                     setSelectedTier(plan.name);
-                    setMode('questionnaire');
+                    setSubView('questionnaire');
                   }}
                 >
                   Choose {plan.name} →
@@ -461,18 +657,64 @@ export default function LaunchSevenApp() {
             ))}
           </div>
 
-          <button style={styles.backBtn} onClick={() => setMode('landing')}>
-            ← Back to Home
+          <button style={styles.backBtn} onClick={() => setSubView(null)}>
+            ← Back to Navigation
           </button>
         </div>
       </main>
     );
   }
 
-  // --- VIEW: QUESTIONNAIRE ---
-  if (mode === 'questionnaire') {
+  // --- SUB-VIEW: CREATOR BRAND HUB ---
+  if (subView === 'creator') {
     return (
-      <main style={{ ...styles.container, background: getDynamicBackground() }}>
+      <main style={{ ...styles.container, background: getAmbientBackground() }}>
+        <div style={{ ...styles.cardRelative, maxWidth: '520px' }}>
+          <div style={{ textAlign: 'center', marginBottom: '16px' }}>
+            <span style={styles.creatorPill}>✨ CREATORS, ARTISTS & PERSONAL BRANDS</span>
+            <h2 style={{ ...styles.title, marginTop: '8px' }}>Own Your Brand Hub</h2>
+            <p style={styles.brandSubheading}>
+              Stop sending followers to plain link trees. Own a custom portfolio and catalog on your own custom domain.
+            </p>
+          </div>
+
+          <div style={styles.creatorGrid}>
+            <div style={styles.creatorCard}>
+              <h4 style={{ ...styles.creatorCardTitle, color: '#f472b6' }}>📸 Visual Catalog & Portfolio</h4>
+              <p style={styles.creatorCardText}>Present your work, photography, designs, or physical goods with responsive high-definition galleries.</p>
+            </div>
+            <div style={styles.creatorCard}>
+              <h4 style={{ ...styles.creatorCardTitle, color: '#c084fc' }}>🔗 Centralized Social Hub</h4>
+              <p style={styles.creatorCardText}>Bring your YouTube, Instagram, TikTok, podcasts, and newsletter together under one branded roof.</p>
+            </div>
+            <div style={styles.creatorCard}>
+              <h4 style={{ ...styles.creatorCardTitle, color: '#38bdf8' }}>💼 Direct Brand Partnerships</h4>
+              <p style={styles.creatorCardText}>Capture corporate sponsorships and direct inquiries with automated intake forms and zero platform cuts.</p>
+            </div>
+          </div>
+
+          <button
+            style={styles.primaryBtn}
+            onClick={() => {
+              updateField('vertical', 'Creator & Personal Brand');
+              setSubView('questionnaire');
+            }}
+          >
+            Build My Creator Brand Site →
+          </button>
+
+          <button style={styles.backBtn} onClick={() => setSubView(null)}>
+            ← Back to Navigation
+          </button>
+        </div>
+      </main>
+    );
+  }
+
+  // --- SUB-VIEW: QUESTIONNAIRE ---
+  if (subView === 'questionnaire') {
+    return (
+      <main style={{ ...styles.container, background: getAmbientBackground() }}>
         <div style={styles.card}>
           <div style={styles.progressBarContainer}>
             <div style={{ ...styles.progressBar, width: `${(step / 6) * 100}%` }} />
@@ -485,7 +727,7 @@ export default function LaunchSevenApp() {
           {step === 1 && (
             <div>
               <h3 style={styles.questionTitle}>1. What type of website is this for?</h3>
-              {['B2B Enterprise & Logistics', 'Artisan Retail & Goods', 'Deep-Tech & Automation', 'Healthcare & Wellness', 'Creator / Portfolio Hub'].map((item) => (
+              {['B2B & Professional', 'Retail & E-Commerce', 'Health & Wellness', 'Technology & AI', 'Creators & Hospitality'].map((item) => (
                 <button
                   key={item}
                   style={formData.vertical === item ? styles.selectedOption : styles.optionBtn}
@@ -601,206 +843,293 @@ export default function LaunchSevenApp() {
               ← Back
             </button>
           )}
+          {step === 1 && (
+            <button style={styles.backBtn} onClick={() => setSubView(null)}>
+              ← Cancel
+            </button>
+          )}
         </div>
       </main>
     );
   }
 
-  // --- VIEW: RESPONSIVE LANDING HOME PAGE ---
+  // --- THE 4-PAGE GUIDED STEP JOURNEY ---
   return (
-    <main style={{ ...styles.container, background: getDynamicBackground() }}>
-      <style dangerouslySetInnerHTML={{ __html: `
-        @keyframes floatSlow { 0%, 100% { transform: translateY(0px); } 50% { transform: translateY(-8px); } }
-        @keyframes ambientGlow { 0%, 100% { transform: scale(1); opacity: 0.4; } 50% { transform: scale(1.15); opacity: 0.7; } }
-        .glow-orb-main { animation: ambientGlow 9s ease-in-out infinite; }
+    <main style={{ ...styles.container, background: getAmbientBackground() }}>
+      <div style={{ width: '100%', maxWidth: navPage === 4 ? '1040px' : '520px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
 
-        .platform-shell {
-          display: flex;
-          flex-direction: column;
-          gap: 20px;
-          width: 100%;
-          max-width: 460px;
-          z-index: 4;
-        }
-
-        @media (min-width: 1024px) {
-          .platform-shell {
-            display: grid;
-            grid-template-columns: 460px 1fr;
-            max-width: 1140px;
-            align-items: start;
-            gap: 32px;
-          }
-        }
-      `}} />
-
-      <div className="glow-orb-main" style={styles.glowOrb1} />
-
-      <div className="platform-shell">
-        {/* LEFT COLUMN: Funnel Controls */}
-        <div style={styles.cardRelative}>
-          <div style={{ textAlign: 'center', marginBottom: '14px' }}>
-            <h1 style={styles.brandTitleText}>
-              LaunchSeven <span style={{ color: '#38bdf8', fontWeight: '300' }}>Studio</span>
-            </h1>
-            <p style={styles.brandSubheading}>Custom websites delivered in 7 days with full personal control.</p>
-          </div>
-
-          <div style={styles.deliveryClockPill}>
-            <span style={{ color: '#38bdf8', fontWeight: '700' }}>⚡ Ready by {deliveryDate || 'Next Week'}</span>
-            <span style={{ color: '#64748b' }}>•</span>
-            <span style={{ color: '#94a3b8' }}>3 of 5 sprint spots left</span>
-          </div>
-
-          <div style={styles.buttonGroup}>
-            <button style={styles.primaryBtn} onClick={() => setMode('questionnaire')}>
-              Build My Website Now
-            </button>
-
-            <button style={styles.pricingBtn} onClick={() => setMode('pricing')}>
-              🏷 Full Website Starting at $449
-            </button>
-
-            <button style={styles.portfolioBtn} onClick={() => setMode('portfolio')}>
-              <Icons.Eye />
-              <span>Real-World Portfolios & Layouts</span>
-            </button>
-
-            <button style={styles.creatorBtn} onClick={() => setMode('creator_brand')}>
-              <Icons.Sparkles />
-              <span>For Creators & Brand Catalogs</span>
-            </button>
-          </div>
-
-          <div style={styles.roadmapBox}>
-            <h4 style={styles.roadmapTitle}>HOW YOUR 7 DAYS WORK</h4>
-            <div style={styles.roadmapGrid}>
-              <div style={styles.roadmapStep}>
-                <span style={styles.stepNum}>1</span>
-                <div><strong>Intake (2 min)</strong><p>Pick layout & goals</p></div>
-              </div>
-              <div style={styles.roadmapStep}>
-                <span style={styles.stepNum}>2</span>
-                <div><strong>Checkout</strong><p>Unlocks 7-day clock</p></div>
-              </div>
-              <div style={styles.roadmapStep}>
-                <span style={styles.stepNum}>3</span>
-                <div><strong>Day 3 Preview</strong><p>Live staging review</p></div>
-              </div>
-              <div style={styles.roadmapStep}>
-                <span style={styles.stepNum}>4</span>
-                <div><strong>Day 7 Launch</strong><p>Live DNS & handoff</p></div>
-              </div>
-            </div>
-          </div>
-
-          <div style={styles.ownershipBadge}>
-            <Icons.ShieldCheck />
-            <span>100% Code & Content Ownership • Zero Lock-In</span>
-          </div>
-
-          <div style={{ marginTop: '14px', textAlign: 'center' }}>
-            <button style={styles.shareBtn} onClick={handleShare}>
-              <Icons.Share />
-              <span>Share with friends & family</span>
-            </button>
-            {shareNotice && (
-              <p style={{ fontSize: '11px', color: '#34d399', margin: '4px 0 0 0' }}>
-                ✓ Website link copied to clipboard!
-              </p>
-            )}
-          </div>
+        {/* Top 4-Step Navigation Progress Bar */}
+        <div style={styles.stepProgressRow}>
+          <button style={navPage === 1 ? styles.stepBtnActive : styles.stepBtn} onClick={() => setNavPage(1)}>
+            01. About Us
+          </button>
+          <button style={navPage === 2 ? styles.stepBtnActive : styles.stepBtn} onClick={() => setNavPage(2)}>
+            02. Launch Date
+          </button>
+          <button style={navPage === 3 ? styles.stepBtnActive : styles.stepBtn} onClick={() => setNavPage(3)}>
+            03. Action Hub
+          </button>
+          <button style={navPage === 4 ? styles.stepBtnActive : styles.stepBtn} onClick={() => setNavPage(4)}>
+            04. 25 Templates
+          </button>
         </div>
 
-        {/* RIGHT COLUMN: Live Interactive Preview */}
-        <div style={styles.previewCanvasContainer}>
-          <div style={styles.previewControlBar}>
-            <div style={styles.categoryScroll}>
-              {portfolioProjects.map((p, idx) => (
-                <button
-                  key={p.brand}
-                  style={activePortfolioIndex === idx ? styles.catTabActive : styles.catTab}
-                  onClick={() => setActivePortfolioIndex(idx)}
-                >
-                  {p.businessType}
-                </button>
-              ))}
+        {/* ========================================================= */}
+        {/* PAGE 1: ABOUT THE COMPANY                                 */}
+        {/* ========================================================= */}
+        {navPage === 1 && (
+          <div style={styles.cardRelative}>
+            <div style={{ textAlign: 'center', marginBottom: '18px' }}>
+              <span style={styles.studioPill}>LAUNCHSEVEN STUDIO // WHO WE ARE</span>
+              <h1 style={styles.landingHeroHeading}>
+                LaunchSeven Studio
+              </h1>
+              <p style={styles.landingHeroSubheading}>
+                Custom websites delivered in seven days with full personal control.
+              </p>
             </div>
 
-            <div style={styles.deviceToggleGroup}>
-              <button
-                style={previewDevice === 'desktop' ? styles.deviceBtnActive : styles.deviceBtn}
-                onClick={() => setPreviewDevice('desktop')}
-                title="Desktop View"
-              >
-                <Icons.Laptop />
-              </button>
-              <button
-                style={previewDevice === 'mobile' ? styles.deviceBtnActive : styles.deviceBtn}
-                onClick={() => setPreviewDevice('mobile')}
-                title="Mobile View"
-              >
-                <Icons.Smartphone />
-              </button>
-            </div>
-          </div>
-
-          <div style={previewDevice === 'mobile' ? styles.mobileFrameWrapper : styles.desktopFrameWrapper}>
-            <div style={styles.browserHeader}>
-              <div style={styles.browserDots}>
-                <span style={{ ...styles.dot, backgroundColor: '#ef4444' }} />
-                <span style={{ ...styles.dot, backgroundColor: '#eab308' }} />
-                <span style={{ ...styles.dot, backgroundColor: '#22c55e' }} />
+            <div style={styles.aboutPillarsList}>
+              <div style={styles.aboutPillar}>
+                <div style={styles.pillarIconBox}>⚡</div>
+                <div>
+                  <h4 style={styles.pillarTitle}>Guaranteed 7-Day Turnaround</h4>
+                  <p style={styles.pillarText}>We eliminate months of traditional agency delays. Your custom website is staged on Day 3 and live on Day 7.</p>
+                </div>
               </div>
-              <div style={styles.browserUrlPill}>
-                preview.{activeProject.brand.toLowerCase().replace(/\s+/g, '')}.com
-              </div>
-              <span style={{ fontSize: '10px', color: activeProject.accentColor, fontWeight: '700' }}>
-                LIVE PREVIEW
-              </span>
-            </div>
 
-            <div style={styles.mockupHeroContainer}>
-              <img src={activeProject.heroImage} alt={activeProject.brand} style={styles.mockupImage} />
-              <div style={styles.mockupHeroOverlay} />
-              <div style={styles.mockupHeroContent}>
-                <span style={{ ...styles.mockupBadge, borderColor: activeProject.accentColor, color: activeProject.accentColor }}>
-                  {activeProject.badge}
-                </span>
-                <h3 style={styles.mockupHeading}>{activeProject.brand}</h3>
-                <p style={styles.mockupSubtext}>{activeProject.tagline}</p>
-                <div style={{ display: 'flex', gap: '8px', marginTop: '10px' }}>
-                  <button style={{ ...styles.mockupActionBtn, backgroundColor: activeProject.accentColor }}>
-                    {activeProject.actionCta}
-                  </button>
-                  <button style={styles.mockupSecondaryBtn}>
-                    Learn More
-                  </button>
+              <div style={styles.aboutPillar}>
+                <div style={styles.pillarIconBox}>🎨</div>
+                <div>
+                  <h4 style={styles.pillarTitle}>"My Site Manager" Autonomy</h4>
+                  <p style={styles.pillarText}>Update your own text, photos, and color palettes anytime through a secure client portal without technical barriers.</p>
+                </div>
+              </div>
+
+              <div style={styles.aboutPillar}>
+                <div style={styles.pillarIconBox}>🛡️</div>
+                <div>
+                  <h4 style={styles.pillarTitle}>100% Code & Content Ownership</h4>
+                  <p style={styles.pillarText}>Zero monthly platform lock-in. You own your source code, domain, and database completely from day one.</p>
                 </div>
               </div>
             </div>
 
-            <div style={styles.mockupStatsBar}>
-              {activeProject.stats.map((stat, i) => (
-                <span key={i} style={styles.mockupStatItem}>
-                  ✓ {stat}
+            <button style={styles.primaryBtn} onClick={() => setNavPage(2)}>
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: '8px' }}>
+                See When Your Site Can Launch →
+              </span>
+            </button>
+
+            <div style={styles.ownershipBadge}>
+              <Icons.ShieldCheck />
+              <span>Engineered for Maximum Speed & Conversion</span>
+            </div>
+          </div>
+        )}
+
+        {/* ========================================================= */}
+        {/* PAGE 2: GUARANTEED LAUNCH DATE & 7-DAY WORK PROCESS       */}
+        {/* ========================================================= */}
+        {navPage === 2 && (
+          <div style={styles.cardRelative}>
+            <div style={{ textAlign: 'center', marginBottom: '16px' }}>
+              <span style={styles.badge}>THE 7-DAY DELIVERY BLUEPRINT</span>
+              <h2 style={{ ...styles.title, marginTop: '6px' }}>Your Launch Timeline</h2>
+              <p style={styles.brandSubheading}>Transparent milestones tracked via SMS, voice, and your client portal.</p>
+            </div>
+
+            {/* Dynamic Calculated Date Box */}
+            <div style={styles.dynamicDateBox}>
+              <Icons.Calendar />
+              <div>
+                <span style={{ fontSize: '11px', color: '#94a3b8', display: 'block' }}>If you start your build today:</span>
+                <strong style={{ fontSize: '17px', color: '#38bdf8' }}>Guaranteed Live Launch by {deliveryDate || 'Next Week'}</strong>
+              </div>
+            </div>
+
+            {/* Milestone Steps */}
+            <div style={styles.processTimelineContainer}>
+              <div style={styles.processTimelineItem}>
+                <div style={styles.processDayBadge}>Day 0</div>
+                <div style={styles.processContent}>
+                  <h4 style={styles.processItemTitle}>Intake & Instant Workspace Provisioning</h4>
+                  <p style={styles.processItemDesc}>Payment clears, your unique Transaction ID is minted, and the 7-day clock starts immediately.</p>
+                </div>
+              </div>
+
+              <div style={styles.processTimelineItem}>
+                <div style={styles.processDayBadge}>Days 1-2</div>
+                <div style={styles.processContent}>
+                  <h4 style={styles.processItemTitle}>Architecture & Layout Compilation</h4>
+                  <p style={styles.processItemDesc}>Our system builds your responsive design system, typography tokens, and feature modules.</p>
+                </div>
+              </div>
+
+              <div style={{ ...styles.processTimelineItem, borderColor: '#38bdf8' }}>
+                <div style={{ ...styles.processDayBadge, backgroundColor: '#0284c7', color: '#ffffff' }}>Day 3</div>
+                <div style={styles.processContent}>
+                  <h4 style={{ ...styles.processItemTitle, color: '#38bdf8' }}>Staging Deploy & "My Site Manager" Unlocks</h4>
+                  <p style={styles.processItemDesc}>Access your private preview portal to customize text, upload images, and test your site.</p>
+                </div>
+              </div>
+
+              <div style={styles.processTimelineItem}>
+                <div style={styles.processDayBadge}>Days 4-6</div>
+                <div style={styles.processContent}>
+                  <h4 style={styles.processItemTitle}>Integrations & Automated QA</h4>
+                  <p style={styles.processItemDesc}>We wire your forms, run mobile device tests, and optimize Google PageSpeed scores.</p>
+                </div>
+              </div>
+
+              <div style={{ ...styles.processTimelineItem, borderColor: '#10b981' }}>
+                <div style={{ ...styles.processDayBadge, backgroundColor: '#059669', color: '#ffffff' }}>Day 7</div>
+                <div style={styles.processContent}>
+                  <h4 style={{ ...styles.processItemTitle, color: '#34d399' }}>Official Production Release</h4>
+                  <p style={styles.processItemDesc}>DNS routes to your live domain with SSL security. Full code ownership transferred to you.</p>
+                </div>
+              </div>
+            </div>
+
+            <button style={styles.primaryBtn} onClick={() => setNavPage(3)}>
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: '8px' }}>
+                Choose How to Get Started <Icons.ArrowRight />
+              </span>
+            </button>
+
+            <button style={styles.backBtn} onClick={() => setNavPage(1)}>
+              ← Back to About Us
+            </button>
+          </div>
+        )}
+
+        {/* ========================================================= */}
+        {/* PAGE 3: ACTION BUTTONS HUB                                */}
+        {/* ========================================================= */}
+        {navPage === 3 && (
+          <div style={styles.cardRelative}>
+            <div style={{ textAlign: 'center', marginBottom: '18px' }}>
+              <span style={styles.launchReadyPill}>ACTION HUB // START YOUR SPRINT</span>
+              <h2 style={{ ...styles.title, marginTop: '6px' }}>Ready to Go Live?</h2>
+              <p style={styles.brandSubheading}>Select an action below to begin your project journey.</p>
+            </div>
+
+            <div style={styles.buttonGroup}>
+              <button
+                style={styles.primaryBtn}
+                onClick={() => setSubView('questionnaire')}
+              >
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: '8px' }}>
+                  ⚡ Build My Website Now <Icons.ArrowRight />
                 </span>
+              </button>
+
+              <button
+                style={styles.browseTemplatesBtn}
+                onClick={() => setNavPage(4)}
+              >
+                <Icons.Eye />
+                <span>Browse 25 Website Templates (5 Per Industry)</span>
+              </button>
+
+              <button
+                style={styles.pricingBtn}
+                onClick={() => setSubView('pricing')}
+              >
+                🏷 Full Website Starting at $449
+              </button>
+
+              <button
+                style={styles.creatorBtn}
+                onClick={() => setSubView('creator')}
+              >
+                <Icons.Sparkles />
+                <span>For Creators & Brand Catalogs</span>
+              </button>
+            </div>
+
+            <div style={{ marginTop: '16px', textAlign: 'center' }}>
+              <button style={styles.shareBtn} onClick={handleShare}>
+                <Icons.Share />
+                <span>Share with friends & family</span>
+              </button>
+              {shareNotice && (
+                <p style={{ fontSize: '11px', color: '#34d399', margin: '4px 0 0 0' }}>
+                  ✓ Website link copied to clipboard!
+                </p>
+              )}
+            </div>
+
+            <button style={styles.backBtn} onClick={() => setNavPage(2)}>
+              ← Back to Delivery Timeline
+            </button>
+          </div>
+        )}
+
+        {/* ========================================================= */}
+        {/* PAGE 4: 25 DIVERSE TEMPLATES (5 PER BUSINESS TYPE)       */}
+        {/* ========================================================= */}
+        {navPage === 4 && (
+          <div style={{ ...styles.cardRelative, maxWidth: '1000px' }}>
+            <div style={{ textAlign: 'center', marginBottom: '14px' }}>
+              <span style={styles.portfolioBadge}>25 PRODUCTION DESIGNS // 5 PER CATEGORY</span>
+              <h2 style={{ ...styles.title, marginTop: '6px' }}>Explore Real-World Website Templates</h2>
+              <p style={styles.brandSubheading}>Tap any template to launch a live interactive preview simulating how it looks on your device.</p>
+            </div>
+
+            {/* Category Selector Tabs */}
+            <div style={styles.portfolioCategoryTabs}>
+              {Object.keys(templateCatalog).map((catName) => (
+                <button
+                  key={catName}
+                  style={activeCategory === catName ? styles.catTabActive : styles.catTab}
+                  onClick={() => setActiveCategory(catName)}
+                >
+                  {catName} (5)
+                </button>
               ))}
             </div>
-          </div>
 
-          <div style={styles.foundationSpeedBox}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
-              <Icons.SpeedDelivery />
-              <span style={{ fontSize: '13px', fontWeight: '700', color: '#38bdf8' }}>
-                Base {activeProject.businessType} Ready in 24 Hours
-              </span>
+            {/* Grid of 5 Distinct Examples for Selected Category */}
+            <div style={styles.templateGrid}>
+              {templateCatalog[activeCategory].map((t) => (
+                <div key={t.id} style={styles.templateCardItem}>
+                  <div style={styles.templateCardThumbnailBox}>
+                    <img src={t.heroImage} alt={t.name} style={styles.templateCardImg} />
+                    <div style={styles.templateCardBadgeOverlay}>
+                      <span style={{ ...styles.mockupBadge, borderColor: t.accentColor, color: t.accentColor, backgroundColor: '#090d16cc' }}>
+                        {t.badge}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div style={styles.templateCardBody}>
+                    <h4 style={styles.templateCardName}>{t.name}</h4>
+                    <p style={styles.templateCardTagline}>{t.tagline}</p>
+                    
+                    <button
+                      style={{ ...styles.previewTriggerBtn, borderColor: t.accentColor, color: t.accentColor }}
+                      onClick={() => setInspectingTemplate(t)}
+                    >
+                      <Icons.Eye />
+                      <span>Live Device Preview</span>
+                    </button>
+                  </div>
+                </div>
+              ))}
             </div>
-            <p style={{ fontSize: '11px', color: '#94a3b8', margin: 0, lineHeight: '1.4' }}>
-              Your custom staging layout is ready within 24 hours of payment. You have full freedom to modify copy, colors, and media inside My Site Manager.
-            </p>
+
+            <div style={{ display: 'flex', gap: '10px', marginTop: '16px' }}>
+              <button style={{ ...styles.primaryBtn, flex: 1 }} onClick={() => setSubView('questionnaire')}>
+                Ready to Build? Start Intake Form →
+              </button>
+              <button style={{ ...styles.secondaryBtn, width: 'auto', padding: '0 20px' }} onClick={() => setNavPage(3)}>
+                Back to Action Hub
+              </button>
+            </div>
           </div>
-        </div>
+        )}
+
       </div>
     </main>
   );
@@ -809,111 +1138,121 @@ export default function LaunchSevenApp() {
 const styles = {
   container: { position: 'relative', minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px', boxSizing: 'border-box', overflowX: 'hidden', transition: 'background 0.5s ease' },
 
-  // Ambient Vibrant Orbs
-  glowOrb1: { position: 'fixed', top: '-10%', left: '-10%', width: '450px', height: '450px', borderRadius: '50%', background: 'radial-gradient(circle, rgba(37,99,235,0.35) 0%, rgba(37,99,235,0) 70%)', pointerEvents: 'none', zIndex: 1 },
-  vibrantOrbPink: { position: 'fixed', top: '10%', right: '-10%', width: '450px', height: '450px', borderRadius: '50%', background: 'radial-gradient(circle, rgba(219,39,119,0.35) 0%, rgba(219,39,119,0) 70%)', pointerEvents: 'none', zIndex: 1 },
-  vibrantOrbPurple: { position: 'fixed', bottom: '-10%', left: '10%', width: '500px', height: '500px', borderRadius: '50%', background: 'radial-gradient(circle, rgba(147,51,234,0.3) 0%, rgba(147,51,234,0) 70%)', pointerEvents: 'none', zIndex: 1 },
-  vibrantOrbCyan: { position: 'fixed', top: '-10%', right: '10%', width: '450px', height: '450px', borderRadius: '50%', background: 'radial-gradient(circle, rgba(6,182,212,0.3) 0%, rgba(6,182,212,0) 70%)', pointerEvents: 'none', zIndex: 1 },
-  vibrantOrbEmerald: { position: 'fixed', bottom: '-10%', left: '-5%', width: '450px', height: '450px', borderRadius: '50%', background: 'radial-gradient(circle, rgba(16,185,129,0.25) 0%, rgba(16,185,129,0) 70%)', pointerEvents: 'none', zIndex: 1 },
-
-  // Glassmorphic Shells
-  cardRelative: { position: 'relative', zIndex: 4, backgroundColor: 'rgba(15, 23, 42, 0.88)', backdropFilter: 'blur(22px)', WebkitBackdropFilter: 'blur(22px)', width: '100%', borderRadius: '18px', padding: '24px 20px', color: '#f8fafc', boxShadow: '0 25px 50px -12px rgba(0,0,0,0.85), 0 0 0 1px rgba(255,255,255,0.1)', boxSizing: 'border-box' },
+  cardRelative: { position: 'relative', zIndex: 4, backgroundColor: 'rgba(15, 23, 42, 0.92)', backdropFilter: 'blur(24px)', WebkitBackdropFilter: 'blur(24px)', width: '100%', borderRadius: '20px', padding: '24px 20px', color: '#f8fafc', boxShadow: '0 25px 50px -12px rgba(0,0,0,0.85), 0 0 0 1px rgba(255,255,255,0.1)', boxSizing: 'border-box' },
   card: { position: 'relative', zIndex: 4, backgroundColor: '#1e293b', width: '100%', maxWidth: '440px', borderRadius: '16px', padding: '24px', color: '#f8fafc', boxShadow: '0 15px 35px rgba(0,0,0,0.6)', boxSizing: 'border-box' },
 
-  brandTitleText: { fontSize: '28px', fontWeight: '800', letterSpacing: '-0.8px', margin: '0 0 4px 0', background: 'linear-gradient(135deg, #ffffff 0%, #cbd5e1 50%, #38bdf8 100%)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' },
-  brandSubheading: { fontSize: '13px', color: '#94a3b8', margin: '0 0 14px 0', lineHeight: '1.45' },
-  deliveryClockPill: { display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '8px', fontSize: '11px', backgroundColor: '#0f172acc', padding: '8px 12px', borderRadius: '8px', marginBottom: '16px', border: '1px solid #1e293b' },
+  // Top Step Progress
+  stepProgressRow: { display: 'flex', gap: '6px', backgroundColor: '#090d16', padding: '4px', borderRadius: '10px', border: '1px solid #1e293b', width: '100%', overflowX: 'auto' },
+  stepBtn: { flex: 1, minWidth: '85px', padding: '8px 10px', backgroundColor: 'transparent', color: '#64748b', border: 'none', borderRadius: '6px', fontSize: '11px', fontWeight: '600', cursor: 'pointer', textAlign: 'center', whiteSpace: 'nowrap' },
+  stepBtnActive: { flex: 1, minWidth: '85px', padding: '8px 10px', backgroundColor: '#1e293b', color: '#38bdf8', border: '1px solid #334155', borderRadius: '6px', fontSize: '11px', fontWeight: '700', cursor: 'pointer', textAlign: 'center', whiteSpace: 'nowrap' },
 
-  buttonGroup: { display: 'flex', flexDirection: 'column', gap: '9px' },
-  primaryBtn: { width: '100%', padding: '14px', backgroundColor: '#2563eb', color: '#ffffff', border: 'none', borderRadius: '10px', fontWeight: '700', fontSize: '14px', cursor: 'pointer' },
+  // Typography
+  landingHeroHeading: { fontSize: '28px', fontWeight: '800', letterSpacing: '-0.8px', margin: '8px 0 6px 0', lineHeight: '1.2', background: 'linear-gradient(135deg, #ffffff 20%, #38bdf8 100%)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' },
+  landingHeroSubheading: { fontSize: '13px', color: '#cbd5e1', margin: '0 0 16px 0', lineHeight: '1.45' },
+  studioPill: { fontSize: '9px', letterSpacing: '1.2px', fontWeight: '800', color: '#38bdf8', backgroundColor: 'rgba(2, 132, 199, 0.2)', padding: '3px 8px', borderRadius: '999px', border: '1px solid rgba(2, 132, 199, 0.4)', display: 'inline-block' },
+  launchReadyPill: { fontSize: '9px', letterSpacing: '1.2px', fontWeight: '800', color: '#c084fc', backgroundColor: 'rgba(147, 51, 234, 0.2)', padding: '3px 8px', borderRadius: '999px', border: '1px solid rgba(147, 51, 234, 0.4)', display: 'inline-block' },
+  title: { fontSize: '22px', fontWeight: '800', marginBottom: '6px', textAlign: 'center', letterSpacing: '-0.5px' },
+  brandSubheading: { fontSize: '12px', color: '#94a3b8', margin: '0 0 14px 0', lineHeight: '1.45', textAlign: 'center' },
+  badge: { fontSize: '10px', letterSpacing: '1px', fontWeight: '700', color: '#38bdf8', backgroundColor: 'rgba(2, 132, 199, 0.2)', padding: '4px 10px', borderRadius: '999px', border: '1px solid rgba(2, 132, 199, 0.4)', display: 'inline-block' },
+
+  // About Pillars
+  aboutPillarsList: { display: 'flex', flexDirection: 'column', gap: '10px', marginBottom: '20px' },
+  aboutPillar: { display: 'flex', gap: '12px', padding: '12px', backgroundColor: 'rgba(15, 23, 42, 0.7)', borderRadius: '10px', border: '1px solid #1e293b', alignItems: 'flex-start' },
+  pillarIconBox: { fontSize: '18px', padding: '6px', backgroundColor: '#1e293b', borderRadius: '8px' },
+  pillarTitle: { fontSize: '13px', fontWeight: '700', color: '#f8fafc', margin: '0 0 2px 0' },
+  pillarText: { fontSize: '11px', color: '#94a3b8', margin: 0, lineHeight: '1.4' },
+
+  // Date Box
+  dynamicDateBox: { display: 'flex', alignItems: 'center', gap: '12px', backgroundColor: 'rgba(2, 132, 199, 0.15)', border: '1px solid #0284c7', borderRadius: '10px', padding: '12px', marginBottom: '14px' },
+
+  // Timeline
+  processTimelineContainer: { display: 'flex', flexDirection: 'column', gap: '8px', margin: '12px 0 18px 0' },
+  processTimelineItem: { display: 'flex', gap: '10px', padding: '10px', backgroundColor: 'rgba(15, 23, 42, 0.7)', border: '1px solid #1e293b', borderRadius: '8px', alignItems: 'flex-start' },
+  processDayBadge: { padding: '3px 6px', backgroundColor: '#1e293b', color: '#94a3b8', borderRadius: '4px', fontSize: '10px', fontWeight: '800', flexShrink: 0, textAlign: 'center' },
+  processContent: { flex: 1 },
+  processItemTitle: { fontSize: '12px', fontWeight: '700', color: '#f8fafc', margin: '0 0 2px 0' },
+  processItemDesc: { fontSize: '11px', color: '#94a3b8', margin: 0, lineHeight: '1.35' },
+
+  // Buttons
+  buttonGroup: { display: 'flex', flexDirection: 'column', gap: '10px' },
+  primaryBtn: { width: '100%', padding: '14px', backgroundColor: '#2563eb', color: '#ffffff', border: 'none', borderRadius: '10px', fontWeight: '700', fontSize: '14px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' },
+  browseTemplatesBtn: { width: '100%', padding: '13px', backgroundColor: 'rgba(6, 182, 212, 0.15)', color: '#38bdf8', border: '1px solid #0891b2', borderRadius: '10px', fontWeight: '700', fontSize: '13px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' },
   pricingBtn: { width: '100%', padding: '12px', backgroundColor: 'rgba(2, 132, 199, 0.15)', color: '#38bdf8', border: '1px solid #0284c7', borderRadius: '10px', fontWeight: '700', fontSize: '13px', cursor: 'pointer' },
-  portfolioBtn: { width: '100%', padding: '12px', backgroundColor: 'rgba(6, 182, 212, 0.15)', color: '#38bdf8', border: '1px solid #0891b2', borderRadius: '10px', fontWeight: '600', fontSize: '13px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' },
   creatorBtn: { width: '100%', padding: '12px', backgroundColor: 'rgba(236, 72, 153, 0.12)', color: '#f472b6', border: '1px solid #db2777', borderRadius: '10px', fontWeight: '600', fontSize: '13px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' },
   secondaryBtn: { width: '100%', padding: '12px', backgroundColor: 'transparent', color: '#cbd5e1', border: '1px solid #334155', borderRadius: '10px', fontWeight: '600', fontSize: '13px', cursor: 'pointer' },
+  backBtn: { background: 'none', border: 'none', color: '#94a3b8', marginTop: '12px', cursor: 'pointer', fontSize: '12px', width: '100%', textAlign: 'center' },
 
-  // Roadmap & Badges
-  roadmapBox: { backgroundColor: '#0b1120', border: '1px solid #1e293b', borderRadius: '10px', padding: '12px', marginTop: '16px' },
-  roadmapTitle: { fontSize: '10px', letterSpacing: '1px', fontWeight: '800', color: '#64748b', margin: '0 0 10px 0' },
-  roadmapGrid: { display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '10px' },
-  roadmapStep: { display: 'flex', gap: '8px', alignItems: 'flex-start', fontSize: '11px', color: '#cbd5e1' },
-  stepNum: { display: 'flex', alignItems: 'center', justifyContent: 'center', width: '18px', height: '18px', borderRadius: '50%', backgroundColor: '#1e293b', color: '#38bdf8', fontSize: '10px', fontWeight: '700', flexShrink: 0 },
-  ownershipBadge: { display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px', fontSize: '11px', color: '#94a3b8', marginTop: '12px' },
-  shareBtn: { background: 'none', border: 'none', color: '#94a3b8', display: 'inline-flex', alignItems: 'center', gap: '6px', fontSize: '12px', cursor: 'pointer', padding: '4px' },
+  // Template Catalog Grid (Page 4)
+  portfolioBadge: { fontSize: '10px', letterSpacing: '1px', fontWeight: '800', color: '#38bdf8', backgroundColor: 'rgba(6, 182, 212, 0.2)', padding: '4px 10px', borderRadius: '999px', border: '1px solid #0891b2', display: 'inline-block' },
+  portfolioCategoryTabs: { display: 'flex', gap: '6px', overflowX: 'auto', paddingBottom: '6px', marginBottom: '14px' },
+  catTab: { padding: '7px 12px', backgroundColor: '#0f172a', color: '#94a3b8', border: '1px solid #1e293b', borderRadius: '6px', fontSize: '11px', fontWeight: '600', cursor: 'pointer', whiteSpace: 'nowrap' },
+  catTabActive: { padding: '7px 12px', backgroundColor: '#0284c7', color: '#ffffff', border: '1px solid #38bdf8', borderRadius: '6px', fontSize: '11px', fontWeight: '700', cursor: 'pointer', whiteSpace: 'nowrap' },
 
-  // Preview Canvas
-  previewCanvasContainer: { backgroundColor: 'rgba(15, 23, 42, 0.88)', backdropFilter: 'blur(22px)', borderRadius: '18px', padding: '18px', border: '1px solid rgba(255,255,255,0.08)', boxShadow: '0 25px 50px -12px rgba(0,0,0,0.85)' },
-  previewControlBar: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '10px', marginBottom: '14px', flexWrap: 'wrap' },
-  categoryScroll: { display: 'flex', gap: '6px', flexWrap: 'wrap' },
-  catTab: { padding: '6px 10px', backgroundColor: '#0b1120', color: '#94a3b8', border: '1px solid #1e293b', borderRadius: '6px', fontSize: '11px', fontWeight: '500', cursor: 'pointer' },
-  catTabActive: { padding: '6px 10px', backgroundColor: '#2563eb', color: '#ffffff', border: '1px solid #38bdf8', borderRadius: '6px', fontSize: '11px', fontWeight: '700', cursor: 'pointer' },
-  deviceToggleGroup: { display: 'flex', backgroundColor: '#0b1120', borderRadius: '6px', border: '1px solid #1e293b', padding: '2px' },
-  deviceBtn: { background: 'none', border: 'none', color: '#64748b', padding: '4px 8px', borderRadius: '4px', cursor: 'pointer', display: 'flex', alignItems: 'center' },
-  deviceBtnActive: { backgroundColor: '#1e293b', border: 'none', color: '#38bdf8', padding: '4px 8px', borderRadius: '4px', cursor: 'pointer', display: 'flex', alignItems: 'center' },
+  templateGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: '12px' },
+  templateCardItem: { backgroundColor: 'rgba(15, 23, 42, 0.8)', border: '1px solid #1e293b', borderRadius: '12px', overflow: 'hidden', display: 'flex', flexDirection: 'column' },
+  templateCardThumbnailBox: { position: 'relative', height: '130px', width: '100%', overflow: 'hidden' },
+  templateCardImg: { width: '100%', height: '100%', objectFit: 'cover' },
+  templateCardBadgeOverlay: { position: 'absolute', top: 8, left: 8 },
+  templateCardBody: { padding: '12px', display: 'flex', flexDirection: 'column', flex: 1, justifyContent: 'space-between' },
+  templateCardName: { fontSize: '14px', fontWeight: '800', color: '#f8fafc', margin: '0 0 2px 0' },
+  templateCardTagline: { fontSize: '11px', color: '#94a3b8', margin: '0 0 10px 0', lineHeight: '1.35' },
+  previewTriggerBtn: { padding: '8px', backgroundColor: 'transparent', border: '1px solid', borderRadius: '6px', fontSize: '11px', fontWeight: '700', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' },
 
-  desktopFrameWrapper: { backgroundColor: '#0f172a', borderRadius: '12px', border: '1px solid #334155', overflow: 'hidden' },
-  mobileFrameWrapper: { backgroundColor: '#0f172a', borderRadius: '22px', border: '4px solid #334155', maxWidth: '310px', margin: '0 auto', overflow: 'hidden' },
+  // Live Inspector Modal
+  inspectorTopBar: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#0f172a', padding: '10px 14px', borderRadius: '10px', border: '1px solid #1e293b', flexWrap: 'wrap', gap: '8px' },
+  closeInspectorBtn: { background: '#1e293b', border: '1px solid #334155', color: '#cbd5e1', padding: '6px 12px', borderRadius: '6px', cursor: 'pointer', fontSize: '11px' },
+  deviceToggleGroup: { display: 'flex', backgroundColor: '#090d16', borderRadius: '6px', border: '1px solid #1e293b', padding: '2px' },
+  deviceBtn: { background: 'none', border: 'none', color: '#64748b', padding: '5px 8px', borderRadius: '4px', cursor: 'pointer', display: 'flex', alignItems: 'center' },
+  deviceBtnActive: { backgroundColor: '#1e293b', border: 'none', color: '#38bdf8', padding: '5px 8px', borderRadius: '4px', cursor: 'pointer', display: 'flex', alignItems: 'center' },
+
+  // Device Frames
+  frameDesktop: { backgroundColor: '#0f172a', borderRadius: '12px', border: '1px solid #334155', overflow: 'hidden', width: '100%', transition: 'all 0.3s ease' },
+  frameTablet: { backgroundColor: '#0f172a', borderRadius: '18px', border: '3px solid #334155', maxWidth: '580px', margin: '0 auto', overflow: 'hidden', width: '100%', transition: 'all 0.3s ease' },
+  frameMobile: { backgroundColor: '#0f172a', borderRadius: '24px', border: '4px solid #334155', maxWidth: '320px', margin: '0 auto', overflow: 'hidden', width: '100%', transition: 'all 0.3s ease' },
+
   browserHeader: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 12px', backgroundColor: '#1e293b', borderBottom: '1px solid #334155' },
   browserDots: { display: 'flex', gap: '5px' },
   dot: { width: '8px', height: '8px', borderRadius: '50%' },
   browserUrlPill: { backgroundColor: '#0f172a', color: '#94a3b8', fontSize: '10px', padding: '2px 10px', borderRadius: '4px', border: '1px solid #334155' },
 
-  mockupHeroContainer: { position: 'relative', height: '230px', overflow: 'hidden' },
-  mockupImage: { width: '100%', height: '100%', objectFit: 'cover' },
-  mockupHeroOverlay: { position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', background: 'linear-gradient(to top, rgba(15,23,42,0.95) 20%, rgba(15,23,42,0.3) 100%)' },
-  mockupHeroContent: { position: 'absolute', bottom: 12, left: 12, right: 12 },
+  simulatedHero: { position: 'relative', height: '240px', overflow: 'hidden' },
+  simulatedHeroImg: { width: '100%', height: '100%', objectFit: 'cover' },
+  simulatedHeroOverlay: { position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', background: 'linear-gradient(to top, rgba(15,23,42,0.95) 20%, rgba(15,23,42,0.3) 100%)' },
+  simulatedHeroContent: { position: 'absolute', bottom: 12, left: 12, right: 12 },
   mockupBadge: { fontSize: '9px', fontWeight: '800', padding: '2px 6px', borderRadius: '4px', border: '1px solid', letterSpacing: '0.5px' },
-  mockupHeading: { fontSize: '17px', fontWeight: '800', margin: '4px 0 2px 0', color: '#ffffff' },
-  mockupSubtext: { fontSize: '11px', color: '#cbd5e1', margin: 0 },
+  simulatedHeading: { fontSize: '18px', fontWeight: '800', margin: '4px 0 2px 0', color: '#ffffff' },
+  simulatedSubtext: { fontSize: '11px', color: '#cbd5e1', margin: 0 },
   mockupActionBtn: { padding: '6px 12px', color: '#ffffff', border: 'none', borderRadius: '5px', fontSize: '11px', fontWeight: '700', cursor: 'pointer' },
   mockupSecondaryBtn: { padding: '6px 10px', backgroundColor: 'rgba(255,255,255,0.1)', color: '#cbd5e1', border: '1px solid rgba(255,255,255,0.2)', borderRadius: '5px', fontSize: '11px', fontWeight: '600' },
-  mockupStatsBar: { display: 'flex', justifyContent: 'space-around', padding: '9px', backgroundColor: '#0b1120', borderTop: '1px solid #1e293b' },
-  mockupStatItem: { fontSize: '10px', color: '#38bdf8', fontWeight: '600' },
-  foundationSpeedBox: { backgroundColor: 'rgba(6, 78, 59, 0.25)', border: '1px solid #059669', borderRadius: '8px', padding: '12px', marginTop: '14px' },
+  simulatedStatsStrip: { display: 'flex', justifyContent: 'space-around', padding: '9px', backgroundColor: '#0b1120', borderTop: '1px solid #1e293b', flexWrap: 'wrap', gap: '6px' },
+  simulatedFooterNote: { padding: '8px 12px', backgroundColor: '#060a14', fontSize: '11px', color: '#94a3b8', borderTop: '1px solid #1e293b' },
 
-  // Creator Page Styles
-  creatorPill: { fontSize: '10px', letterSpacing: '1px', fontWeight: '800', color: '#f472b6', backgroundColor: 'rgba(190, 24, 93, 0.25)', padding: '4px 10px', borderRadius: '999px', border: '1px solid rgba(219, 39, 119, 0.5)', display: 'inline-block' },
-  creatorGrid: { display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '16px' },
-  creatorCard: { padding: '12px', backgroundColor: 'rgba(15, 23, 42, 0.75)', borderRadius: '10px', border: '1px solid #334155' },
-  creatorCardTitle: { fontSize: '13px', fontWeight: '700', margin: '0 0 3px 0' },
-  creatorCardText: { fontSize: '11px', color: '#cbd5e1', margin: 0, lineHeight: '1.4' },
-
-  // Portfolio Page Styles
-  portfolioBadge: { fontSize: '10px', letterSpacing: '1px', fontWeight: '800', color: '#38bdf8', backgroundColor: 'rgba(6, 182, 212, 0.2)', padding: '4px 10px', borderRadius: '999px', border: '1px solid #0891b2', display: 'inline-block' },
-  portfolioTabs: { display: 'flex', gap: '6px', flexWrap: 'wrap', marginBottom: '14px' },
-  portfolioTab: { padding: '6px 10px', backgroundColor: '#0f172a', color: '#94a3b8', border: '1px solid #334155', borderRadius: '6px', fontSize: '11px', fontWeight: '500', cursor: 'pointer' },
-  portfolioTabActive: { padding: '6px 10px', backgroundColor: '#0284c7', color: '#ffffff', border: '1px solid #38bdf8', borderRadius: '6px', fontSize: '11px', fontWeight: '700', cursor: 'pointer' },
-  portfolioPreviewBox: { backgroundColor: '#0f172a', borderRadius: '12px', border: '1px solid #334155', overflow: 'hidden' },
-  portfolioHero: { position: 'relative', height: '260px', overflow: 'hidden' },
-  portfolioHeroImg: { width: '100%', height: '100%', objectFit: 'cover' },
-  portfolioHeroOverlay: { position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', background: 'linear-gradient(to top, rgba(15,23,42,0.95) 25%, rgba(15,23,42,0.3) 100%)' },
-  portfolioHeroDetails: { position: 'absolute', bottom: 14, left: 14, right: 14 },
-  portfolioHeroTitle: { fontSize: '19px', fontWeight: '800', margin: '4px 0 2px 0', color: '#ffffff' },
-  portfolioHeroSub: { fontSize: '12px', color: '#cbd5e1', margin: 0 },
-  portfolioStatsRow: { display: 'flex', justifyContent: 'space-around', padding: '10px', backgroundColor: '#0b1120', borderTop: '1px solid #1e293b', flexWrap: 'wrap', gap: '6px' },
-  portfolioLayoutNote: { padding: '8px 12px', backgroundColor: '#060a14', fontSize: '11px', color: '#94a3b8', borderTop: '1px solid #1e293b' },
-
-  // Concise Pricing Styles
+  // Pricing & Creator Styles
   roiBanner: { backgroundColor: 'rgba(6, 78, 59, 0.25)', border: '1px solid #059669', borderRadius: '8px', padding: '10px', marginBottom: '12px' },
   pricingCard: { padding: '12px 14px', borderRadius: '10px', border: '1px solid #334155' },
   conciseBulletList: { display: 'grid', gridTemplateColumns: 'repeat(1, 1fr)', gap: '4px', margin: '8px 0 10px 0' },
   conciseBulletItem: { display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11px', color: '#cbd5e1' },
   tierBadge: { fontSize: '9px', fontWeight: '700', color: '#94a3b8', backgroundColor: '#334155', padding: '2px 6px', borderRadius: '4px' },
   popularBadge: { fontSize: '9px', fontWeight: '800', color: '#38bdf8', backgroundColor: 'rgba(3, 105, 161, 0.3)', padding: '2px 6px', borderRadius: '4px', border: '1px solid #0284c7' },
+  creatorPill: { fontSize: '10px', letterSpacing: '1px', fontWeight: '800', color: '#f472b6', backgroundColor: 'rgba(190, 24, 93, 0.25)', padding: '4px 10px', borderRadius: '999px', border: '1px solid rgba(219, 39, 119, 0.5)', display: 'inline-block' },
+  creatorGrid: { display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '16px' },
+  creatorCard: { padding: '12px', backgroundColor: 'rgba(15, 23, 42, 0.75)', borderRadius: '10px', border: '1px solid #334155' },
+  creatorCardTitle: { fontSize: '13px', fontWeight: '700', margin: '0 0 3px 0' },
+  creatorCardText: { fontSize: '11px', color: '#cbd5e1', margin: 0, lineHeight: '1.4' },
 
-  // Form & General Styles
-  title: { fontSize: '22px', fontWeight: '800', marginBottom: '6px', textAlign: 'center', letterSpacing: '-0.5px' },
-  badge: { fontSize: '10px', letterSpacing: '1px', fontWeight: '700', color: '#38bdf8', backgroundColor: 'rgba(2, 132, 199, 0.2)', padding: '4px 10px', borderRadius: '999px', border: '1px solid rgba(2, 132, 199, 0.4)', display: 'inline-block' },
+  // Questionnaire Styles
   selectedTierBadge: { fontSize: '11px', fontWeight: '600', color: '#38bdf8', backgroundColor: 'rgba(2, 132, 199, 0.2)', padding: '2px 8px', borderRadius: '4px' },
   questionTitle: { fontSize: '15px', fontWeight: '600', marginBottom: '14px' },
   optionBtn: { width: '100%', padding: '11px', backgroundColor: '#334155', color: '#f8fafc', border: 'none', borderRadius: '6px', textAlign: 'left', marginBottom: '8px', fontSize: '13px', cursor: 'pointer' },
   selectedOption: { width: '100%', padding: '11px', backgroundColor: '#2563eb', color: '#ffffff', border: 'none', borderRadius: '6px', textAlign: 'left', marginBottom: '8px', fontSize: '13px', cursor: 'pointer' },
   input: { width: '100%', padding: '11px', backgroundColor: '#0f172a', border: '1px solid #334155', borderRadius: '6px', color: '#f8fafc', marginBottom: '10px', boxSizing: 'border-box' },
-  backBtn: { background: 'none', border: 'none', color: '#94a3b8', marginTop: '12px', cursor: 'pointer', fontSize: '13px', width: '100%', textAlign: 'center' },
   progressBarContainer: { height: '4px', backgroundColor: '#334155', borderRadius: '2px', marginBottom: '12px', overflow: 'hidden' },
   progressBar: { height: '100%', backgroundColor: '#2563eb', transition: 'width 0.3s' },
   stepLabel: { fontSize: '12px', color: '#94a3b8' },
   alertBox: { backgroundColor: '#1e1b4b', border: '1px solid #4338ca', padding: '14px', borderRadius: '8px', marginTop: '14px', marginBottom: '14px' },
   alertTitle: { fontSize: '13px', fontWeight: 'bold', color: '#a5b4fc', margin: '0 0 4px 0' },
   alertText: { fontSize: '12px', color: '#c7d2fe', margin: 0, lineHeight: '1.4' },
-  text: { fontSize: '14px', color: '#cbd5e1', lineHeight: '1.5' }
+  text: { fontSize: '14px', color: '#cbd5e1', lineHeight: '1.5' },
+  ownershipBadge: { display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px', fontSize: '11px', color: '#94a3b8', marginTop: '14px' },
+  shareBtn: { background: 'none', border: 'none', color: '#94a3b8', display: 'inline-flex', alignItems: 'center', gap: '6px', fontSize: '12px', cursor: 'pointer', padding: '4px' }
 };
