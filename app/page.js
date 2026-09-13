@@ -2,7 +2,7 @@
 
 import React, { useState } from 'react';
 
-// Custom inline SVG icons (Zero extra npm packages needed)
+// Custom inline SVG icons
 const Icons = {
   SpeedDelivery: () => (
     <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -61,31 +61,32 @@ export default function FunnelApp() {
     setSubmitted(true);
   };
 
+  // Plain-English, customer-friendly service descriptions
   const services = [
     {
-      title: '7-Day Guaranteed Turnaround',
-      desc: 'Rapid production from cleared payment directly to live deployment.',
+      title: 'Ready in Just 7 Days',
+      desc: 'Your professional website is built, polished, and launched online within one week.',
       icon: <Icons.SpeedDelivery />,
       bg: '#0369a122',
       border: '#0284c7'
     },
     {
-      title: 'Integrated "My Site Manager"',
-      desc: 'Sandboxed client portal to preview and update text, assets, and design.',
+      title: 'Simple "My Site Manager"',
+      desc: 'A private dashboard where you can easily change your own text, photos, and colors anytime.',
       icon: <Icons.SiteManager />,
       bg: '#4338ca22',
       border: '#6366f1'
     },
     {
-      title: 'Live Theme & Asset Studio',
-      desc: 'Dynamic color palettes, custom typography, and direct cloud media uploads.',
+      title: 'Easy Color & Photo Updates',
+      desc: 'Match your business branding with simple color pickers and 1-click photo uploads.',
       icon: <Icons.ColorPalette />,
       bg: '#be185d22',
       border: '#ec4899'
     },
     {
-      title: 'Omnichannel Milestone Updates',
-      desc: 'Real-time project updates and build telemetry delivered by voice, SMS, or chat.',
+      title: 'Friendly Progress Updates',
+      desc: 'Receive simple text messages or short phone calls so you always know what we are working on.',
       icon: <Icons.OmnichannelBell />,
       bg: '#04785722',
       border: '#10b981'
@@ -96,19 +97,19 @@ export default function FunnelApp() {
     return (
       <main style={styles.container}>
         <div style={styles.card}>
-          <h2 style={styles.title}>Intake Staged: Payment Required</h2>
+          <h2 style={styles.title}>You are almost there!</h2>
           <p style={styles.text}>
-            Thank you, <strong>{formData.fullName}</strong>. Specifications for <strong>{formData.businessName}</strong> are logged.
+            Thank you, <strong>{formData.fullName}</strong>. We have saved the details for <strong>{formData.businessName}</strong>.
           </p>
           <div style={styles.alertBox}>
-            <p style={styles.alertTitle}>Pre-Development Policy Notice</p>
+            <p style={styles.alertTitle}>Next Step: Payment Confirmation</p>
             <p style={styles.alertText}>
-              Engineering resources and your <strong>7-Day Delivery Timeline</strong> activate immediately upon payment settlement. 
-              Invoice confirmation and your secure portal access link have been staged for <strong>{formData.email}</strong>.
+              To protect your spot on our build calendar, our <strong>7-day delivery clock</strong> starts as soon as payment is confirmed. 
+              We have sent a copy of your receipt and project link to <strong>{formData.email}</strong>.
             </p>
           </div>
           <button style={styles.primaryBtn} onClick={() => alert('Redirecting to checkout...')}>
-            Proceed to Secure Checkout
+            Complete Payment & Start Build
           </button>
         </div>
       </main>
@@ -119,14 +120,14 @@ export default function FunnelApp() {
     return (
       <main style={styles.container}>
         <div style={styles.card}>
-          <h1 style={styles.title}>Custom Website Platform</h1>
-          <p style={styles.subtitle}>Select your starting pathway below to begin.</p>
+          <h1 style={styles.title}>Get Your New Website</h1>
+          <p style={styles.subtitle}>Choose how you would like to get started today.</p>
           <div style={styles.buttonGroup}>
             <button style={styles.primaryBtn} onClick={() => setMode('questionnaire')}>
-              Build a Website Now
+              Build My Website Now
             </button>
             <button style={styles.secondaryBtn} onClick={() => setMode('browse')}>
-              Browse Services
+              See What is Included
             </button>
           </div>
         </div>
@@ -139,9 +140,9 @@ export default function FunnelApp() {
       <main style={styles.container}>
         <div style={styles.card}>
           <div style={{ textAlign: 'center', marginBottom: '20px' }}>
-            <span style={styles.badge}>CAPABILITIES & ARCHITECTURE</span>
-            <h2 style={{ ...styles.title, marginTop: '8px' }}>Available Services</h2>
-            <p style={styles.subtitle}>Enterprise development precision with direct portal autonomy.</p>
+            <span style={styles.badge}>WHAT YOU GET</span>
+            <h2 style={{ ...styles.title, marginTop: '8px' }}>Everything You Need</h2>
+            <p style={styles.subtitle}>A complete, professional website delivered quickly without the headache.</p>
           </div>
 
           <div style={styles.serviceGrid}>
@@ -159,7 +160,7 @@ export default function FunnelApp() {
           </div>
 
           <button style={styles.primaryBtn} onClick={() => setMode('questionnaire')}>
-            Start Intake Questionnaire
+            Start Building My Website
           </button>
           <button style={styles.backBtn} onClick={() => setMode('landing')}>
             ← Back to Home
@@ -179,8 +180,8 @@ export default function FunnelApp() {
 
         {step === 1 && (
           <div>
-            <h3 style={styles.questionTitle}>1. What is your industry vertical?</h3>
-            {['Professional Services', 'E-Commerce / Retail', 'Healthcare / Medical', 'Technology / SaaS'].map((item) => (
+            <h3 style={styles.questionTitle}>1. What type of business is this for?</h3>
+            {['Service Provider (Law, Consulting, etc.)', 'Online Store / Shop', 'Health & Wellness', 'Technology & Software'].map((item) => (
               <button
                 key={item}
                 style={formData.vertical === item ? styles.selectedOption : styles.optionBtn}
@@ -194,8 +195,8 @@ export default function FunnelApp() {
 
         {step === 2 && (
           <div>
-            <h3 style={styles.questionTitle}>2. What is your primary objective?</h3>
-            {['Lead Generation', 'Direct Sales', 'Portfolio Showcase', 'Brand Awareness'].map((item) => (
+            <h3 style={styles.questionTitle}>2. What is the main goal of your site?</h3>
+            {['Get New Customer Inquiries', 'Sell Products Directly', 'Showcase My Past Work', 'Build Trust & Credibility'].map((item) => (
               <button
                 key={item}
                 style={formData.objective === item ? styles.selectedOption : styles.optionBtn}
@@ -209,8 +210,8 @@ export default function FunnelApp() {
 
         {step === 3 && (
           <div>
-            <h3 style={styles.questionTitle}>3. Select your aesthetic archetype</h3>
-            {['Minimal Clean', 'Bold Editorial', 'Technical Dark', 'Warm Corporate'].map((item) => (
+            <h3 style={styles.questionTitle}>3. What style fits your business best?</h3>
+            {['Clean & Simple', 'Bold & Modern', 'Dark & High-Tech', 'Warm & Friendly'].map((item) => (
               <button
                 key={item}
                 style={formData.archetype === item ? styles.selectedOption : styles.optionBtn}
@@ -224,8 +225,8 @@ export default function FunnelApp() {
 
         {step === 4 && (
           <div>
-            <h3 style={styles.questionTitle}>4. Required functional feature</h3>
-            {['Appointment Scheduling', 'Contact / Inquiry Forms', 'Interactive Gallery', 'Customer Portal'].map((item) => (
+            <h3 style={styles.questionTitle}>4. What key feature do you need most?</h3>
+            {['Online Booking / Calendar', 'Customer Contact Form', 'Photo & Work Gallery', 'Customer Login Area'].map((item) => (
               <button
                 key={item}
                 style={formData.feature === item ? styles.selectedOption : styles.optionBtn}
@@ -239,8 +240,8 @@ export default function FunnelApp() {
 
         {step === 5 && (
           <div>
-            <h3 style={styles.questionTitle}>5. Brand asset readiness</h3>
-            {['I have a domain and vector logo ready', 'I have logo files but no domain', 'I need full branding from scratch'].map((item) => (
+            <h3 style={styles.questionTitle}>5. Do you already have a logo and domain?</h3>
+            {['Yes, I have my logo and website name ready', 'I have a logo, but need a website name', 'I am starting from scratch and need both'].map((item) => (
               <button
                 key={item}
                 style={formData.readiness === item ? styles.selectedOption : styles.optionBtn}
@@ -254,17 +255,17 @@ export default function FunnelApp() {
 
         {step === 6 && (
           <form onSubmit={handleSubmit}>
-            <h3 style={styles.questionTitle}>6. Contact Credentials</h3>
+            <h3 style={styles.questionTitle}>6. Where should we send your project details?</h3>
             <input
               style={styles.input}
-              placeholder="Full Name"
+              placeholder="Your Full Name"
               required
               value={formData.fullName}
               onChange={(e) => updateField('fullName', e.target.value)}
             />
             <input
               style={styles.input}
-              placeholder="Business Name"
+              placeholder="Your Business Name"
               required
               value={formData.businessName}
               onChange={(e) => updateField('businessName', e.target.value)}
@@ -272,7 +273,7 @@ export default function FunnelApp() {
             <input
               style={styles.input}
               type="email"
-              placeholder="Email Address"
+              placeholder="Your Email Address"
               required
               value={formData.email}
               onChange={(e) => updateField('email', e.target.value)}
@@ -280,13 +281,13 @@ export default function FunnelApp() {
             <input
               style={styles.input}
               type="tel"
-              placeholder="Phone Number (e.g. +14155550144)"
+              placeholder="Mobile Phone (for text updates)"
               required
               value={formData.phone}
               onChange={(e) => updateField('phone', e.target.value)}
             />
             <button type="submit" style={styles.primaryBtn}>
-              Submit & Request Invoice
+              Submit & View Invoice
             </button>
           </form>
         )}
