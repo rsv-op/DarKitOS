@@ -73,15 +73,15 @@ const Icons = {
 };
 
 export default function LaunchSevenApp() {
-  // Navigation: 1 = About, 2 = Date & Timeline, 3 = Action Hub, 4 = Templates Gallery
+  // Navigation: 1 = About, 2 = Launch, 3 = Ready to build?, 4 = Templates
   const [navPage, setNavPage] = useState(1);
   const [activeCategory, setActiveCategory] = useState('B2B & Professional');
-  const [selectedTemplate, setSelectedTemplate] = useState(null); // When set, loads full Template Detail Page
-  const [previewDevice, setPreviewDevice] = useState('desktop'); // desktop | tablet | mobile
+  const [selectedTemplate, setSelectedTemplate] = useState(null);
+  const [previewDevice, setPreviewDevice] = useState('desktop');
   const [deliveryDate, setDeliveryDate] = useState('');
   const [shareNotice, setShareNotice] = useState(false);
 
-  // Sub-views from Action Hub
+  // Sub-views from Ready to build? page
   const [subView, setSubView] = useState(null); // 'pricing' | 'creator' | 'questionnaire'
   const [step, setStep] = useState(1);
   const [selectedTier, setSelectedTier] = useState('Growth Engine');
@@ -963,7 +963,7 @@ export default function LaunchSevenApp() {
     <main style={{ ...styles.container, background: getAmbientBackground() }}>
       <div style={{ width: '100%', maxWidth: navPage === 4 ? '1040px' : '520px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
 
-        {/* REFINED 4-COLUMN PAGES BAR (Zero Text Slip / Overflow Fix) */}
+        {/* REFINED 4-COLUMN PAGES BAR WITH '03. Ready to build?' */}
         <div style={styles.stepProgressRow}>
           <button style={navPage === 1 ? styles.stepBtnActive : styles.stepBtn} onClick={() => setNavPage(1)}>
             01. About
@@ -972,7 +972,7 @@ export default function LaunchSevenApp() {
             02. Launch
           </button>
           <button style={navPage === 3 ? styles.stepBtnActive : styles.stepBtn} onClick={() => setNavPage(3)}>
-            03. Action
+            03. Ready to build?
           </button>
           <button style={navPage === 4 ? styles.stepBtnActive : styles.stepBtn} onClick={() => setNavPage(4)}>
             04. Templates
@@ -1109,14 +1109,14 @@ export default function LaunchSevenApp() {
         )}
 
         {/* ========================================================= */}
-        {/* PAGE 3: ACTION BUTTONS HUB                                */}
+        {/* PAGE 3: READY TO BUILD? (RENAMED)                          */}
         {/* ========================================================= */}
         {navPage === 3 && (
           <div style={styles.cardRelative}>
             <div style={{ textAlign: 'center', marginBottom: '18px' }}>
-              <span style={styles.launchReadyPill}>ACTION HUB // START YOUR SPRINT</span>
-              <h2 style={{ ...styles.title, marginTop: '6px' }}>Ready to Go Live?</h2>
-              <p style={styles.brandSubheading}>Select an action below to begin your project journey.</p>
+              <span style={styles.launchReadyPill}>PHASE 03 // ACTION HUB</span>
+              <h2 style={{ ...styles.title, marginTop: '6px' }}>Ready to build?</h2>
+              <p style={styles.brandSubheading}>Select an option below to kick off your guaranteed 7-day development cycle.</p>
             </div>
 
             <div style={styles.buttonGroup}>
@@ -1236,7 +1236,7 @@ export default function LaunchSevenApp() {
                 Ready to Build? Start Intake Form →
               </button>
               <button style={{ ...styles.secondaryBtn, width: 'auto', padding: '0 20px' }} onClick={() => setNavPage(3)}>
-                Back to Action Hub
+                Back to Ready to build?
               </button>
             </div>
           </div>
@@ -1253,7 +1253,7 @@ const styles = {
   cardRelative: { position: 'relative', zIndex: 4, backgroundColor: 'rgba(15, 23, 42, 0.92)', backdropFilter: 'blur(24px)', WebkitBackdropFilter: 'blur(24px)', width: '100%', borderRadius: '20px', padding: '24px 20px', color: '#f8fafc', boxShadow: '0 25px 50px -12px rgba(0,0,0,0.85), 0 0 0 1px rgba(255,255,255,0.1)', boxSizing: 'border-box' },
   card: { position: 'relative', zIndex: 4, backgroundColor: '#1e293b', width: '100%', maxWidth: '440px', borderRadius: '16px', padding: '24px', color: '#f8fafc', boxShadow: '0 15px 35px rgba(0,0,0,0.6)', boxSizing: 'border-box' },
 
-  // REFINED 4-COLUMN PAGES BAR (Zero Text Slip / Overflow Fix)
+  // ZERO-SLIP 4-COLUMN PAGES BAR WITH CLEAN FONT SCALING
   stepProgressRow: { 
     display: 'grid', 
     gridTemplateColumns: 'repeat(4, 1fr)', 
@@ -1271,7 +1271,7 @@ const styles = {
     color: '#64748b', 
     border: '1px solid transparent', 
     borderRadius: '6px', 
-    fontSize: '11px', 
+    fontSize: '10.5px', 
     fontWeight: '600', 
     cursor: 'pointer', 
     textAlign: 'center', 
@@ -1287,7 +1287,7 @@ const styles = {
     color: '#38bdf8', 
     border: '1px solid #38bdf8', 
     borderRadius: '6px', 
-    fontSize: '11px', 
+    fontSize: '10.5px', 
     fontWeight: '700', 
     cursor: 'pointer', 
     textAlign: 'center', 
