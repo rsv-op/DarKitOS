@@ -76,7 +76,7 @@ export default function LaunchSevenApp() {
   // Navigation: 1 = About, 2 = Date & Timeline, 3 = Action Hub, 4 = Templates Gallery
   const [navPage, setNavPage] = useState(1);
   const [activeCategory, setActiveCategory] = useState('B2B & Professional');
-  const [inspectingTemplate, setInspectingTemplate] = useState(null); // Full-screen device preview
+  const [selectedTemplate, setSelectedTemplate] = useState(null); // When set, loads full Template Detail Page
   const [previewDevice, setPreviewDevice] = useState('desktop'); // desktop | tablet | mobile
   const [deliveryDate, setDeliveryDate] = useState('');
   const [shareNotice, setShareNotice] = useState(false);
@@ -133,58 +133,73 @@ export default function LaunchSevenApp() {
     }
   };
 
-  // 5 Major Business Types with 5 Completely Different Websites Each (25 Unique Designs)
+  // 25 Completely Distinct Production Template Architectures
   const templateCatalog = {
     'B2B & Professional': [
       {
         id: 'b2b-1',
         name: 'Apex Transit Dynamics',
-        tagline: 'Global Autonomous Supply Chain & Freight Logistics',
+        tagline: 'Global Autonomous Supply Chain & Freight Logistics Infrastructure',
         badge: 'ENTERPRISE FREIGHT',
         accentColor: '#0284c7',
+        colorPalette: ['#0284c7', '#0f172a', '#38bdf8', '#f8fafc'],
         heroImage: 'https://images.unsplash.com/photo-1586528116311-ad8dd3c8310d?auto=format&fit=crop&w=900&q=80',
         stats: ['42 Global Logistics Hubs', 'Sub-Second Route Telemetry', '99.99% Node SLA'],
-        layoutStyle: 'High-density telemetry dashboard with real-time schedule tracking.'
+        layoutStyle: 'High-density telemetry dashboard with real-time schedule tracking and automated freight inquiry calculators.',
+        idealFor: 'Logistics fleets, international freight forwarders, and commercial supply chain networks.',
+        includedModules: ['Live Terminal Locator', 'Dynamic RFP Document Uploader', 'Automated Quote Calculator', 'Executive Leadership Directory']
       },
       {
         id: 'b2b-2',
         name: 'Vance Advisory Group',
-        tagline: 'Private Equity M&A Due Diligence & Portfolio Governance',
+        tagline: 'Private Equity M&A Due Diligence, Restructuring & Governance',
         badge: 'FINANCIAL ADVISORY',
         accentColor: '#3b82f6',
+        colorPalette: ['#3b82f6', '#172554', '#60a5fa', '#ffffff'],
         heroImage: 'https://images.unsplash.com/photo-1486406146926-c627a92ad1ab?auto=format&fit=crop&w=900&q=80',
-        stats: ['$4.2B Capital Deployed', '28 Global Deal Exits', 'Institutional Confidentiality'],
-        layoutStyle: 'Sleek corporate editorial aesthetic with gated document download rooms.'
+        stats: ['$4.2B Capital Deployed', '28 Global Deal Exits', 'Strict Confidentiality'],
+        layoutStyle: 'Sleek corporate editorial aesthetic featuring secure data-room access points and institutional case studies.',
+        idealFor: 'Private equity firms, boutique investment banks, and institutional corporate consultancies.',
+        includedModules: ['Confidential Deal Portal', 'Managing Partner Roster', 'Regulatory Compliance Library', 'Scheduled Strategy Call Booking']
       },
       {
         id: 'b2b-3',
         name: 'Aura Architecture Lab',
-        tagline: 'Sustainable Biophilic Commercial & Civic Structural Design',
+        tagline: 'Sustainable Biophilic Commercial & Civic Structural Masterplanning',
         badge: 'ARCHITECTURAL DESIGN',
         accentColor: '#14b8a6',
+        colorPalette: ['#14b8a6', '#042f2e', '#2dd4bf', '#f0fdfa'],
         heroImage: 'https://images.unsplash.com/photo-1503387762-592deb58ef4e?auto=format&fit=crop&w=900&q=80',
-        stats: ['LEED Platinum Standard', '18 Architectural Awards', 'Carbon-Neutral Scaffolding'],
-        layoutStyle: 'Clean minimalist grid showcasing full-screen structural project photos.'
+        stats: ['LEED Platinum Standard', '18 Global Design Awards', 'Carbon-Neutral Scaffolding'],
+        layoutStyle: 'Ultra-clean minimalist grid showcasing edge-to-edge architectural photography and blueprint schematics.',
+        idealFor: 'Commercial architects, interior designers, urban planners, and civil engineering studios.',
+        includedModules: ['Full-Screen Interactive Project Inspector', 'Interactive Blueprint Drawer', 'Sustainability Index Showcase', 'Client Commission Intake']
       },
       {
         id: 'b2b-4',
         name: 'Blackstone Legal Counsel',
-        tagline: 'Corporate Litigation, Regulatory Compliance & IP Defense',
+        tagline: 'Corporate Litigation, Regulatory Cross-Border Defense & Patent Protection',
         badge: 'CORPORATE LAW',
         accentColor: '#d97706',
+        colorPalette: ['#d97706', '#1c1917', '#fbbf24', '#fafaf9'],
         heroImage: 'https://images.unsplash.com/photo-1479142506502-19b3a3b7ff33?auto=format&fit=crop&w=900&q=80',
         stats: ['Over 300 Trial Verdicts', 'Cross-Border Patent Defense', '24/7 Crisis Hotline'],
-        layoutStyle: 'Executive dark typography with confidential case consultation booking.'
+        layoutStyle: 'Executive dark typography with confidential case consultation booking and legal brief archives.',
+        idealFor: 'Trial attorneys, corporate legal counsel, and IP patent protection practices.',
+        includedModules: ['Encrypted Intake Messaging', 'Practice Area Directories', 'Lead Counsel Bios', 'Client Retainer Checkout Link']
       },
       {
         id: 'b2b-5',
         name: 'Synthetix Human Capital',
-        tagline: 'Executive Search & Technical Engineering Headhunting',
+        tagline: 'Executive Search & Technical Engineering Headhunting for Enterprise',
         badge: 'EXECUTIVE TALENT',
         accentColor: '#8b5cf6',
+        colorPalette: ['#8b5cf6', '#2e1065', '#a78bfa', '#f5f3ff'],
         heroImage: 'https://images.unsplash.com/photo-1522071820081-009f0129c71c?auto=format&fit=crop&w=900&q=80',
         stats: ['96% 1-Year Retention', 'Average 18-Day Placement', 'Fortune 500 Network'],
-        layoutStyle: 'High-conversion talent search portal with instant candidate inquiry intake.'
+        layoutStyle: 'High-conversion talent search portal with confidential executive candidate inquiry pipelines.',
+        idealFor: 'Executive recruiters, corporate search firms, and specialized HR staffing agencies.',
+        includedModules: ['Candidate Submission Vault', 'Confidential Hiring Brief Form', 'Live Placement Statistics', 'Enterprise Talent Retainer Portal']
       }
     ],
 
@@ -192,52 +207,67 @@ export default function LaunchSevenApp() {
       {
         id: 'ret-1',
         name: 'Solstice Botanical Roastery',
-        tagline: 'Ethically Sourced Micro-Lot Coffee & Pantry Provisions',
+        tagline: 'Ethically Sourced Micro-Lot Coffee & Artisan Pantry Provisions',
         badge: 'DIRECT TO CONSUMER',
         accentColor: '#f97316',
+        colorPalette: ['#f97316', '#431407', '#fed7aa', '#fff7ed'],
         heroImage: 'https://images.unsplash.com/photo-1509785307050-d4066910ec1e?auto=format&fit=crop&w=900&q=80',
-        stats: ['Single-Origin Beans', 'Compostable Packaging', '4.9★ Over 8,000 Reviews'],
-        layoutStyle: 'Warm terracotta artisan storytelling with 1-click subscription checkout.'
+        stats: ['Single-Origin Micro-Lots', 'Compostable Bio-Bags', '4.9★ Over 8,000 Orders'],
+        layoutStyle: 'Warm terracotta artisan storytelling with 1-click subscription checkout and roast level selectors.',
+        idealFor: 'Specialty coffee roasters, gourmet food brands, and organic kitchen purveyors.',
+        includedModules: ['Monthly Subscription Customizer', 'Tasting Notes Interactive Chart', 'Live Stock Inventory Counter', 'Express Apple Pay Integration']
       },
       {
         id: 'ret-2',
         name: 'Kroma Nordic Ceramics',
-        tagline: 'Wheel-Thrown Stoneware & Minimalist Interior Vessels',
+        tagline: 'Wheel-Thrown Stoneware & Minimalist Interior Vessels for Living',
         badge: 'STUDIO CRAFT',
         accentColor: '#a1a1aa',
+        colorPalette: ['#a1a1aa', '#18181b', '#e4e4e7', '#ffffff'],
         heroImage: 'https://images.unsplash.com/photo-1612196808214-b8e1d6145a8c?auto=format&fit=crop&w=900&q=80',
-        stats: ['Handmade in Batches', 'Lead-Free Mineral Glazes', 'Global Express Delivery'],
-        layoutStyle: 'Nordic museum gallery layout with high-resolution image zoom inspection.'
+        stats: ['Handmade in Batches', 'Lead-Free Mineral Glazes', 'Global Express Shipping'],
+        layoutStyle: 'Nordic museum gallery layout with high-resolution image zoom inspection and limited batch drops.',
+        idealFor: 'Ceramicists, fine art potters, sculptors, and bespoke homeware designers.',
+        includedModules: ['Limited Batch Drop Timer', 'High-Def 360 Gallery', 'Care & Maintenance Guide', 'Stockist Retailer Directory']
       },
       {
         id: 'ret-3',
         name: 'Lumina Clean Skincare',
-        tagline: 'Dermatologist-Formulated Botanical Serums & Barrier Oils',
+        tagline: 'Dermatologist-Formulated Botanical Serums & Barrier Repair Oils',
         badge: 'BEAUTY & WELLNESS',
         accentColor: '#ec4899',
+        colorPalette: ['#ec4899', '#500724', '#fbcfe8', '#fdf2f8'],
         heroImage: 'https://images.unsplash.com/photo-1556228720-195a672e8a03?auto=format&fit=crop&w=900&q=80',
-        stats: ['Clinical Efficacy Trials', '100% Vegan Certified', 'Carbon-Neutral Production'],
-        layoutStyle: 'Soft pastel radiance with interactive skin quiz and customized routines.'
+        stats: ['Clinical Efficacy Trials', '100% Vegan Certified', 'Carbon-Neutral Labs'],
+        layoutStyle: 'Soft pastel radiance with interactive skin diagnostic quiz and personalized routine recommendations.',
+        idealFor: 'Clean beauty companies, skincare formulators, and natural cosmetics houses.',
+        includedModules: ['Interactive Skin Quiz', 'Ingredient Clinical Research Cards', 'Customer Video Reviews Carousel', 'Recurring Auto-Refill Engine']
       },
       {
         id: 'ret-4',
         name: 'Aero Craft Tailoring',
-        tagline: 'Technical Merino Wool Apparel Engineered for Travel',
+        tagline: 'Technical Merino Wool Travel Suits & Performance Commuter Apparel',
         badge: 'TECHNICAL APPAREL',
         accentColor: '#0ea5e9',
+        colorPalette: ['#0ea5e9', '#082f49', '#bae6fd', '#f0f9ff'],
         heroImage: 'https://images.unsplash.com/photo-1490481651871-ab68de25d43d?auto=format&fit=crop&w=900&q=80',
-        stats: ['Odor-Resistant Fiber', '4-Way Dynamic Stretch', 'Lifetime Stitch Warranty'],
-        layoutStyle: 'High-contrast editorial lookbook with live size recommendation module.'
+        stats: ['Odor-Resistant Fiber', '4-Way Stretch Weave', 'Lifetime Seam Warranty'],
+        layoutStyle: 'High-contrast editorial lookbook with live size recommendation modules and fabric stretch demos.',
+        idealFor: 'Modern menswear, performance activewear, and luxury travel apparel manufacturers.',
+        includedModules: ['Smart Sizing Assistant', 'Fabric Micro-Zoom Inspector', 'Lookbook Video Feed', 'Instant Return Portal Integration']
       },
       {
         id: 'ret-5',
         name: 'Velox Precision Watches',
-        tagline: 'Mechanical Horology & Aviation Chronometers',
+        tagline: 'Mechanical Horology, Pilot Chronometers & Deep Sea Diving Instruments',
         badge: 'LUXURY TIMEPIECES',
         accentColor: '#eab308',
+        colorPalette: ['#eab308', '#1c1917', '#fef08a', '#fefce8'],
         heroImage: 'https://images.unsplash.com/photo-1522335789203-aabd1fc54bc9?auto=format&fit=crop&w=900&q=80',
-        stats: ['Swiss Automatic Movement', '300m Water Resistance', 'Numbered Editions'],
-        layoutStyle: 'Obsidian luxury framing with dynamic 360-degree case rotation gallery.'
+        stats: ['Swiss Automatic Caliber', '300m Water Resistance', 'Individually Serialized'],
+        layoutStyle: 'Obsidian luxury framing with dynamic 360-degree case rotation gallery and authorized dealer locators.',
+        idealFor: 'Independent watchmakers, fine jewelry studios, and precision luxury accessories.',
+        includedModules: ['Numbered Serial Registry', 'Caliber Movement Exploded View', 'Authorized Retailer Map', 'VIP Waitlist Pre-Orders']
       }
     ],
 
@@ -245,52 +275,67 @@ export default function LaunchSevenApp() {
       {
         id: 'hlth-1',
         name: 'Aegis Medical Collective',
-        tagline: 'Evidence-Based Preventative Care & Metabolic Optimization',
+        tagline: 'Evidence-Based Preventative Care, Longevity & Metabolic Optimization',
         badge: 'CLINICAL PRACTICE',
         accentColor: '#10b981',
+        colorPalette: ['#10b981', '#064e3b', '#a7f3d0', '#ecfdf5'],
         heroImage: 'https://images.unsplash.com/photo-1629909613654-28e377c37b09?auto=format&fit=crop&w=900&q=80',
-        stats: ['Same-Day Intake Slots', 'Board-Certified Care', 'HIPAA Secure Vault'],
-        layoutStyle: 'Modern clinical calm with instant patient scheduling and lab result portal.'
+        stats: ['Same-Day Intake Slots', 'Board-Certified MDs', 'HIPAA Encrypted Records'],
+        layoutStyle: 'Modern clinical calm with instant patient scheduling and private lab result portal routing.',
+        idealFor: 'Integrative medicine clinics, functional doctors, and concierge medical practices.',
+        includedModules: ['Real-Time Calendar Booking', 'Physician Profile Directories', 'Patient Intake Paperwork Upload', 'Telehealth Video Integration']
       },
       {
         id: 'hlth-2',
         name: 'Pureform Sports Physical Therapy',
-        tagline: 'Biomechanics Rehabilitation & Elite Athletic Conditioning',
+        tagline: 'Biomechanics Rehabilitation & Elite Athletic Conditioning Programs',
         badge: 'SPORTS RECOVERY',
         accentColor: '#06b6d4',
+        colorPalette: ['#06b6d4', '#164e63', '#a5f3fc', '#ecfeff'],
         heroImage: 'https://images.unsplash.com/photo-1574680096145-d05b474e2155?auto=format&fit=crop&w=900&q=80',
         stats: ['Olympic-Level Therapists', 'Force-Plate Diagnostics', 'Accelerated Protocols'],
-        layoutStyle: 'High-energy recovery aesthetic with direct injury assessment intake form.'
+        layoutStyle: 'High-energy recovery aesthetic with interactive injury symptom evaluator and direct intake form.',
+        idealFor: 'Physical therapy practices, sports medicine clinics, and performance chiropractors.',
+        includedModules: ['Interactive Injury Body Map', 'Direct Therapist Scheduling', 'Performance Assessment Video Vault', 'Insurance Eligibility Checker']
       },
       {
         id: 'hlth-3',
         name: 'Sonoma Mind Sanctuary',
-        tagline: 'Holistic Mental Health, Somatic Therapy & Wellness Retreats',
+        tagline: 'Holistic Mental Health, Somatic Therapy & Forest Immersion Retreats',
         badge: 'PSYCHOLOGY & RETREAT',
         accentColor: '#84cc16',
+        colorPalette: ['#84cc16', '#365314', '#d9f99d', '#f7fee7'],
         heroImage: 'https://images.unsplash.com/photo-1544367567-0f2fcb009e0b?auto=format&fit=crop&w=900&q=80',
-        stats: ['Licensed Psychologists', 'Private Woodland Setting', 'Confidential Inquiries'],
-        layoutStyle: 'Organic earthy calming tones with guided retreat itinerary and bookings.'
+        stats: ['Licensed Psychologists', 'Private Woodland Setting', 'Strict Confidentiality'],
+        layoutStyle: 'Organic earthy calming tones with guided retreat itinerary and private confidential counseling booking.',
+        idealFor: 'Therapists, psychologists, wellness retreats, and holistic healing centers.',
+        includedModules: ['Confidential Consultation Form', 'Retreat Room Itinerary Viewer', 'Practitioner Philosophy Bios', 'Virtual Counseling Link Hub']
       },
       {
         id: 'hlth-4',
         name: 'Radiance Dental Spa',
-        tagline: 'Cosmetic Dentistry, Clear Aligners & Gentle Oral Care',
+        tagline: 'Cosmetic Dentistry, Clear Aligners & Gentle Anxiety-Free Oral Care',
         badge: 'DENTAL PRACTICE',
         accentColor: '#0ea5e9',
+        colorPalette: ['#0ea5e9', '#0c4a6e', '#bae6fd', '#f0f9ff'],
         heroImage: 'https://images.unsplash.com/photo-1588776814546-1ffcf47267a5?auto=format&fit=crop&w=900&q=80',
-        stats: ['Digital 3D Smile Preview', 'Sedation Dentistry Options', 'Zero Anxiety Care'],
-        layoutStyle: 'Bright hygienic layout with interactive before-and-after smile transformations.'
+        stats: ['Digital 3D Smile Preview', 'Sedation Dentistry Options', 'Zero-Anxiety Environment'],
+        layoutStyle: 'Bright hygienic layout with interactive before-and-after smile transformations and insurance estimators.',
+        idealFor: 'Cosmetic dentists, orthodontists, and dental surgery practices.',
+        includedModules: ['Before/After Transformation Slider', 'Instant Insurance Estimator', 'Appointment Booking Calendar', 'New Patient Welcome Video']
       },
       {
         id: 'hlth-5',
         name: 'Kinetic Movement Pilates',
-        tagline: 'Reformer Studio, Private Coaching & Posture Alignment',
+        tagline: 'Reformer Studio, Private Coaching & Posture Alignment Classes',
         badge: 'FITNESS STUDIO',
         accentColor: '#f43f5e',
+        colorPalette: ['#f43f5e', '#4c0519', '#fecdd3', '#fff1f2'],
         heroImage: 'https://images.unsplash.com/photo-1518611012118-696072aa579a?auto=format&fit=crop&w=900&q=80',
         stats: ['Small Classes (Max 6)', 'Certified Master Trainers', 'Custom Reformer Gear'],
-        layoutStyle: 'Minimal chic studio vibe with real-time class pass and seat reservation.'
+        layoutStyle: 'Minimal chic studio vibe with real-time class pass and reformer seat reservation integration.',
+        idealFor: 'Pilates studios, yoga collectives, and boutique fitness spaces.',
+        includedModules: ['Weekly Live Schedule Grid', 'Membership Tier Checkout', 'Instructor Video Spotlights', 'First-Timer Intro Package Booking']
       }
     ],
 
@@ -298,52 +343,67 @@ export default function LaunchSevenApp() {
       {
         id: 'tech-1',
         name: 'Kinesis Robotics Lab',
-        tagline: 'Autonomous Industrial Fabrication & Neural Actuators',
+        tagline: 'Autonomous Industrial Fabrication & Neural Actuator Hardware Systems',
         badge: 'HARDWARE & AI',
         accentColor: '#a855f7',
+        colorPalette: ['#a855f7', '#3b0764', '#e9d5ff', '#faf5ff'],
         heroImage: 'https://images.unsplash.com/photo-1485827404703-89b55fcc595e?auto=format&fit=crop&w=900&q=80',
-        stats: ['12ms Actuator Response', 'ISO-Certified Firmware', '24/7 Diagnostics'],
-        layoutStyle: 'Obsidian dark terminal with high-contrast hardware technical specs.'
+        stats: ['12ms Actuator Response', 'ISO-Certified Firmware', '24/7 Remote Diagnostics'],
+        layoutStyle: 'Obsidian dark terminal with high-contrast hardware schematics and developer whitepaper downloads.',
+        idealFor: 'Robotics startups, industrial hardware developers, and automation manufacturers.',
+        includedModules: ['Hardware Specification Table', 'API Documentation Link Hub', 'Technical Whitepaper Request', 'Pilot Program Application']
       },
       {
         id: 'tech-2',
         name: 'CyberDefend Security',
-        tagline: 'Automated Threat Intelligence & Zero-Trust Architecture',
+        tagline: 'Automated Threat Intelligence, Managed SOC & Zero-Trust Infrastructure',
         badge: 'CYBERSECURITY',
         accentColor: '#22c55e',
+        colorPalette: ['#22c55e', '#052e16', '#bbf7d0', '#f0fdf4'],
         heroImage: 'https://images.unsplash.com/photo-1550751827-4bd374c3f58b?auto=format&fit=crop&w=900&q=80',
-        stats: ['Real-Time SOC Telemetry', 'Sub-Second Anomaly Blocks', 'SOC2 Compliant'],
-        layoutStyle: 'Cyber-ops dashboard with live incident response audit request engine.'
+        stats: ['Real-Time SOC Telemetry', 'Sub-Second Anomaly Blocks', 'SOC2 Type II Compliant'],
+        layoutStyle: 'Cyber-ops dashboard with live threat feed simulator and compliance vulnerability audit forms.',
+        idealFor: 'Managed security providers, vulnerability testing firms, and enterprise compliance tools.',
+        includedModules: ['Free Vulnerability Scan Form', 'Interactive Architecture Diagram', 'Compliance Certifications Strip', 'Emergency Breach Dispatch Button']
       },
       {
         id: 'tech-3',
         name: 'HyperScale Cloud Engine',
-        tagline: 'Serverless Edge Compute & Distributed Redis Infrastructure',
+        tagline: 'Serverless Distributed Edge Compute & Fast Redis Cache Infrastructure',
         badge: 'CLOUD PLATFORM',
         accentColor: '#38bdf8',
+        colorPalette: ['#38bdf8', '#082f49', '#bae6fd', '#f0f9ff'],
         heroImage: 'https://images.unsplash.com/photo-1451187580459-43490279c0fa?auto=format&fit=crop&w=900&q=80',
-        stats: ['99.999% Regional Uptime', '35ms Global Edge P99', 'Unlimited Scaling'],
-        layoutStyle: 'Interactive code snippet previews with developer documentation builder.'
+        stats: ['99.999% Regional Uptime', '35ms Global Edge P99', 'Unlimited Autoscaling'],
+        layoutStyle: 'Terminal command code previews with real-time latency map and interactive cost calculators.',
+        idealFor: 'Cloud hosting providers, developer API platforms, and database tooling startups.',
+        includedModules: ['Copy-Paste CLI Terminal Snippet', 'Global Ping Latency Map', 'Interactive Tier Calculator', 'Developer Documentation Center']
       },
       {
         id: 'tech-4',
         name: 'Cognitive Data Systems',
-        tagline: 'Enterprise Large Language Model Scaffolding & Vector Stores',
+        tagline: 'Enterprise Large Language Model Scaffolding & Vector Embeddings',
         badge: 'AI APPLIED LAB',
         accentColor: '#6366f1',
+        colorPalette: ['#6366f1', '#1e1b4b', '#c7d2fe', '#eef2ff'],
         heroImage: 'https://images.unsplash.com/photo-1518770660439-4636190af475?auto=format&fit=crop&w=900&q=80',
         stats: ['Private VPC Isolation', 'Zero Data Leakage Model', 'Enterprise RAG Ready'],
-        layoutStyle: 'Deep tech blueprint with interactive model accuracy benchmarks.'
+        layoutStyle: 'Deep tech blueprint with interactive vector benchmark metrics and enterprise security certifications.',
+        idealFor: 'Enterprise AI consultants, data engineering consultancies, and RAG search startups.',
+        includedModules: ['Model Performance Benchmarks', 'Interactive Data Pipeline Chart', 'VPC Isolation Checklist', 'Executive Demo Scheduler']
       },
       {
         id: 'tech-5',
         name: 'Voxel Simulation Engine',
-        tagline: 'Real-Time Physics Simulations & Spatial Computing SDK',
+        tagline: 'Real-Time Physics Simulations, Gaming SDKs & Spatial Computing Tools',
         badge: 'SPATIAL COMPUTE',
         accentColor: '#f43f5e',
+        colorPalette: ['#f43f5e', '#4c0519', '#fecdd3', '#fff1f2'],
         heroImage: 'https://images.unsplash.com/photo-1526374965328-7f61d4dc18c5?auto=format&fit=crop&w=900&q=80',
-        stats: ['120 FPS Rendering', 'WebGPU Native Acceleration', 'Cross-Platform SDK'],
-        layoutStyle: 'Futuristic 3D wireframe layout with interactive sandbox playground.'
+        stats: ['120 FPS Native Rendering', 'WebGPU Accelerated', 'Cross-Platform SDK'],
+        layoutStyle: 'Futuristic wireframe layout with interactive sandbox physics demos and SDK license purchases.',
+        idealFor: 'Game development studios, spatial compute startups, and 3D simulation creators.',
+        includedModules: ['Interactive WebGL Sandbox', 'Developer Discord Bridge', 'SDK License Pricing Table', 'Feature Roadmap Timeline']
       }
     ],
 
@@ -351,52 +411,67 @@ export default function LaunchSevenApp() {
       {
         id: 'cre-1',
         name: 'Maison Noir Private Bistro',
-        tagline: 'Seasonal Tasting Menus & Natural Wine Cellar',
+        tagline: 'Seasonal Farm-Direct Tasting Menus & Biodynamic Wine Cellar',
         badge: 'FINE DINING',
         accentColor: '#e11d48',
+        colorPalette: ['#e11d48', '#4c0519', '#fecdd3', '#fff1f2'],
         heroImage: 'https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?auto=format&fit=crop&w=900&q=80',
         stats: ['Michelin Guide Featured', 'Farm-Direct Daily Harvest', 'Cellar of 400 Labels'],
-        layoutStyle: 'Sensory dark photography with integrated table reservation engine.'
+        layoutStyle: 'Sensory dark photography with integrated table reservation engine and downloadable seasonal menus.',
+        idealFor: 'Fine dining restaurants, chef collectives, and culinary tasting rooms.',
+        includedModules: ['Live OpenTable/Resy Widget', 'Daily Rotating Menu PDF Viewer', 'Sommelier Wine List', 'Private Event Rental Inquiry']
       },
       {
         id: 'cre-2',
         name: 'The Highland Atelier',
-        tagline: 'Boutique Mountain Hotel & Nordic Spa Sanctuary',
+        tagline: 'Boutique Mountain Chalet & Nordic Spa Sanctuary for Rejuvenation',
         badge: 'BOUTIQUE HOTEL',
         accentColor: '#059669',
+        colorPalette: ['#059669', '#064e3b', '#a7f3d0', '#ecfdf5'],
         heroImage: 'https://images.unsplash.com/photo-1566073771259-6a8506099945?auto=format&fit=crop&w=900&q=80',
         stats: ['14 Private Chalets', 'Geothermal Heated Springs', 'Panoramic Alpine Views'],
-        layoutStyle: 'Expansive imagery layout with real-time suite availability calendars.'
+        layoutStyle: 'Expansive imagery layout with real-time chalet suite availability calendars and concierge services.',
+        idealFor: 'Boutique hotels, luxury lodges, bed & breakfasts, and resort spas.',
+        includedModules: ['Suite Availability Calendar', 'Interactive Property Map', 'Nordic Spa Menu', 'Direct Booking Deposit Checkout']
       },
       {
         id: 'cre-3',
         name: 'Kinesis Film & Media Lab',
-        tagline: 'Commercial Cinematography & Color Grading Studio',
+        tagline: 'Commercial Cinematography, Color Grading & Visual Production Studio',
         badge: 'FILM PRODUCTION',
         accentColor: '#f59e0b',
+        colorPalette: ['#f59e0b', '#451a03', '#fde68a', '#fffbeb'],
         heroImage: 'https://images.unsplash.com/photo-1492691527719-9d1e07e534b4?auto=format&fit=crop&w=900&q=80',
-        stats: ['Cinema 8K RAW Cameras', 'Dolby Vision Mastering', 'Cannes Shortlist'],
-        layoutStyle: 'Cinematic wide-ratio video reel player with commercial deck download.'
+        stats: ['Cinema 8K RAW Cameras', 'Dolby Vision Mastering', 'Cannes Shortlisted'],
+        layoutStyle: 'Cinematic wide-ratio video reel player with commercial lookbook downloads and project quote calculators.',
+        idealFor: 'Commercial filmmakers, video production houses, and creative directors.',
+        includedModules: ['Embedded 4K Video Reel', 'Client Brand Logo Strip', 'Interactive Production Budget Estimator', 'Commercial Deck Download']
       },
       {
         id: 'cre-4',
         name: 'Elena Rostova Portfolio',
-        tagline: 'Visual Brand Identity & Editorial Typography Direction',
+        tagline: 'Visual Brand Systems, Editorial Typography & Campaign Direction',
         badge: 'CREATOR PORTFOLIO',
         accentColor: '#ec4899',
+        colorPalette: ['#ec4899', '#500724', '#fbcfe8', '#fdf2f8'],
         heroImage: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=900&q=80',
         stats: ['Over 120 Brand Projects', 'Tokyo & Paris Exhibitions', 'Published in Monocle'],
-        layoutStyle: 'Bold editorial typography catalog showcasing client campaigns and links.'
+        layoutStyle: 'Bold editorial typography catalog showcasing client campaigns, press features, and social link hub.',
+        idealFor: 'Art directors, digital creators, models, fashion stylists, and visual consultants.',
+        includedModules: ['High-Def Campaign Slider', 'Press & Exhibition Archive', 'Centralized Link Hub', 'Brand Sponsorship Inquiry Form']
       },
       {
         id: 'cre-5',
         name: 'The Foundry Co-Working Hub',
-        tagline: 'Curated Workspaces, Private Studios & Creator Podcast Pods',
+        tagline: 'Curated Workspaces, Private Studios & Creator Podcast Audio Pods',
         badge: 'CREATIVE CLUB',
         accentColor: '#0284c7',
+        colorPalette: ['#0284c7', '#082f49', '#bae6fd', '#f0f9ff'],
         heroImage: 'https://images.unsplash.com/photo-1497366216548-37526070297c?auto=format&fit=crop&w=900&q=80',
         stats: ['Fiber 1Gbps Dedicated', 'Soundproof Recording Pods', 'Artisan Espresso Bar'],
-        layoutStyle: 'Modern collaborative club aesthetic with direct day-pass and tour booking.'
+        layoutStyle: 'Modern collaborative club aesthetic with direct day-pass and private tour booking forms.',
+        idealFor: 'Co-working spaces, private clubs, podcast studios, and event venues.',
+        includedModules: ['Virtual 3D Tour Video', 'Day Pass & Desk Booking Calendar', 'Member Amenities Checklist', 'Private Event Rental Inquiry']
       }
     ]
   };
@@ -428,9 +503,7 @@ export default function LaunchSevenApp() {
     }
   ];
 
-  // Dynamic Ambient Gradients
   const getAmbientBackground = () => {
-    if (inspectingTemplate) return '#050811';
     switch (navPage) {
       case 1:
         return 'radial-gradient(circle at 50% 20%, rgba(37, 99, 235, 0.4) 0%, rgba(15, 23, 42, 0.9) 60%, rgba(5, 8, 17, 0.98) 100%)';
@@ -469,21 +542,18 @@ export default function LaunchSevenApp() {
     );
   }
 
-  // --- FULL-SCREEN INTERACTIVE DEVICE PREVIEW MODAL (CALLED FROM TEMPLATES) ---
-  if (inspectingTemplate) {
-    const t = inspectingTemplate;
+  // --- DEDICATED TEMPLATE DETAIL PAGE (NEW WEBPAGE FOR SPECIFIC TEMPLATE INFO) ---
+  if (selectedTemplate) {
+    const t = selectedTemplate;
     return (
-      <main style={{ ...styles.container, background: '#050811', padding: '12px' }}>
-        <div style={{ width: '100%', maxWidth: '1040px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+      <main style={{ ...styles.container, background: '#050811', padding: '16px' }}>
+        <div style={{ width: '100%', maxWidth: '960px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
           
-          {/* Top Inspector Controls */}
-          <div style={styles.inspectorTopBar}>
-            <div>
-              <span style={{ fontSize: '10px', color: t.accentColor, fontWeight: '800', letterSpacing: '1px' }}>{t.badge}</span>
-              <h3 style={{ fontSize: '16px', fontWeight: '800', margin: 0, color: '#ffffff' }}>{t.name}</h3>
-            </div>
-
-            {/* Device Frame Viewport Toggle */}
+          {/* Top Breadcrumb & Return Bar */}
+          <div style={styles.detailReturnBar}>
+            <button style={styles.returnCatalogBtn} onClick={() => setSelectedTemplate(null)}>
+              ← Back to All 25 Templates
+            </button>
             <div style={styles.deviceToggleGroup}>
               <button
                 style={previewDevice === 'desktop' ? styles.deviceBtnActive : styles.deviceBtn}
@@ -507,18 +577,13 @@ export default function LaunchSevenApp() {
                 <Icons.Smartphone /> <span style={{ fontSize: '11px', marginLeft: '4px' }}>Mobile</span>
               </button>
             </div>
-
-            <button style={styles.closeInspectorBtn} onClick={() => setInspectingTemplate(null)}>
-              ✕ Close
-            </button>
           </div>
 
-          {/* Rendered Device Wrapper */}
+          {/* Device Mockup Canvas */}
           <div style={
             previewDevice === 'mobile' ? styles.frameMobile :
             previewDevice === 'tablet' ? styles.frameTablet : styles.frameDesktop
           }>
-            {/* Simulated Browser Bar */}
             <div style={styles.browserHeader}>
               <div style={styles.browserDots}>
                 <span style={{ ...styles.dot, backgroundColor: '#ef4444' }} />
@@ -528,10 +593,9 @@ export default function LaunchSevenApp() {
               <div style={styles.browserUrlPill}>
                 preview.{t.name.toLowerCase().replace(/[^a-z0-9]/g, '')}.com
               </div>
-              <span style={{ fontSize: '10px', color: t.accentColor, fontWeight: '700' }}>SSL ENCRYPTED</span>
+              <span style={{ fontSize: '10px', color: t.accentColor, fontWeight: '700' }}>SSL LIVE</span>
             </div>
 
-            {/* Simulated Website Body */}
             <div style={styles.simulatedHero}>
               <img src={t.heroImage} alt={t.name} style={styles.simulatedHeroImg} />
               <div style={styles.simulatedHeroOverlay} />
@@ -543,16 +607,15 @@ export default function LaunchSevenApp() {
                 <p style={styles.simulatedSubtext}>{t.tagline}</p>
                 <div style={{ display: 'flex', gap: '8px', marginTop: '10px', flexWrap: 'wrap' }}>
                   <button style={{ ...styles.mockupActionBtn, backgroundColor: t.accentColor }}>
-                    Get Started
+                    Explore Platform
                   </button>
                   <button style={styles.mockupSecondaryBtn}>
-                    Learn More
+                    View Specs
                   </button>
                 </div>
               </div>
             </div>
 
-            {/* Proof Points Strip */}
             <div style={styles.simulatedStatsStrip}>
               {t.stats.map((s, idx) => (
                 <span key={idx} style={{ fontSize: '11px', color: '#cbd5e1', fontWeight: '500' }}>
@@ -560,29 +623,71 @@ export default function LaunchSevenApp() {
                 </span>
               ))}
             </div>
-
-            {/* Layout Architecture Explainer */}
-            <div style={styles.simulatedFooterNote}>
-              <span style={{ color: t.accentColor, fontWeight: '700' }}>Architecture Note: </span>
-              {t.layoutStyle}
-            </div>
           </div>
 
-          {/* Action to Adopt Template */}
-          <div style={{ display: 'flex', gap: '10px' }}>
-            <button
-              style={{ ...styles.primaryBtn, flex: 1 }}
-              onClick={() => {
-                updateField('vertical', t.name);
-                setInspectingTemplate(null);
-                setSubView('questionnaire');
-              }}
-            >
-              Adopt This Template & Start 7-Day Sprint →
-            </button>
-            <button style={{ ...styles.secondaryBtn, width: 'auto', padding: '0 20px' }} onClick={() => setInspectingTemplate(null)}>
-              Back to Catalog
-            </button>
+          {/* Detailed Template Specifications Card */}
+          <div style={styles.cardRelative}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '10px', marginBottom: '14px' }}>
+              <div>
+                <span style={{ fontSize: '10px', color: t.accentColor, fontWeight: '800', letterSpacing: '1px' }}>{t.badge}</span>
+                <h2 style={{ fontSize: '22px', fontWeight: '800', margin: '4px 0 2px 0', color: '#f8fafc' }}>{t.name}</h2>
+                <p style={{ fontSize: '12px', color: '#94a3b8', margin: 0 }}>{t.tagline}</p>
+              </div>
+
+              {/* Color Swatches */}
+              <div>
+                <span style={{ fontSize: '10px', color: '#94a3b8', display: 'block', marginBottom: '4px' }}>Color Palette Tokens</span>
+                <div style={{ display: 'flex', gap: '6px' }}>
+                  {t.colorPalette.map((hex, i) => (
+                    <div key={i} style={{ width: '22px', height: '22px', borderRadius: '50%', backgroundColor: hex, border: '1px solid #334155' }} title={hex} />
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            {/* Architecture Details Grid */}
+            <div style={styles.templateDetailGrid}>
+              <div style={styles.detailBox}>
+                <h4 style={styles.detailBoxTitle}>📐 Layout Architecture</h4>
+                <p style={styles.detailBoxText}>{t.layoutStyle}</p>
+              </div>
+              <div style={styles.detailBox}>
+                <h4 style={styles.detailBoxTitle}>🎯 Ideal Client Profile</h4>
+                <p style={styles.detailBoxText}>{t.idealFor}</p>
+              </div>
+            </div>
+
+            {/* Included Functional Modules */}
+            <div style={{ marginTop: '14px' }}>
+              <h4 style={{ fontSize: '12px', fontWeight: '700', color: '#e2e8f0', margin: '0 0 8px 0' }}>Included Functional Modules</h4>
+              <div style={styles.moduleBadgeList}>
+                {t.includedModules.map((mod, idx) => (
+                  <span key={idx} style={styles.moduleBadge}>
+                    ✓ {mod}
+                  </span>
+                ))}
+              </div>
+            </div>
+
+            {/* Direct Action Button to Adopt Template */}
+            <div style={{ display: 'flex', gap: '10px', marginTop: '18px' }}>
+              <button
+                style={{ ...styles.primaryBtn, flex: 1 }}
+                onClick={() => {
+                  updateField('vertical', t.name);
+                  setSelectedTemplate(null);
+                  setSubView('questionnaire');
+                }}
+              >
+                Adopt {t.name} & Start 7-Day Sprint →
+              </button>
+              <button
+                style={{ ...styles.secondaryBtn, width: 'auto', padding: '0 20px' }}
+                onClick={() => setSelectedTemplate(null)}
+              >
+                Back
+              </button>
+            </div>
           </div>
 
         </div>
@@ -858,19 +963,19 @@ export default function LaunchSevenApp() {
     <main style={{ ...styles.container, background: getAmbientBackground() }}>
       <div style={{ width: '100%', maxWidth: navPage === 4 ? '1040px' : '520px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
 
-        {/* Top 4-Step Navigation Progress Bar */}
+        {/* REFINED 4-COLUMN PAGES BAR (Zero Text Slip / Overflow Fix) */}
         <div style={styles.stepProgressRow}>
           <button style={navPage === 1 ? styles.stepBtnActive : styles.stepBtn} onClick={() => setNavPage(1)}>
-            01. About Us
+            01. About
           </button>
           <button style={navPage === 2 ? styles.stepBtnActive : styles.stepBtn} onClick={() => setNavPage(2)}>
-            02. Launch Date
+            02. Launch
           </button>
           <button style={navPage === 3 ? styles.stepBtnActive : styles.stepBtn} onClick={() => setNavPage(3)}>
-            03. Action Hub
+            03. Action
           </button>
           <button style={navPage === 4 ? styles.stepBtnActive : styles.stepBtn} onClick={() => setNavPage(4)}>
-            04. 25 Templates
+            04. Templates
           </button>
         </div>
 
@@ -1074,7 +1179,7 @@ export default function LaunchSevenApp() {
             <div style={{ textAlign: 'center', marginBottom: '14px' }}>
               <span style={styles.portfolioBadge}>25 PRODUCTION DESIGNS // 5 PER CATEGORY</span>
               <h2 style={{ ...styles.title, marginTop: '6px' }}>Explore Real-World Website Templates</h2>
-              <p style={styles.brandSubheading}>Tap any template to launch a live interactive preview simulating how it looks on your device.</p>
+              <p style={styles.brandSubheading}>Tap any template card to open a full dedicated page with detailed specifications and live device preview.</p>
             </div>
 
             {/* Category Selector Tabs */}
@@ -1093,7 +1198,11 @@ export default function LaunchSevenApp() {
             {/* Grid of 5 Distinct Examples for Selected Category */}
             <div style={styles.templateGrid}>
               {templateCatalog[activeCategory].map((t) => (
-                <div key={t.id} style={styles.templateCardItem}>
+                <div
+                  key={t.id}
+                  style={styles.templateCardItem}
+                  onClick={() => setSelectedTemplate(t)}
+                >
                   <div style={styles.templateCardThumbnailBox}>
                     <img src={t.heroImage} alt={t.name} style={styles.templateCardImg} />
                     <div style={styles.templateCardBadgeOverlay}>
@@ -1109,10 +1218,13 @@ export default function LaunchSevenApp() {
                     
                     <button
                       style={{ ...styles.previewTriggerBtn, borderColor: t.accentColor, color: t.accentColor }}
-                      onClick={() => setInspectingTemplate(t)}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setSelectedTemplate(t);
+                      }}
                     >
                       <Icons.Eye />
-                      <span>Live Device Preview</span>
+                      <span>Inspect Template Specs & Preview →</span>
                     </button>
                   </div>
                 </div>
@@ -1141,10 +1253,51 @@ const styles = {
   cardRelative: { position: 'relative', zIndex: 4, backgroundColor: 'rgba(15, 23, 42, 0.92)', backdropFilter: 'blur(24px)', WebkitBackdropFilter: 'blur(24px)', width: '100%', borderRadius: '20px', padding: '24px 20px', color: '#f8fafc', boxShadow: '0 25px 50px -12px rgba(0,0,0,0.85), 0 0 0 1px rgba(255,255,255,0.1)', boxSizing: 'border-box' },
   card: { position: 'relative', zIndex: 4, backgroundColor: '#1e293b', width: '100%', maxWidth: '440px', borderRadius: '16px', padding: '24px', color: '#f8fafc', boxShadow: '0 15px 35px rgba(0,0,0,0.6)', boxSizing: 'border-box' },
 
-  // Top Step Progress
-  stepProgressRow: { display: 'flex', gap: '6px', backgroundColor: '#090d16', padding: '4px', borderRadius: '10px', border: '1px solid #1e293b', width: '100%', overflowX: 'auto' },
-  stepBtn: { flex: 1, minWidth: '85px', padding: '8px 10px', backgroundColor: 'transparent', color: '#64748b', border: 'none', borderRadius: '6px', fontSize: '11px', fontWeight: '600', cursor: 'pointer', textAlign: 'center', whiteSpace: 'nowrap' },
-  stepBtnActive: { flex: 1, minWidth: '85px', padding: '8px 10px', backgroundColor: '#1e293b', color: '#38bdf8', border: '1px solid #334155', borderRadius: '6px', fontSize: '11px', fontWeight: '700', cursor: 'pointer', textAlign: 'center', whiteSpace: 'nowrap' },
+  // REFINED 4-COLUMN PAGES BAR (Zero Text Slip / Overflow Fix)
+  stepProgressRow: { 
+    display: 'grid', 
+    gridTemplateColumns: 'repeat(4, 1fr)', 
+    gap: '4px', 
+    backgroundColor: '#090d16', 
+    padding: '4px', 
+    borderRadius: '10px', 
+    border: '1px solid #1e293b', 
+    width: '100%', 
+    boxSizing: 'border-box' 
+  },
+  stepBtn: { 
+    padding: '8px 2px', 
+    backgroundColor: 'transparent', 
+    color: '#64748b', 
+    border: '1px solid transparent', 
+    borderRadius: '6px', 
+    fontSize: '11px', 
+    fontWeight: '600', 
+    cursor: 'pointer', 
+    textAlign: 'center', 
+    whiteSpace: 'nowrap', 
+    overflow: 'hidden', 
+    textOverflow: 'ellipsis',
+    boxSizing: 'border-box',
+    width: '100%'
+  },
+  stepBtnActive: { 
+    padding: '8px 2px', 
+    backgroundColor: '#1e293b', 
+    color: '#38bdf8', 
+    border: '1px solid #38bdf8', 
+    borderRadius: '6px', 
+    fontSize: '11px', 
+    fontWeight: '700', 
+    cursor: 'pointer', 
+    textAlign: 'center', 
+    whiteSpace: 'nowrap', 
+    overflow: 'hidden', 
+    textOverflow: 'ellipsis',
+    boxSizing: 'border-box',
+    width: '100%',
+    boxShadow: '0 0 12px rgba(56, 189, 248, 0.25)'
+  },
 
   // Typography
   landingHeroHeading: { fontSize: '28px', fontWeight: '800', letterSpacing: '-0.8px', margin: '8px 0 6px 0', lineHeight: '1.2', background: 'linear-gradient(135deg, #ffffff 20%, #38bdf8 100%)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' },
@@ -1188,8 +1341,8 @@ const styles = {
   catTab: { padding: '7px 12px', backgroundColor: '#0f172a', color: '#94a3b8', border: '1px solid #1e293b', borderRadius: '6px', fontSize: '11px', fontWeight: '600', cursor: 'pointer', whiteSpace: 'nowrap' },
   catTabActive: { padding: '7px 12px', backgroundColor: '#0284c7', color: '#ffffff', border: '1px solid #38bdf8', borderRadius: '6px', fontSize: '11px', fontWeight: '700', cursor: 'pointer', whiteSpace: 'nowrap' },
 
-  templateGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: '12px' },
-  templateCardItem: { backgroundColor: 'rgba(15, 23, 42, 0.8)', border: '1px solid #1e293b', borderRadius: '12px', overflow: 'hidden', display: 'flex', flexDirection: 'column' },
+  templateGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(230px, 1fr))', gap: '12px' },
+  templateCardItem: { backgroundColor: 'rgba(15, 23, 42, 0.8)', border: '1px solid #1e293b', borderRadius: '12px', overflow: 'hidden', display: 'flex', flexDirection: 'column', cursor: 'pointer', transition: 'border-color 0.2s' },
   templateCardThumbnailBox: { position: 'relative', height: '130px', width: '100%', overflow: 'hidden' },
   templateCardImg: { width: '100%', height: '100%', objectFit: 'cover' },
   templateCardBadgeOverlay: { position: 'absolute', top: 8, left: 8 },
@@ -1198,9 +1351,16 @@ const styles = {
   templateCardTagline: { fontSize: '11px', color: '#94a3b8', margin: '0 0 10px 0', lineHeight: '1.35' },
   previewTriggerBtn: { padding: '8px', backgroundColor: 'transparent', border: '1px solid', borderRadius: '6px', fontSize: '11px', fontWeight: '700', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' },
 
-  // Live Inspector Modal
-  inspectorTopBar: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#0f172a', padding: '10px 14px', borderRadius: '10px', border: '1px solid #1e293b', flexWrap: 'wrap', gap: '8px' },
-  closeInspectorBtn: { background: '#1e293b', border: '1px solid #334155', color: '#cbd5e1', padding: '6px 12px', borderRadius: '6px', cursor: 'pointer', fontSize: '11px' },
+  // Template Detail Page Styles
+  detailReturnBar: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#0f172a', padding: '10px 14px', borderRadius: '10px', border: '1px solid #1e293b', flexWrap: 'wrap', gap: '8px' },
+  returnCatalogBtn: { background: 'none', border: 'none', color: '#38bdf8', fontSize: '12px', fontWeight: '700', cursor: 'pointer' },
+  templateDetailGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: '12px', marginTop: '12px' },
+  detailBox: { padding: '12px', backgroundColor: 'rgba(15, 23, 42, 0.7)', borderRadius: '8px', border: '1px solid #1e293b' },
+  detailBoxTitle: { fontSize: '12px', fontWeight: '700', color: '#cbd5e1', margin: '0 0 4px 0' },
+  detailBoxText: { fontSize: '11px', color: '#94a3b8', margin: 0, lineHeight: '1.4' },
+  moduleBadgeList: { display: 'flex', flexWrap: 'wrap', gap: '6px' },
+  moduleBadge: { padding: '4px 8px', backgroundColor: 'rgba(2, 132, 199, 0.15)', border: '1px solid #0284c7', borderRadius: '4px', fontSize: '11px', color: '#38bdf8' },
+
   deviceToggleGroup: { display: 'flex', backgroundColor: '#090d16', borderRadius: '6px', border: '1px solid #1e293b', padding: '2px' },
   deviceBtn: { background: 'none', border: 'none', color: '#64748b', padding: '5px 8px', borderRadius: '4px', cursor: 'pointer', display: 'flex', alignItems: 'center' },
   deviceBtnActive: { backgroundColor: '#1e293b', border: 'none', color: '#38bdf8', padding: '5px 8px', borderRadius: '4px', cursor: 'pointer', display: 'flex', alignItems: 'center' },
@@ -1225,7 +1385,6 @@ const styles = {
   mockupActionBtn: { padding: '6px 12px', color: '#ffffff', border: 'none', borderRadius: '5px', fontSize: '11px', fontWeight: '700', cursor: 'pointer' },
   mockupSecondaryBtn: { padding: '6px 10px', backgroundColor: 'rgba(255,255,255,0.1)', color: '#cbd5e1', border: '1px solid rgba(255,255,255,0.2)', borderRadius: '5px', fontSize: '11px', fontWeight: '600' },
   simulatedStatsStrip: { display: 'flex', justifyContent: 'space-around', padding: '9px', backgroundColor: '#0b1120', borderTop: '1px solid #1e293b', flexWrap: 'wrap', gap: '6px' },
-  simulatedFooterNote: { padding: '8px 12px', backgroundColor: '#060a14', fontSize: '11px', color: '#94a3b8', borderTop: '1px solid #1e293b' },
 
   // Pricing & Creator Styles
   roiBanner: { backgroundColor: 'rgba(6, 78, 59, 0.25)', border: '1px solid #059669', borderRadius: '8px', padding: '10px', marginBottom: '12px' },
