@@ -1,6 +1,6 @@
 // File: package.json
 {
-  "name": "cloud7-foundry",
+  "name": "dark-cloud-kitchen-os",
   "version": "1.0.0",
   "private": true,
   "scripts": {
