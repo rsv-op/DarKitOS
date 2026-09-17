@@ -1,8 +1,9 @@
+
 // File: app/inventory/page.tsx
 "use client";
 
 import React, { useEffect, useState } from 'react';
-import { kitchenDB, InventoryItem } from '../lib/db';
+import { kitchenDB, InventoryItem } from '../../lib/db';
 
 /**
  * Dark-Cloud Kitchen OS - Algorithmic Depletion Matrix
