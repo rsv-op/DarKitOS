@@ -56,7 +56,7 @@ const initDB = (): Promise<IDBDatabase> => {
   });
 };
 
-// --- STANDALONE EXPORTS (For app/page.tsx) ---
+// --- STANDALONE EXPORTS ---
 export const getOrders = async (): Promise<Order[]> => {
   if (typeof window === 'undefined') return [];
   try {
@@ -147,15 +147,42 @@ export const updateInventoryItem = async (item: InventoryItem): Promise<void> =>
   }
 };
 
-// --- NAMESPACE EXPORT (For app/inventory & app/orders) ---
-// We map both flat functions and nested objects to guarantee compatibility 
-// with however the legacy pages invoke the DB methods.
+export const initDefaultInventory = async (): Promise<void> => {
+  if (typeof window === 'undefined') return;
+  try {
+    const currentStock = await getInventory();
+    if (currentStock.length === 0) {
+      const defaultItems: InventoryItem[] = [
+        { id: 'ITEM-1', name: 'Signature Cloud Burger Patties', currentStock: 50, threshold: 20, unit: 'pcs' },
+        { id: 'ITEM-2', name: 'Brioche Buns', currentStock: 45, threshold: 25, unit: 'pcs' },
+        { id: 'ITEM-3', name: 'Dark-Cloud Secret Sauce', currentStock: 8, threshold: 5, unit: 'liters' },
+        { id: 'ITEM-4', name: 'Premium Packaging Boxes', currentStock: 120, threshold: 50, unit: 'boxes' }
+      ];
+
+      const db = await initDB();
+      return new Promise((resolve, reject) => {
+        const transaction = db.transaction('inventory', 'readwrite');
+        const store = transaction.objectStore('inventory');
+        
+        defaultItems.forEach(item => store.put(item));
+        
+        transaction.oncomplete = () => resolve();
+        transaction.onerror = () => reject(transaction.error);
+      });
+    }
+  } catch (error) {
+    console.error('Failed to initialize default inventory:', error);
+  }
+};
+
+// --- NAMESPACE EXPORT ---
 export const kitchenDB = {
   getOrders,
   getInventory,
   addOrder,
   updateOrderStatus,
   updateInventoryItem,
+  initDefaultInventory,
   orders: {
     getAll: getOrders,
     add: addOrder,
