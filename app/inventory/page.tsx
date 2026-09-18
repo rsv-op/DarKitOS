@@ -1,7 +1,7 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
-import { getInventory, initDefaultInventory, InventoryItem } from '../lib/db';
+import { getInventory, initDefaultInventory, InventoryItem } from '../../lib/db';
+
 
 export default function AlgorithmicDepletionMatrix() {
   const [inventory, setInventory] = useState<InventoryItem[]>([]);
