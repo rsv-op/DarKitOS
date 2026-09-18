@@ -1,7 +1,6 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
-import { getOrders, updateOrderStatus, Order } from '../lib/db';
+import { getOrders, updateOrderStatus, Order } from '../../lib/db';
 
 export default function UnifiedDispatch() {
   const [orders, setOrders] = useState<Order[]>([]);
