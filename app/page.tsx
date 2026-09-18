@@ -11,7 +11,7 @@ import {
   getAllOrders,
   getAllInventory,
   initDefaultInventory,
-} from "../../lib/db";
+} from "../lib/db";
 
 /**
  * Command Center — aggregates live pipeline metrics across all brands.
