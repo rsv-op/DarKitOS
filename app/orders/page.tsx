@@ -1,102 +1,107 @@
-'use client';
 
-import React, { useState, useEffect } from 'react';
-import { getInventory, initDefaultInventory, InventoryItem } from '../../lib/db';
+"use client";
 
+import { useCallback, useEffect, useState } from "react";
+import Link from "next/link";
+import { Order, OrderStatus, getAllOrders, setOrderStatus } from "../../lib/db";
 
-export default function UnifiedDispatch() {
+/**
+ * Unified Dispatch Pipeline — high-contrast Kanban.
+ * PENDING → PREPPING → COMPLETED. Polls IndexedDB every 1000ms.
+ */
+
+const COLUMNS: { status: OrderStatus; color: string }[] = [
+  { status: "PENDING", color: "#fbbf24" },
+  { status: "PREPPING", color: "#60a5fa" },
+  { status: "COMPLETED", color: "#34d399" },
+];
+
+export default function UnifiedDispatchPipeline() {
   const [orders, setOrders] = useState<Order[]>([]);
-  const [isSyncing, setIsSyncing] = useState<boolean>(true);
 
-  const fetchOrders = async () => {
-    try {
-      const data = await getOrders();
-      // Filter out completed/cancelled to keep the Kanban clean, sort by oldest first
-      const activeOrders = data
-        .filter(o => o.status === 'PENDING' || o.status === 'PREPPING')
-        .sort((a, b) => a.timestamp - b.timestamp);
-      
-      setOrders(activeOrders);
-    } catch (err) {
-      console.error('State sync failed:', err);
-    } finally {
-      setIsSyncing(false);
-    }
-  };
-
-  useEffect(() => {
-    fetchOrders();
-    // Zero-latency cross-tab synchronization polling
-    const interval = setInterval(fetchOrders, 1000);
-    return () => clearInterval(interval);
+  const refresh = useCallback(async () => {
+    setOrders(await getAllOrders());
   }, []);
 
-  const handleStatusAdvance = async (id: string, currentStatus: string) => {
-    const nextStatus = currentStatus === 'PENDING' ? 'PREPPING' : 'COMPLETED';
-    await updateOrderStatus(id, nextStatus);
-    await fetchOrders();
-  };
+  useEffect(() => {
+    refresh();
+    const t = setInterval(refresh, 1000);
+    return () => clearInterval(t);
+  }, [refresh]);
 
-  const s: { [key: string]: React.CSSProperties } = {
-    container: { padding: '2.5rem', color: '#ededed', backgroundColor: '#050505', minHeight: '100vh', fontFamily: 'system-ui, -apple-system, sans-serif' },
-    header: { fontSize: '2.25rem', fontWeight: 700, marginBottom: '2rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' },
-    grid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(350px, 1fr))', gap: '1.5rem' },
-    ticket: { padding: '1.5rem', backgroundColor: '#111111', border: '1px solid #262626', borderRadius: '8px', display: 'flex', flexDirection: 'column' },
-    ticketHeader: { display: 'flex', justifyContent: 'space-between', marginBottom: '1rem', borderBottom: '1px solid #262626', paddingBottom: '0.75rem' },
-    brand: { fontSize: '0.75rem', color: '#a1a1aa', textTransform: 'uppercase', letterSpacing: '0.05em' },
-    status: { fontSize: '0.75rem', fontWeight: 700, padding: '0.25rem 0.5rem', borderRadius: '4px' },
-    itemList: { flexGrow: 1, marginBottom: '1.5rem' },
-    item: { display: 'flex', justifyContent: 'space-between', fontSize: '0.875rem', marginBottom: '0.5rem' },
-    button: { padding: '0.75rem', backgroundColor: '#ededed', color: '#000', border: 'none', borderRadius: '4px', fontWeight: 600, cursor: 'pointer' }
+  const move = async (order: Order, dir: 1 | -1) => {
+    const idx = COLUMNS.findIndex(c => c.status === order.status);
+    const next = COLUMNS[idx + dir]?.status;
+    if (!next) return;
+    await setOrderStatus(order.id, next);
+    await refresh();
   };
 
   return (
-    <div style={s.container}>
-      <div style={s.header}>
-        Unified Dispatch Pipeline
-        <span style={{ fontSize: '0.875rem', color: isSyncing ? '#a1a1aa' : '#10b981' }}>
-          {isSyncing ? 'SYNCING...' : 'LIVE'}
-        </span>
-      </div>
-      
-      <div style={s.grid}>
-        {orders.length === 0 ? (
-          <div style={{ color: '#71717a' }}>No active tickets in pipeline.</div>
-        ) : (
-          orders.map((order) => (
-            <div key={order.id} style={s.ticket}>
-              <div style={s.ticketHeader}>
-                <div>
-                  <div style={{ fontWeight: 700, fontSize: '1.125rem' }}>{order.id}</div>
-                  <div style={s.brand}>{order.brand}</div>
-                </div>
-                <div style={{
-                  ...s.status,
-                  backgroundColor: order.status === 'PENDING' ? '#f59e0b' : '#3b82f6',
-                  color: '#fff'
-                }}>
-                  {order.status}
-                </div>
-              </div>
-              
-              <div style={s.itemList}>
-                {order.items.map((item, idx) => (
-                  <div key={idx} style={s.item}>
-                    <span>{item.quantity}x {item.name}</span>
-                  </div>
-                ))}
-              </div>
+    <main style={s.page}>
+      <header style={s.header}>
+        <h1 style={s.h1}>Unified Dispatch Pipeline</h1>
+        <p style={s.sub}>
+          <Link href="/" style={s.link}>← Command Center</Link> · live sync every 1000ms
+        </p>
+      </header>
 
-              <button 
-                style={s.button} 
-                onClick={() => handleStatusAdvance(order.id, order.status)}
-              >
-                {order.status === 'PENDING' ? 'START PREPPING' : 'MARK COMPLETED'}
-              </button>
-            </div>
-          ))
-        )}
+      <div style={s.board}>
+        {COLUMNS.map(({ status, color }) => {
+          const col = orders.filter(o => o.status === status);
+          return (
+            <section key={status} style={s.column}>
+              <h2 style={{ ...s.colTitle, color }}>
+                {status} <span style={s.count}>{col.length}</span>
+              </h2>
+              {col.sort((a, b) => a.createdAt - b.createdAt).map(o => (
+                <article key={o.id} style={s.ticket}>
+                  <div style={s.ticketBrand}>{o.brand}</div>
+                  <ul style={s.ticketItems}>
+                    {o.items.map((it, i) => <li key={i} style={s.ticketItem}>{it}</li>)}
+                  </ul>
+                  <div style={s.ticketMeta}>
+                    <span>${o.total.toFixed(2)}</span>
+                    <span>{new Date(o.createdAt).toLocaleTimeString()}</span>
+                  </div>
+                  <div style={s.ticketActions}>
+                    <button style={s.ghostBtn} disabled={status === "PENDING"} onClick={() => move(o, -1)}>↩</button>
+                    <button
+                      style={{ ...s.moveBtn, background: status === "COMPLETED" ? "#1f2937" : "#2563eb" }}
+                      disabled={status === "COMPLETED"}
+                      onClick={() => move(o, 1)}
+                    >
+                      {status === "PENDING" ? "Start prepping →" : status === "PREPPING" ? "Complete →" : "Done"}
+                    </button>
+                  </div>
+                </article>
+              ))}
+              {col.length === 0 && <p style={s.empty}>No orders</p>}
+            </section>
+          );
+        })}
       </div>
-    </div>
+    </main>
   );
 }
+
+const s: Record<string, React.CSSProperties> = {
+  page: { padding: "2rem", maxWidth: 1200, margin: "0 auto" },
+  header: { marginBottom: "1.2rem" },
+  h1: { fontSize: "1.6rem", margin: 0 },
+  sub: { color: "#94a3b8" },
+  link: { color: "#60a5fa", textDecoration: "none" },
+  board: { display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "1rem" },
+  column: { background: "#0f172a", border: "1px solid #1f2937", borderRadius: 12, padding: "1rem", minHeight: 300 },
+  colTitle: { fontSize: "0.85rem", letterSpacing: 1, marginTop: 0 },
+  count: { background: "#1f2937", borderRadius: 99, padding: "0.1rem 0.5rem", fontSize: "0.75rem" },
+  ticket: { background: "#111c33", border: "1px solid #24304d", borderRadius: 10, padding: "0.8rem", marginBottom: "0.7rem" },
+  ticketBrand: { fontWeight: 700, color: "#93c5fd", fontSize: "0.85rem" },
+  ticketItems: { margin: "0.4rem 0", paddingLeft: "1rem", color: "#cbd5e1", fontSize: "0.85rem" },
+  ticketItem: { marginBottom: "0.15rem" },
+  ticketMeta: { display: "flex", justifyContent: "space-between", color: "#94a3b8", fontSize: "0.75rem" },
+  ticketActions: { display: "flex", gap: "0.5rem", marginTop: "0.6rem" },
+  moveBtn: { flex: 1, color: "#fff", border: "none", borderRadius: 8, padding: "0.45rem", cursor: "pointer" },
+  ghostBtn: { background: "transparent", border: "1px solid #334155", color: "#94a3b8", borderRadius: 8, padding: "0.45rem 0.7rem", cursor: "pointer" },
+  empty: { color: "#475569", fontSize: "0.85rem", textAlign: "center", marginTop: "2rem" },
+};
