@@ -1,4 +1,3 @@
-
 // lib/db.ts
 // Dark-Cloud Kitchen OS: Zero-Cost Native IndexedDB Engine (Universal Adapter)
 
@@ -26,14 +25,14 @@ export interface InventoryItem {
   id: string;
   name: string;
   currentStock: number;
-  threshold: number;
+  reorderThreshold: number; // FIXED: Renamed from 'threshold' to match app/inventory/page.tsx
   unit: string;
 }
 
 // --- CORE ENGINE ---
 const initDB = (): Promise<IDBDatabase> => {
   return new Promise((resolve, reject) => {
-    // SSR/Vercel Edge Guard: Prevent server crashes during static generation
+    // SSR/Vercel Edge Guard
     if (typeof window === 'undefined') {
       return reject(new Error('IndexedDB is not supported on the server'));
     }
@@ -153,10 +152,10 @@ export const initDefaultInventory = async (): Promise<void> => {
     const currentStock = await getInventory();
     if (currentStock.length === 0) {
       const defaultItems: InventoryItem[] = [
-        { id: 'ITEM-1', name: 'Signature Cloud Burger Patties', currentStock: 50, threshold: 20, unit: 'pcs' },
-        { id: 'ITEM-2', name: 'Brioche Buns', currentStock: 45, threshold: 25, unit: 'pcs' },
-        { id: 'ITEM-3', name: 'Dark-Cloud Secret Sauce', currentStock: 8, threshold: 5, unit: 'liters' },
-        { id: 'ITEM-4', name: 'Premium Packaging Boxes', currentStock: 120, threshold: 50, unit: 'boxes' }
+        { id: 'ITEM-1', name: 'Signature Cloud Burger Patties', currentStock: 50, reorderThreshold: 20, unit: 'pcs' },
+        { id: 'ITEM-2', name: 'Brioche Buns', currentStock: 45, reorderThreshold: 25, unit: 'pcs' },
+        { id: 'ITEM-3', name: 'Dark-Cloud Secret Sauce', currentStock: 8, reorderThreshold: 5, unit: 'liters' },
+        { id: 'ITEM-4', name: 'Premium Packaging Boxes', currentStock: 120, reorderThreshold: 50, unit: 'boxes' }
       ];
 
       const db = await initDB();
