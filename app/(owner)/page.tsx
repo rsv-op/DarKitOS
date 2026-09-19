@@ -1,3 +1,4 @@
+import OrderSimulationPanel from '../../components/OrderSimulationPanel'
 
 export default function OwnerDashboard() {
   return (
@@ -19,17 +20,9 @@ export default function OwnerDashboard() {
         </div>
       </div>
 
-      <div className="bg-gray-900 border border-gray-800 rounded-lg p-6">
-        <h2 className="text-xl font-bold mb-4">System Actions</h2>
-        <div className="flex gap-4 flex-wrap">
-          <button className="bg-purple-600/20 text-purple-400 border border-purple-900/50 px-4 py-2 rounded-md text-sm">
-            Generate Daily PINs
-          </button>
-          <button className="bg-blue-600/20 text-blue-400 border border-blue-900/50 px-4 py-2 rounded-md text-sm">
-            Strict-Typed Mock Injector
-          </button>
-        </div>
-      </div>
+      {/* This is the imported component taking the place of the old buttons */}
+      <OrderSimulationPanel />
+
     </div>
   )
 }
