@@ -1,25 +1,21 @@
-
-import type { Metadata } from "next";
-import type { ReactNode } from "react";
+import './globals.css'
+import type { Metadata } from 'next'
 
 export const metadata: Metadata = {
-  title: "Dark-Cloud Kitchen OS",
-  description: "Unified multi-brand operational ledger for cloud kitchens.",
-};
+  title: 'Dark-Cloud Kitchen OS',
+  description: 'Unified command center for multi-brand cloud kitchens.',
+}
 
-const shellStyle: Record<string, string> = {
-  minHeight: "100vh",
-  background: "#070b14",
-  color: "#e2e8f0",
-  margin: "0",
-};
-
-export default function RootLayout({ children }: { children: ReactNode }) {
+export default function RootLayout({
+  children,
+}: {
+  children: React.ReactNode
+}) {
   return (
-    <html lang="en" style={shellStyle}>
-      <body style={{ margin: 0, fontFamily: "system-ui, -apple-system, sans-serif" }}>
+    <html lang="en">
+      <body className="bg-gray-950 text-white min-h-screen antialiased">
         {children}
       </body>
     </html>
-  );
+  )
 }
