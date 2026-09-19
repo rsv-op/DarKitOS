@@ -1,9 +1,9 @@
 
-import { NextResponse } from 'next/server';
-import type { InventoryItem } from '@/lib/db';
-import { INVENTORY_DB } from '@/lib/db';
+import { NextResponse } from "next/server";
+import type { InventoryItem } from "@/lib/db";
+import { INVENTORY_DB } from "@/lib/db";
 
-export const dynamic = 'force-dynamic';
+export const dynamic = "force-dynamic";
 
 let globalInventory: InventoryItem[] = [...INVENTORY_DB];
 
@@ -23,14 +23,14 @@ export async function PATCH(request: Request) {
     const { itemId, restockAmount } = body;
 
     const itemIndex = globalInventory.findIndex(
-      (i) => i.id === itemId
+      (item) => item.id === itemId
     );
 
     if (itemIndex === -1) {
       return NextResponse.json(
         {
           success: false,
-          error: 'Item not found',
+          error: "Item not found",
         },
         {
           status: 404,
@@ -51,7 +51,7 @@ export async function PATCH(request: Request) {
     const message =
       error instanceof Error
         ? error.message
-        : 'Failed to update inventory';
+        : "Failed to update inventory";
 
     return NextResponse.json(
       {
