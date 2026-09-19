@@ -10,7 +10,6 @@ export default function LoginPage() {
   const handleLogin = (e: React.FormEvent) => {
     e.preventDefault()
     
-    // Base PIN logic (Owner updates these daily in production)
     if (pin === '1111') {
       document.cookie = "kitchen_pin=cook_token; path=/"
       router.push('/cook')
@@ -19,6 +18,10 @@ export default function LoginPage() {
       router.push('/dispatch')
     } else if (pin === '3333') {
       document.cookie = "kitchen_pin=owner_token; path=/"
+      router.push('/owner')
+    } else if (pin === '9999') {
+      // Dev bypass token - defaults to Owner view but can navigate anywhere
+      document.cookie = "kitchen_pin=dev_token; path=/"
       router.push('/owner')
     } else {
       setError('Invalid Station PIN')
