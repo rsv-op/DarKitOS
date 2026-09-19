@@ -1,12 +1,9 @@
-```typescript
-// File: app/api/orders/route.ts
+
 import { NextResponse } from 'next/server';
-import {
-  Order,
-  INVENTORY_DB,
-  processOrderDepletion,
-  InventoryItem,
-} from '@/lib/db';
+import type { Order, InventoryItem } from '@/lib/db';
+import { INVENTORY_DB, processOrderDepletion } from '@/lib/db';
+
+export const dynamic = 'force-dynamic';
 
 let globalOrders: Order[] = [];
 let globalInventory: InventoryItem[] = [...INVENTORY_DB];
@@ -22,8 +19,12 @@ export async function GET() {
 export async function POST(request: Request) {
   try {
     const body = await request.json();
+
+    const generatedId =
+      "ORD-" + Math.floor(1000 + Math.random() * 9000);
+
     const newOrder: Order = {
-      id: body.id || `ORD-${Math.floor(1000 + Math.random() * 9000)}`,
+      id: body.id ? String(body.id) : generatedId,
       brandId: body.brandId || 'BurgerForge',
       channel: body.channel || 'Direct Web',
       status: 'PENDING',
@@ -32,7 +33,11 @@ export async function POST(request: Request) {
       updatedAt: new Date().toISOString(),
     };
 
-    const { updatedInventory, depletedItems, lowStockAlerts } = processOrderDepletion(
+    const {
+      updatedInventory,
+      depletedItems,
+      lowStockAlerts,
+    } = processOrderDepletion(
       newOrder,
       globalInventory
     );
@@ -47,53 +52,20 @@ export async function POST(request: Request) {
       lowStockAlerts,
       currentInventory: globalInventory,
     });
-  } catch (error: any) {
+  } catch (error) {
+    const message =
+      error instanceof Error
+        ? error.message
+        : 'Failed to process order';
+
     return NextResponse.json(
-      { success: false, error: error.message || 'Failed to process order' },
-      { status: 500 }
+      {
+        success: false,
+        error: message,
+      },
+      {
+        status: 500,
+      }
     );
   }
 }
-```
-
-```typescript
-// File: app/api/inventory/route.ts
-import { NextResponse } from 'next/server';
-import { INVENTORY_DB, InventoryItem } from '@/lib/db';
-
-let globalInventory: InventoryItem[] = [...INVENTORY_DB];
-
-export async function GET() {
-  return NextResponse.json({
-    success: true,
-    inventory: globalInventory,
-    lowStock: globalInventory.filter((item) => item.currentStock <= item.reorderThreshold),
-  });
-}
-
-export async function PATCH(request: Request) {
-  try {
-    const body = await request.json();
-    const { itemId, restockAmount } = body;
-
-    const itemIndex = globalInventory.findIndex((i) => i.id === itemId);
-    if (itemIndex === -1) {
-      return NextResponse.json({ success: false, error: 'Item not found' }, { status: 404 });
-    }
-
-    globalInventory[itemIndex].currentStock += restockAmount;
-    globalInventory[itemIndex].lastRestocked = new Date().toISOString();
-
-    return NextResponse.json({
-      success: true,
-      updatedItem: globalInventory[itemIndex],
-      inventory: globalInventory,
-    });
-  } catch (error: any) {
-    return NextResponse.json(
-      { success: false, error: error.message || 'Failed to update inventory' },
-      { status: 500 }
-    );
-  }
-}
-```
