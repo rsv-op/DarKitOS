@@ -1,4 +1,4 @@
- 
+
 import { NextResponse } from 'next/server';
 import type { Order, InventoryItem } from '@/lib/db';
 import { INVENTORY_DB, processOrderDepletion } from '@/lib/db';
@@ -54,4 +54,3 @@ export async function POST(request: Request) {
     );
   }
 }
-```
