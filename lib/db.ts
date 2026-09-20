@@ -1,7 +1,3 @@
-code directory > /lib/db.ts
-
-```typescript
-// File: lib/db.ts
 
 export type DbaBrand = 'BurgerForge' | 'TacoMatrix' | 'WingProtocol' | 'GreenBowl';
 export type OrderChannel = 'DoorDash' | 'UberEats' | 'GrubHub' | 'Direct Web';
