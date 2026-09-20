@@ -82,7 +82,6 @@ export default function StandaloneShowcaseOS() {
   const handleInject = (e: React.FormEvent) => {
     e.preventDefault();
     const newId = "ORD-" + Math.floor(1000 + Math.random() * 9000);
-
     const newOrder: MockOrder = {
       id: newId,
       brand: selectedBrand,
@@ -99,15 +98,12 @@ export default function StandaloneShowcaseOS() {
         if (selectedItem.includes("Burger") && item.sku === "BEEF-01") {
           return { ...item, stock: Math.max(0, item.stock - 2 * qty) };
         }
-
         if (selectedItem.includes("Burger") && item.sku === "BUN-01") {
           return { ...item, stock: Math.max(0, item.stock - 1 * qty) };
         }
-
         if (selectedItem.includes("Wings") && item.sku === "WING-01") {
           return { ...item, stock: Math.max(0, item.stock - 12 * qty) };
         }
-
         return item;
       })
     );
@@ -117,14 +113,12 @@ export default function StandaloneShowcaseOS() {
     setOrders((prev) =>
       prev.map((o) => {
         if (o.id !== id) return o;
-
         const nextStatus =
           o.status === "PENDING"
             ? "PREPARING"
             : o.status === "PREPARING"
             ? "READY"
             : "DISPATCHED";
-
         return { ...o, status: nextStatus };
       })
     );
@@ -134,14 +128,8 @@ export default function StandaloneShowcaseOS() {
     return (
       <div className="min-h-screen bg-gray-950 text-white flex items-center justify-center p-4 font-mono">
         <div className="bg-gray-900 border border-gray-800 p-8 rounded-2xl max-w-sm w-full text-center">
-          <h1 className="text-xl font-bold mb-2 text-sky-400">
-            Dark-Cloud OS Gateway
-          </h1>
-
-          <p className="text-xs text-gray-400 mb-6">
-            Enter PIN 9999 for Master Access
-          </p>
-
+          <h1 className="text-xl font-bold mb-2 text-sky-400">Dark-Cloud OS Gateway</h1>
+          <p className="text-xs text-gray-400 mb-6">Enter PIN 9999 for Master Access</p>
           <input
             type="password"
             maxLength={4}
@@ -150,7 +138,6 @@ export default function StandaloneShowcaseOS() {
             className="w-full bg-gray-950 border border-sky-500/30 text-center text-2xl tracking-widest p-3 rounded-lg mb-4 text-white outline-none"
             placeholder="••••"
           />
-
           <button
             onClick={() => pin === "9999" && setAuthenticated(true)}
             className="w-full bg-sky-500 text-gray-950 font-bold py-3 rounded-lg text-sm uppercase"
@@ -168,19 +155,12 @@ export default function StandaloneShowcaseOS() {
         <div>
           <div className="flex items-center gap-2">
             <span className="w-3 h-3 rounded-full bg-emerald-400 animate-pulse" />
-
-            <h1 className="text-xl font-bold font-mono tracking-tight">
-              Dark-Cloud Kitchen OS
-            </h1>
-
+            <h1 className="text-xl font-bold font-mono tracking-tight">Dark-Cloud Kitchen OS</h1>
             <span className="text-[10px] bg-sky-500/10 text-sky-400 border border-sky-500/20 px-2 py-0.5 rounded font-mono">
               UI/UX Showcase (0-API Standalone)
             </span>
           </div>
-
-          <p className="text-gray-400 text-xs mt-0.5">
-            4 DBA Brands · 1 Physical Kitchen Facility
-          </p>
+          <p className="text-gray-400 text-xs mt-0.5">4 DBA Brands · 1 Physical Kitchen Facility</p>
         </div>
 
         <div className="flex bg-gray-900 p-1 rounded-xl border border-gray-800 font-mono text-xs">
@@ -204,59 +184,33 @@ export default function StandaloneShowcaseOS() {
         <div className="space-y-6">
           <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
             <div className="bg-gray-900 border border-gray-800 p-5 rounded-xl">
-              <div className="text-xs text-gray-400 font-mono uppercase">
-                Active Orders
-              </div>
-
+              <div className="text-xs text-gray-400 font-mono uppercase">Active Orders</div>
               <div className="text-3xl font-mono font-bold text-white mt-1">
                 {orders.filter((o) => o.status !== "DISPATCHED").length}
               </div>
-
-              <div className="text-[11px] text-emerald-400 font-mono mt-1">
-                Live KDS Syncing
-              </div>
+              <div className="text-[11px] text-emerald-400 font-mono mt-1">Live KDS Syncing</div>
             </div>
 
             <div className="bg-gray-900 border border-gray-800 p-5 rounded-xl">
-              <div className="text-xs text-gray-400 font-mono uppercase">
-                Avg Prep Speed
-              </div>
-
-              <div className="text-3xl font-mono font-bold text-amber-400 mt-1">
-                5.8 mins
-              </div>
-
-              <div className="text-[11px] text-emerald-400 font-mono mt-1">
-                SLA Target: &lt; 8.0 mins
-              </div>
+              <div className="text-xs text-gray-400 font-mono uppercase">Avg Prep Speed</div>
+              <div className="text-3xl font-mono font-bold text-amber-400 mt-1">5.8 mins</div>
+              <div className="text-[11px] text-emerald-400 font-mono mt-1">SLA Target: &lt; 8.0 mins</div>
             </div>
 
             <div className="bg-gray-900 border border-gray-800 p-5 rounded-xl">
-              <div className="text-xs text-gray-400 font-mono uppercase">
-                Daily Gross Revenue
-              </div>
-
+              <div className="text-xs text-gray-400 font-mono uppercase">Daily Gross Revenue</div>
               <div className="text-3xl font-mono font-bold text-emerald-400 mt-1">
-                ${(orders.length * 28.5 + 1420).toFixed(2)}
+                \${(orders.length * 28.5 + 1420).toFixed(2)}
               </div>
-
-              <div className="text-[11px] text-gray-400 font-mono mt-1">
-                4 DBA Brands Combined
-              </div>
+              <div className="text-[11px] text-gray-400 font-mono mt-1">4 DBA Brands Combined</div>
             </div>
 
             <div className="bg-gray-900 border border-red-900/40 bg-red-950/10 p-5 rounded-xl">
-              <div className="text-xs text-red-400 font-mono uppercase">
-                Low Stock Alerts
-              </div>
-
+              <div className="text-xs text-red-400 font-mono uppercase">Low Stock Alerts</div>
               <div className="text-3xl font-mono font-bold text-red-400 mt-1">
                 {inventory.filter((i) => i.stock <= i.threshold).length} Items
               </div>
-
-              <div className="text-[11px] text-red-300 font-mono mt-1">
-                Immediate Reorder Triggered
-              </div>
+              <div className="text-[11px] text-red-300 font-mono mt-1">Immediate Reorder Triggered</div>
             </div>
           </div>
 
@@ -264,16 +218,10 @@ export default function StandaloneShowcaseOS() {
             <h3 className="text-xs font-mono font-bold uppercase text-sky-400 mb-3">
               ⚡ UI/UX Order Injector & Real-time Depletion Test
             </h3>
-
-            <form
-              onSubmit={handleInject}
-              className="grid grid-cols-1 md:grid-cols-4 gap-3"
-            >
+            <form onSubmit={handleInject} className="grid grid-cols-1 md:grid-cols-4 gap-3">
               <select
                 value={selectedBrand}
-                onChange={(e) =>
-                  setSelectedBrand(e.target.value as Brand)
-                }
+                onChange={(e) => setSelectedBrand(e.target.value as Brand)}
                 className="bg-gray-950 border border-gray-800 p-2.5 rounded-lg text-xs font-mono text-white outline-none"
               >
                 <option value="BurgerForge">BurgerForge</option>
@@ -287,18 +235,10 @@ export default function StandaloneShowcaseOS() {
                 onChange={(e) => setSelectedItem(e.target.value)}
                 className="bg-gray-950 border border-gray-800 p-2.5 rounded-lg text-xs font-mono text-white outline-none"
               >
-                <option value="Double Smash Burger">
-                  Double Smash Burger
-                </option>
-                <option value="Birria Taco Trio">
-                  Birria Taco Trio
-                </option>
-                <option value="12pc Ghost Pepper Wings">
-                  12pc Ghost Pepper Wings
-                </option>
-                <option value="Ahi Tuna Poke Bowl">
-                  Ahi Tuna Poke Bowl
-                </option>
+                <option value="Double Smash Burger">Double Smash Burger</option>
+                <option value="Birria Taco Trio">Birria Taco Trio</option>
+                <option value="12pc Ghost Pepper Wings">12pc Ghost Pepper Wings</option>
+                <option value="Ahi Tuna Poke Bowl">Ahi Tuna Poke Bowl</option>
               </select>
 
               <input
@@ -306,9 +246,7 @@ export default function StandaloneShowcaseOS() {
                 min={1}
                 max={5}
                 value={qty}
-                onChange={(e) =>
-                  setQty(parseInt(e.target.value) || 1)
-                }
+                onChange={(e) => setQty(parseInt(e.target.value) || 1)}
                 className="bg-gray-950 border border-gray-800 p-2.5 rounded-lg text-xs font-mono text-white outline-none"
               />
 
@@ -325,7 +263,6 @@ export default function StandaloneShowcaseOS() {
             <h3 className="text-xs font-mono font-bold uppercase text-gray-300 mb-4">
               Real-time Inventory Ledger
             </h3>
-
             <div className="overflow-x-auto">
               <table className="w-full text-left font-mono text-xs">
                 <thead>
@@ -336,31 +273,16 @@ export default function StandaloneShowcaseOS() {
                     <th className="pb-2">Status</th>
                   </tr>
                 </thead>
-
                 <tbody className="divide-y divide-gray-800/60">
                   {inventory.map((item) => {
                     const isLow = item.stock <= item.threshold;
-
                     return (
                       <tr key={item.sku}>
-                        <td className="py-2.5 text-gray-400">
-                          {item.sku}
-                        </td>
-
-                        <td className="py-2.5 text-white font-semibold">
-                          {item.name}
-                        </td>
-
-                        <td
-                          className={`py-2.5 font-bold ${
-                            isLow
-                              ? "text-red-400"
-                              : "text-emerald-400"
-                          }`}
-                        >
+                        <td className="py-2.5 text-gray-400">{item.sku}</td>
+                        <td className="py-2.5 text-white font-semibold">{item.name}</td>
+                        <td className={`py-2.5 font-bold ${isLow ? "text-red-400" : "text-emerald-400"}`}>
                           {item.stock} {item.unit}
                         </td>
-
                         <td className="py-2.5">
                           <span
                             className={`px-2 py-0.5 rounded text-[10px] font-bold ${
@@ -396,27 +318,14 @@ export default function StandaloneShowcaseOS() {
                     <span className="text-xs font-mono font-bold text-sky-400 border border-sky-500/30 px-2 py-0.5 rounded bg-sky-500/10">
                       {order.brand}
                     </span>
-
-                    <span className="text-xs font-mono text-gray-400">
-                      {order.id}
-                    </span>
+                    <span className="text-xs font-mono text-gray-400">{order.id}</span>
                   </div>
 
                   <ul className="space-y-2 mb-6 text-sm">
                     {order.items.map((it, idx) => (
-                      <li
-                        key={idx}
-                        className="flex justify-between"
-                      >
-                        <span className="font-bold text-white">
-                          {it.qty}x {it.name}
-                        </span>
-
-                        {it.notes && (
-                          <span className="text-xs text-amber-400 font-mono">
-                            ⚠️ {it.notes}
-                          </span>
-                        )}
+                      <li key={idx} className="flex justify-between">
+                        <span className="font-bold text-white">{it.qty}x {it.name}</span>
+                        {it.notes && <span className="text-xs text-amber-400 font-mono">⚠️ {it.notes}</span>}
                       </li>
                     ))}
                   </ul>
@@ -430,9 +339,7 @@ export default function StandaloneShowcaseOS() {
                       : "bg-emerald-500 text-gray-950 hover:bg-emerald-400"
                   }`}
                 >
-                  {order.status === "PENDING"
-                    ? "Start Cook →"
-                    : "Mark Ready ✓"}
+                  {order.status === "PENDING" ? "Start Cook →" : "Mark Ready ✓"}
                 </button>
               </div>
             ))}
@@ -451,17 +358,12 @@ export default function StandaloneShowcaseOS() {
                 <th className="p-4 text-right">Action</th>
               </tr>
             </thead>
-
             <tbody className="divide-y divide-gray-800">
               {orders.map((o) => (
                 <tr key={o.id}>
-                  <td className="p-4 font-bold text-sky-400">
-                    {o.id}
-                  </td>
-
+                  <td className="p-4 font-bold text-sky-400">{o.id}</td>
                   <td className="p-4 text-white">{o.brand}</td>
                   <td className="p-4 text-gray-400">{o.channel}</td>
-
                   <td className="p-4">
                     <span
                       className={`px-2 py-1 rounded text-[10px] font-bold ${
@@ -473,7 +375,6 @@ export default function StandaloneShowcaseOS() {
                       {o.status}
                     </span>
                   </td>
-
                   <td className="p-4 text-right">
                     {o.status === "READY" ? (
                       <button
@@ -483,9 +384,7 @@ export default function StandaloneShowcaseOS() {
                         Hand Off →
                       </button>
                     ) : (
-                      <span className="text-gray-600 italic">
-                        In Progress
-                      </span>
+                      <span className="text-gray-600 italic">In Progress</span>
                     )}
                   </td>
                 </tr>
