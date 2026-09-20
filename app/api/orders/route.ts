@@ -1,34 +1,83 @@
 
 "use client";
 
+import { useState } from 'react';
+import { useRouter } from 'next/navigation';
+
+export default function LoginPage() {
+  const [pin, setPin] = useState('');
+  const [error, setError] = useState('');
+  const router = useRouter();
+
+  const handleLogin = (e: React.FormEvent) =&gt; {
+    e.preventDefault();
+
+    if (pin === '1111') {
+      document.cookie = 'kitchen_pin=cook_token; path=/';
+      router.push('/cook');
+    } else if (pin === '2222') {
+      document.cookie = 'kitchen_pin=dispatch_token; path=/';
+      router.push('/dispatch');
+    } else if (pin === '3333') {
+      document.cookie = 'kitchen_pin=owner_token; path=/';
+      router.push('/owner');
+    } else if (pin === '9999') {
+      // Dev bypass token - defaults to Owner view but can navigate anywhere
+      document.cookie = 'kitchen_pin=dev_token; path=/';
+      router.push('/owner');
+    } else {
+      setError('Invalid Station PIN');
+    }
+  };
+
+  return (
+    <div>
+      <div>
+        <h1>Dark-Cloud OS</h1>
+        <p>Universal Kitchen Station Gateway</p>
+
+        
+
+        <div>
+          <span>Cook: 1111</span>
+          <span>•</span>
+          <span>Dispatch: 2222</span>
+          <span>•</span>
+          <span>Owner: 3333</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+```
+
+---
+
+Ready for **File 7 of 11** (`/app/cook/page.tsx`)? Reply **Next** when you're ready to proceed.
+
+Yes
+
+code directory &gt; /app/cook/page.tsx
+
+```
+// File: app/cook/page.tsx
+"use client";
+
 import React, { useState } from 'react';
 import { Order, OrderStatus } from '@/lib/db';
 
-const MOCK_PIPELINE_ORDERS: Order[] = [
+const MOCK_COOK_ORDERS: Order[] = [
   {
     id: 'ORD-8801',
     brandId: 'BurgerForge',
     channel: 'DoorDash',
     status: 'PREPARING',
-    customerName: 'Sarah K.',
     items: [
-      { id: 'i-1', menuItemId: 'MENU-BF-01', name: 'Double Smash Burger', quantity: 2, station: 'Grill', notes: 'Extra Pickles' },
-      { id: 'i-2', menuItemId: 'MENU-BF-02', name: 'Truffle Fries', quantity: 1, station: 'Fryer' },
+      { id: 'item-1', menuItemId: 'MENU-BF-01', name: 'Double Smash Burger', quantity: 2, station: 'Grill', notes: 'Extra Pickles, No Onions' },
+      { id: 'item-2', menuItemId: 'MENU-BF-02', name: 'Truffle Fries', quantity: 1, station: 'Fryer' },
     ],
     createdAt: new Date(Date.now() - 1000 * 60 * 10).toISOString(),
-    updatedAt: new Date().toISOString(),
-  },
-  {
-    id: 'ORD-8802',
-    brandId: 'TacoMatrix',
-    channel: 'UberEats',
-    status: 'READY_FOR_PICKUP',
-    customerName: 'Alex M.',
-    driverName: 'Carlos R.',
-    items: [
-      { id: 'i-3', menuItemId: 'MENU-TM-01', name: 'Birria Taco Trio', quantity: 1, station: 'Assembly' },
-    ],
-    createdAt: new Date(Date.now() - 1000 * 60 * 18).toISOString(),
     updatedAt: new Date().toISOString(),
   },
   {
@@ -36,33 +85,13 @@ const MOCK_PIPELINE_ORDERS: Order[] = [
     brandId: 'WingProtocol',
     channel: 'GrubHub',
     status: 'PENDING',
-    customerName: 'David L.',
     items: [
-      { id: 'i-4', menuItemId: 'MENU-WP-01', name: '12pc Ghost Pepper Wings', quantity: 1, station: 'Fryer' },
+      { id: 'item-4', menuItemId: 'MENU-WP-01', name: '12pc Ghost Pepper Wings', quantity: 1, station: 'Fryer', notes: 'Extra Ranch' },
     ],
-    createdAt: new Date(Date.now() - 1000 * 60 * 3).toISOString(),
-    updatedAt: new Date().toISOString(),
-  },
-  {
-    id: 'ORD-8804',
-    brandId: 'GreenBowl',
-    channel: 'Direct Web',
-    status: 'DISPATCHED',
-    customerName: 'Elena P.',
-    items: [
-      { id: 'i-5', menuItemId: 'MENU-GB-01', name: 'Ahi Tuna Poke Bowl', quantity: 2, station: 'Cold Prep' },
-    ],
-    createdAt: new Date(Date.now() - 1000 * 60 * 25).toISOString(),
+    createdAt: new Date(Date.now() - 1000 * 60 * 2).toISOString(),
     updatedAt: new Date().toISOString(),
   },
 ];
 
-const STAGES: { status: OrderStatus; label: string; color: string }[] = [
-  { status: 'PENDING', label: '1. Pending', color: 'border-amber-500/30 text-amber-400 bg-amber-500/10' },
-  { status: 'PREPARING', label: '2. Kitchen Prepping', color: 'border-sky-500/30 text-sky-400 bg-sky-500/10' },
-  { status: 'READY_FOR_PICKUP', label: '3. Ready for Courier', color: 'border-emerald-500/30 text-emerald-400 bg-emerald-500/10' },
-  { status: 'DISPATCHED', label: '4. Dispatched', color: 'border-gray-700 text-gray-400 bg-gray-900' },
-];
-
-export default function OrdersPipelinePage() {
-  const [orders, setOrders] = useState
+export default function CookStationPage() {
+  const [activeStationFilter, setActiveStationFilter] = useState
