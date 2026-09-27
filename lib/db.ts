@@ -123,12 +123,10 @@ export interface OrderItem {
 
 export interface OrderEvent {
   id: string;
-  orderId: string;
   type: OrderEventType;
   timestamp: string;
-  source: OrderSource;
   actor: string;
-  metadata?: Record<string, unknown>;
+  details?: string;
 }
 
 export interface Order {
