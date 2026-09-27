@@ -126,14 +126,10 @@ export default function OrderSimulationPanel({
       events: [
         {
           id: eventId,
-          orderId,
           type: "RECEIVED",
           timestamp: now,
-          source: "MANUAL",
           actor: "SYSTEM",
-          metadata: {
-            testOrder: true,
-          },
+          details: "Manual test order received.",
         },
       ],
     };
@@ -173,7 +169,7 @@ export default function OrderSimulationPanel({
 
       if (data.inventoryDecision === "LOW_STOCK") {
         setMessage(
-          `Order accepted with low-stock warning.`,
+          "Order accepted with low-stock warning.",
         );
         setMessageType("warning");
       } else {
