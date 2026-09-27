@@ -264,21 +264,19 @@ function validateOrderItems(items: unknown): {
     }
 
     normalizedItems.push({
-      id: isNonEmptyString(raw.id)
-        ? raw.id
-        : createId("ITEM"),
-      menuItemId: menuItem.id,
-      name: menuItem.name,
-      quantity: raw.quantity,
-      unitPrice: menuItem.price,
-      station: menuItem.station,
-      notes:
-        typeof raw.notes === "string"
-          ? raw.notes.trim()
-          : undefined,
-    });
-  }
-
+  id: isNonEmptyString(raw.id)
+    ? raw.id
+    : createId("ITEM"),
+  menuItemId: menuItem.id,
+  name: menuItem.name,
+  quantity: raw.quantity,
+  station: menuItem.station,
+  notes:
+    typeof raw.notes === "string"
+      ? raw.notes.trim()
+      : undefined,
+});
+  
   return {
     valid: true,
     normalizedItems,
