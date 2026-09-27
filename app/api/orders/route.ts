@@ -232,15 +232,6 @@ function validateOrderItems(items: unknown): {
       };
     }
 
-    if (raw.unitPrice !== undefined) {
-      if (!isFiniteNonNegativeNumber(raw.unitPrice)) {
-        return {
-          valid: false,
-          error: `Invalid unit price for ${menuItem.name}`,
-        };
-      }
-    }
-
     if (
       raw.name !== undefined &&
       !isNonEmptyString(raw.name)
