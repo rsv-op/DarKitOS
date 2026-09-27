@@ -62,21 +62,51 @@ const VALID_BRANDS: DbaBrand[] = BRANDS_DB.map(
   (brand) => brand.id
 ) as DbaBrand[];
 
-const VALID_KITCHENS = KITCHENS_DB.map((kitchen) => kitchen.id);
+const VALID_KITCHENS = KITCHENS_DB.map(
+  (kitchen) => kitchen.id
+);
 
-const VALID_TRANSITIONS: Record<OrderStatus, OrderStatus[]> = {
-  PENDING: ["PREPARING", "CANCELLED"],
-  PREPARING: ["READY_FOR_PICKUP", "CANCELLED"],
-  READY_FOR_PICKUP: ["DRIVER_ASSIGNED", "CANCELLED"],
-  DRIVER_ASSIGNED: ["PICKED_UP", "CANCELLED"],
-  PICKED_UP: ["DISPATCHED", "CANCELLED"],
+const VALID_TRANSITIONS: Record<
+  OrderStatus,
+  OrderStatus[]
+> = {
+  PENDING: [
+    "PREPARING",
+    "CANCELLED",
+  ],
+
+  PREPARING: [
+    "READY_FOR_PICKUP",
+    "CANCELLED",
+  ],
+
+  READY_FOR_PICKUP: [
+    "DRIVER_ASSIGNED",
+    "CANCELLED",
+  ],
+
+  DRIVER_ASSIGNED: [
+    "PICKED_UP",
+    "CANCELLED",
+  ],
+
+  PICKED_UP: [
+    "DISPATCHED",
+    "CANCELLED",
+  ],
+
   DISPATCHED: [],
+
   CANCELLED: [],
 };
 
-const ACTIONS = ["DRIVER_ASSIGNED", "PICKED_UP"] as const;
+const ACTIONS = [
+  "DRIVER_ASSIGNED",
+  "PICKED_UP",
+] as const;
 
-type OrderAction = (typeof ACTIONS)[number];
+type OrderAction =
+  (typeof ACTIONS)[number];
 
 type OrderItemInput = {
   id?: unknown;
@@ -100,6 +130,8 @@ type CreateOrderBody = {
 };
 
 type UpdateOrderBody = {
+  orderId?: unknown;
+  id?: unknown;
   status?: unknown;
   action?: unknown;
   driverName?: unknown;
@@ -108,7 +140,9 @@ type UpdateOrderBody = {
   cancelledBy?: unknown;
 };
 
-function createId(prefix: string): string {
+function createId(
+  prefix: string
+): string {
   return `${prefix}-${Date.now()}-${Math.floor(
     1000 + Math.random() * 9000
   )}`;
@@ -122,52 +156,78 @@ function createEvent(
   return {
     id: createId("EVT"),
     type,
-    timestamp: new Date().toISOString(),
+    timestamp:
+      new Date().toISOString(),
     actor,
     details,
   };
 }
 
-function isValidBrand(value: unknown): value is DbaBrand {
+function isValidBrand(
+  value: unknown
+): value is DbaBrand {
   return (
     typeof value === "string" &&
-    VALID_BRANDS.includes(value as DbaBrand)
+    VALID_BRANDS.includes(
+      value as DbaBrand
+    )
   );
 }
 
-function isValidKitchen(value: unknown): value is string {
+function isValidKitchen(
+  value: unknown
+): value is string {
   return (
     typeof value === "string" &&
     VALID_KITCHENS.includes(value)
   );
 }
 
-function isValidChannel(value: unknown): value is OrderChannel {
+function isValidChannel(
+  value: unknown
+): value is OrderChannel {
   return (
     typeof value === "string" &&
-    VALID_CHANNELS.includes(value as OrderChannel)
+    VALID_CHANNELS.includes(
+      value as OrderChannel
+    )
   );
 }
 
-function isValidSource(value: unknown): value is OrderSource {
+function isValidSource(
+  value: unknown
+): value is OrderSource {
   return (
     typeof value === "string" &&
-    VALID_SOURCES.includes(value as OrderSource)
+    VALID_SOURCES.includes(
+      value as OrderSource
+    )
   );
 }
 
-function isValidStatus(value: unknown): value is OrderStatus {
+function isValidStatus(
+  value: unknown
+): value is OrderStatus {
   return (
     typeof value === "string" &&
-    VALID_STATUSES.includes(value as OrderStatus)
+    VALID_STATUSES.includes(
+      value as OrderStatus
+    )
   );
 }
 
-function isNonEmptyString(value: unknown): value is string {
-  return typeof value === "string" && value.trim().length > 0;
+function isNonEmptyString(
+  value: unknown
+): value is string {
+  return (
+    typeof value === "string" &&
+    value.trim().length > 0
+  );
 }
 
-function isPositiveInteger(value: unknown): value is number {
+function isPositiveInteger(
+  value: unknown
+): value is number {
   return (
     typeof value === "number" &&
     Number.isInteger(value) &&
@@ -175,7 +235,9 @@ function isPositiveInteger(value: unknown): value is number {
   );
 }
 
-function isFiniteNonNegativeNumber(value: unknown): value is number {
+function isFiniteNonNegativeNumber(
+  value: unknown
+): value is number {
   return (
     typeof value === "number" &&
     Number.isFinite(value) &&
@@ -183,40 +245,62 @@ function isFiniteNonNegativeNumber(value: unknown): value is number {
   );
 }
 
-function validateOrderItems(items: unknown): {
+function validateOrderItems(
+  items: unknown
+): {
   valid: boolean;
   error?: string;
   normalizedItems?: Order["items"];
 } {
-  if (!Array.isArray(items) || items.length === 0) {
+  if (
+    !Array.isArray(items) ||
+    items.length === 0
+  ) {
     return {
       valid: false,
-      error: "Order must contain at least one item",
+      error:
+        "Order must contain at least one item",
     };
   }
 
-  const normalizedItems: Order["items"] = [];
+  const normalizedItems: Order["items"] =
+    [];
 
-  for (let index = 0; index < items.length; index += 1) {
-    const raw = items[index] as OrderItemInput;
+  for (
+    let index = 0;
+    index < items.length;
+    index += 1
+  ) {
+    const raw =
+      items[index] as OrderItemInput;
 
-    if (!raw || typeof raw !== "object") {
+    if (
+      !raw ||
+      typeof raw !== "object"
+    ) {
       return {
         valid: false,
         error: `Invalid order item at index ${index}`,
       };
     }
 
-    if (!isNonEmptyString(raw.menuItemId)) {
+    if (
+      !isNonEmptyString(
+        raw.menuItemId
+      )
+    ) {
       return {
         valid: false,
         error: `Missing menuItemId at item ${index}`,
       };
     }
 
-    const menuItem = MENU_CATALOG.find(
-      (item) => item.id === raw.menuItemId
-    );
+    const menuItem =
+      MENU_CATALOG.find(
+        (item) =>
+          item.id ===
+          raw.menuItemId
+      );
 
     if (!menuItem) {
       return {
@@ -225,7 +309,11 @@ function validateOrderItems(items: unknown): {
       };
     }
 
-    if (!isPositiveInteger(raw.quantity)) {
+    if (
+      !isPositiveInteger(
+        raw.quantity
+      )
+    ) {
       return {
         valid: false,
         error: `Invalid quantity for ${menuItem.name}. Quantity must be a positive integer.`,
@@ -253,19 +341,30 @@ function validateOrderItems(items: unknown): {
     }
 
     normalizedItems.push({
-  id: isNonEmptyString(raw.id)
-    ? raw.id
-    : createId("ITEM"),
-  menuItemId: menuItem.id,
-  name: menuItem.name,
-  quantity: raw.quantity,
-  station: menuItem.station,
-  notes:
-    typeof raw.notes === "string"
-      ? raw.notes.trim()
-      : undefined,
-});
-  
+      id: isNonEmptyString(raw.id)
+        ? raw.id
+        : createId("ITEM"),
+
+      menuItemId:
+        menuItem.id,
+
+      name:
+        menuItem.name,
+
+      quantity:
+        raw.quantity,
+
+      station:
+        menuItem.station,
+
+      notes:
+        typeof raw.notes ===
+        "string"
+          ? raw.notes.trim()
+          : undefined,
+    });
+  }
+
   return {
     valid: true,
     normalizedItems,
@@ -275,7 +374,10 @@ function validateOrderItems(items: unknown): {
 function jsonError(
   message: string,
   status = 400,
-  details?: Record<string, unknown>
+  details?: Record<
+    string,
+    unknown
+  >
 ) {
   return NextResponse.json(
     {
@@ -289,14 +391,15 @@ function jsonError(
 
 function getStatusTimestamp(
   status: OrderStatus
-): keyof Pick<
-  Order,
-  | "acceptedAt"
-  | "prepStartedAt"
-  | "prepCompletedAt"
-  | "readyAt"
-  | "dispatchedAt"
-> | null {
+):
+  | keyof Pick<
+      Order,
+      | "prepStartedAt"
+      | "prepCompletedAt"
+      | "readyAt"
+      | "dispatchedAt"
+    >
+  | null {
   switch (status) {
     case "PREPARING":
       return "prepStartedAt";
@@ -334,14 +437,20 @@ function getActor(
   body: UpdateOrderBody,
   fallback: string
 ): string {
-  return isNonEmptyString(body.cancelledBy)
+  return isNonEmptyString(
+    body.cancelledBy
+  )
     ? body.cancelledBy.trim()
     : fallback;
 }
 
 function getCancellationSource(
   value: unknown
-): NonNullable<Order["cancellationSource"]> | null {
+):
+  | NonNullable<
+      Order["cancellationSource"]
+    >
+  | null {
   const allowed = [
     "CUSTOMER",
     "KITCHEN",
@@ -356,7 +465,9 @@ function getCancellationSource(
       value as (typeof allowed)[number]
     )
   ) {
-    return value as NonNullable<Order["cancellationSource"]>;
+    return value as NonNullable<
+      Order["cancellationSource"]
+    >;
   }
 
   return null;
@@ -370,50 +481,80 @@ export async function GET() {
   });
 }
 
-export async function POST(request: Request) {
+export async function POST(
+  request: Request
+) {
   try {
-    const body = (await request.json()) as CreateOrderBody;
+    const body =
+      (await request.json()) as CreateOrderBody;
 
-    const brandId = body.brandId ?? "BurgerForge";
-    const kitchenId = body.kitchenId ?? "K1";
-    const channel = body.channel ?? "Direct Web";
-    const source = body.source ?? "MANUAL";
+    const brandId =
+      body.brandId ??
+      "BurgerForge";
+
+    const kitchenId =
+      body.kitchenId ??
+      "K1";
+
+    const channel =
+      body.channel ??
+      "Direct Web";
+
+    const source =
+      body.source ??
+      "MANUAL";
 
     if (!isValidBrand(brandId)) {
       return jsonError(
-        `Invalid brandId: ${String(brandId)}`
+        `Invalid brandId: ${String(
+          brandId
+        )}`
       );
     }
 
     if (!isValidKitchen(kitchenId)) {
       return jsonError(
-        `Invalid kitchenId: ${String(kitchenId)}`
+        `Invalid kitchenId: ${String(
+          kitchenId
+        )}`
       );
     }
 
     if (!isValidChannel(channel)) {
       return jsonError(
-        `Invalid channel: ${String(channel)}`
+        `Invalid channel: ${String(
+          channel
+        )}`
       );
     }
 
     if (!isValidSource(source)) {
       return jsonError(
-        `Invalid source: ${String(source)}`
+        `Invalid source: ${String(
+          source
+        )}`
       );
     }
 
-    const validation = validateOrderItems(body.items);
+    const validation =
+      validateOrderItems(
+        body.items
+      );
 
-    if (!validation.valid || !validation.normalizedItems) {
+    if (
+      !validation.valid ||
+      !validation.normalizedItems
+    ) {
       return jsonError(
-        validation.error || "Invalid order items"
+        validation.error ||
+          "Invalid order items"
       );
     }
 
-    const orderId = isNonEmptyString(body.id)
-      ? body.id.trim()
-      : createId("ORD");
+    const orderId =
+      isNonEmptyString(body.id)
+        ? body.id.trim()
+        : createId("ORD");
 
     if (findOrder(orderId)) {
       return jsonError(
@@ -422,40 +563,65 @@ export async function POST(request: Request) {
       );
     }
 
-    const externalOrderId = isNonEmptyString(
-      body.externalOrderId
-    )
-      ? body.externalOrderId.trim()
-      : undefined;
+    const externalOrderId =
+      isNonEmptyString(
+        body.externalOrderId
+      )
+        ? body.externalOrderId.trim()
+        : undefined;
 
-    const now = new Date().toISOString();
+    const now =
+      new Date().toISOString();
 
     const baseOrder: Order = {
       id: orderId,
+
       externalOrderId,
+
       brandId,
+
       kitchenId,
+
       channel,
+
       source,
+
       status: "PENDING",
-      items: validation.normalizedItems,
-      customerName: isNonEmptyString(body.customerName)
-        ? body.customerName.trim()
-        : undefined,
-      driverName: isNonEmptyString(body.driverName)
-        ? body.driverName.trim()
-        : undefined,
+
+      items:
+        validation.normalizedItems,
+
+      customerName:
+        isNonEmptyString(
+          body.customerName
+        )
+          ? body.customerName.trim()
+          : undefined,
+
+      driverName:
+        isNonEmptyString(
+          body.driverName
+        )
+          ? body.driverName.trim()
+          : undefined,
+
       courierEtaMins:
-        typeof body.courierEtaMins === "number" &&
-        Number.isFinite(body.courierEtaMins) &&
-        body.courierEtaMins >= 0
+        isFiniteNonNegativeNumber(
+          body.courierEtaMins
+        )
           ? body.courierEtaMins
           : undefined,
+
       createdAt: now,
+
       updatedAt: now,
+
       receivedAt: now,
+
       inventoryWarnings: [],
+
       inventoryUnavailable: [],
+
       events: [
         createEvent(
           "RECEIVED",
@@ -465,29 +631,39 @@ export async function POST(request: Request) {
       ],
     };
 
-    const inventory = getInventory();
+    const inventory =
+      getInventory();
 
-    const inventoryEvaluation = evaluateOrderInventory(
-      baseOrder,
-      inventory
+    const inventoryEvaluation =
+      evaluateOrderInventory(
+        baseOrder,
+        inventory
+      );
+
+    const inventoryCheckedEvent =
+      createEvent(
+        "INVENTORY_CHECKED",
+        "ORDER_API",
+        `Inventory decision: ${inventoryEvaluation.inventoryDecision}`
+      );
+
+    baseOrder.events.push(
+      inventoryCheckedEvent
     );
 
-    const inventoryCheckedEvent = createEvent(
-      "INVENTORY_CHECKED",
-      "ORDER_API",
-      `Inventory decision: ${inventoryEvaluation.decision}`
-    );
-
-    baseOrder.events.push(inventoryCheckedEvent);
     baseOrder.inventoryDecision =
-      inventoryEvaluation.decision;
+      inventoryEvaluation.inventoryDecision;
+
     baseOrder.inventoryWarnings =
       inventoryEvaluation.lowStockItems;
+
     baseOrder.inventoryUnavailable =
       inventoryEvaluation.insufficientStockItems;
 
     if (
-      inventoryEvaluation.insufficientStockItems.length > 0
+      inventoryEvaluation
+        .insufficientStockItems
+        .length > 0
     ) {
       baseOrder.events.push(
         createEvent(
@@ -502,13 +678,18 @@ export async function POST(request: Request) {
       return NextResponse.json(
         {
           success: false,
+
           error:
             "Order cannot be accepted because required inventory is insufficient.",
+
           order: baseOrder,
+
           inventoryDecision:
-            inventoryEvaluation.decision,
+            inventoryEvaluation.inventoryDecision,
+
           inventoryUnavailable:
             inventoryEvaluation.insufficientStockItems,
+
           lowStockItems:
             inventoryEvaluation.lowStockItems,
         },
@@ -516,14 +697,20 @@ export async function POST(request: Request) {
       );
     }
 
-    const depletion = processOrderDepletion(
-      baseOrder,
-      inventory
+    const depletion =
+      processOrderDepletion(
+        baseOrder,
+        inventory
+      );
+
+    replaceInventory(
+      depletion.updatedInventory
     );
 
-    replaceInventory(depletion.updatedInventory);
-
-    if (depletion.lowStockAlerts.length > 0) {
+    if (
+      depletion.lowStockAlerts
+        .length > 0
+    ) {
       baseOrder.inventoryWarnings =
         depletion.lowStockAlerts;
 
@@ -531,12 +718,15 @@ export async function POST(request: Request) {
         createEvent(
           "INVENTORY_WARNING",
           "INVENTORY_ENGINE",
-          depletion.lowStockAlerts.join(", ")
+          depletion.lowStockAlerts.join(
+            ", "
+          )
         )
       );
     }
 
-    baseOrder.acceptedAt = now;
+    baseOrder.acceptedAt =
+      now;
 
     baseOrder.events.push(
       createEvent(
@@ -551,13 +741,22 @@ export async function POST(request: Request) {
     return NextResponse.json(
       {
         success: true,
+
         order: baseOrder,
+
         orders: getOrders(),
-        inventory: getInventory(),
-        depletedItems: depletion.depletedItems,
-        lowStockItems: depletion.lowStockAlerts,
+
+        inventory:
+          getInventory(),
+
+        depletedItems:
+          depletion.depletedItems,
+
+        lowStockItems:
+          depletion.lowStockAlerts,
+
         inventoryDecision:
-          inventoryEvaluation.decision,
+          inventoryEvaluation.inventoryDecision,
       },
       { status: 201 }
     );
@@ -567,41 +766,52 @@ export async function POST(request: Request) {
         ? error.message
         : "Failed to create order";
 
-    return jsonError(message, 500);
+    return jsonError(
+      message,
+      500
+    );
   }
 }
 
-export async function PATCH(request: Request) {
+export async function PATCH(
+  request: Request
+) {
   try {
-    const body = (await request.json()) as UpdateOrderBody;
+    const body =
+      (await request.json()) as UpdateOrderBody;
 
-    if (!isNonEmptyString(body.status) && !isNonEmptyString(body.action)) {
+    if (
+      !isNonEmptyString(
+        body.status
+      ) &&
+      !isNonEmptyString(
+        body.action
+      )
+    ) {
       return jsonError(
         "PATCH requires either status or action"
       );
     }
 
-    const orderIdFromBody = (body as UpdateOrderBody & {
-      orderId?: unknown;
-      id?: unknown;
-    }).orderId;
-
-    const alternateId = (body as UpdateOrderBody & {
-      orderId?: unknown;
-      id?: unknown;
-    }).id;
-
-    const orderId = isNonEmptyString(orderIdFromBody)
-      ? orderIdFromBody
-      : isNonEmptyString(alternateId)
-        ? alternateId
-        : undefined;
+    const orderId =
+      isNonEmptyString(
+        body.orderId
+      )
+        ? body.orderId.trim()
+        : isNonEmptyString(
+            body.id
+          )
+          ? body.id.trim()
+          : undefined;
 
     if (!orderId) {
-      return jsonError("Missing orderId");
+      return jsonError(
+        "Missing orderId"
+      );
     }
 
-    const order = findOrder(orderId);
+    const order =
+      findOrder(orderId);
 
     if (!order) {
       return jsonError(
@@ -610,185 +820,309 @@ export async function PATCH(request: Request) {
       );
     }
 
-    const actor = getActor(body, "SYSTEM");
+    const actor =
+      getActor(
+        body,
+        "SYSTEM"
+      );
 
     /*
-     * Explicit action: assign driver.
+     * Explicit action:
+     * assign driver.
      */
-    if (body.action === "DRIVER_ASSIGNED") {
-      if (order.status !== "READY_FOR_PICKUP") {
+    if (
+      body.action ===
+      "DRIVER_ASSIGNED"
+    ) {
+      if (
+        order.status !==
+        "READY_FOR_PICKUP"
+      ) {
         return jsonError(
           `Cannot assign driver while order is ${order.status}`,
           409
         );
       }
 
-      if (!isNonEmptyString(body.driverName)) {
+      if (
+        !isNonEmptyString(
+          body.driverName
+        )
+      ) {
         return jsonError(
           "driverName is required when assigning a driver"
         );
       }
 
-      const now = new Date().toISOString();
+      const now =
+        new Date().toISOString();
 
-      const updated = updateOrder(orderId, {
-        status: "DRIVER_ASSIGNED",
-        driverName: body.driverName.trim(),
-        driverAssignedAt: now,
-        updatedAt: now,
-        events: [
-          ...order.events,
-          createEvent(
-            "DRIVER_ASSIGNED",
-            actor,
-            `Driver assigned: ${body.driverName.trim()}`
-          ),
-        ],
-      });
+      const driverName =
+        body.driverName.trim();
+
+      const updated =
+        updateOrder(
+          orderId,
+          {
+            status:
+              "DRIVER_ASSIGNED",
+
+            driverName,
+
+            driverAssignedAt:
+              now,
+
+            updatedAt:
+              now,
+
+            events: [
+              ...order.events,
+
+              createEvent(
+                "DRIVER_ASSIGNED",
+                actor,
+                `Driver assigned: ${driverName}`
+              ),
+            ],
+          }
+        );
 
       return NextResponse.json({
         success: true,
+
         order: updated,
+
         orders: getOrders(),
-        inventory: getInventory(),
+
+        inventory:
+          getInventory(),
       });
     }
 
     /*
-     * Explicit action: pickup.
+     * Explicit action:
+     * pickup.
      */
-    if (body.action === "PICKED_UP") {
-      if (order.status !== "DRIVER_ASSIGNED") {
+    if (
+      body.action ===
+      "PICKED_UP"
+    ) {
+      if (
+        order.status !==
+        "DRIVER_ASSIGNED"
+      ) {
         return jsonError(
           `Cannot mark pickup while order is ${order.status}`,
           409
         );
       }
 
-      if (!order.driverAssignedAt) {
+      if (
+        !order.driverAssignedAt
+      ) {
         return jsonError(
           "Order cannot be picked up before driver assignment",
           409
         );
       }
 
-      const now = new Date().toISOString();
+      const now =
+        new Date().toISOString();
 
-      const updated = updateOrder(orderId, {
-        status: "PICKED_UP",
-        pickedUpAt: now,
-        updatedAt: now,
-        events: [
-          ...order.events,
-          createEvent(
-            "PICKED_UP",
-            actor,
-            order.driverName
-              ? `Picked up by ${order.driverName}`
-              : "Order picked up"
-          ),
-        ],
-      });
+      const updated =
+        updateOrder(
+          orderId,
+          {
+            status:
+              "PICKED_UP",
+
+            pickedUpAt:
+              now,
+
+            updatedAt:
+              now,
+
+            events: [
+              ...order.events,
+
+              createEvent(
+                "PICKED_UP",
+                actor,
+                order.driverName
+                  ? `Picked up by ${order.driverName}`
+                  : "Order picked up"
+              ),
+            ],
+          }
+        );
 
       return NextResponse.json({
         success: true,
+
         order: updated,
+
         orders: getOrders(),
-        inventory: getInventory(),
+
+        inventory:
+          getInventory(),
       });
     }
 
     /*
-     * No arbitrary action names.
+     * Reject unsupported
+     * explicit actions.
      */
     if (
-      body.action !== undefined &&
-      !ACTIONS.includes(body.action as OrderAction)
+      body.action !==
+        undefined &&
+      !ACTIONS.includes(
+        body.action as OrderAction
+      )
     ) {
       return jsonError(
-        `Unsupported order action: ${String(body.action)}`
+        `Unsupported order action: ${String(
+          body.action
+        )}`
       );
     }
 
     /*
-     * Standard lifecycle status transition.
+     * Standard lifecycle
+     * status transition.
      */
-    if (!isValidStatus(body.status)) {
+    if (
+      !isValidStatus(
+        body.status
+      )
+    ) {
       return jsonError(
-        `Invalid order status: ${String(body.status)}`
+        `Invalid order status: ${String(
+          body.status
+        )}`
       );
     }
 
-    const nextStatus = body.status;
+    const nextStatus =
+      body.status;
 
-    if (nextStatus === order.status) {
+    if (
+      nextStatus ===
+      order.status
+    ) {
       return NextResponse.json({
         success: true,
+
         order,
+
         orders: getOrders(),
-        inventory: getInventory(),
+
+        inventory:
+          getInventory(),
+
         unchanged: true,
       });
     }
 
-    if (!VALID_TRANSITIONS[order.status].includes(nextStatus)) {
+    if (
+      !VALID_TRANSITIONS[
+        order.status
+      ].includes(
+        nextStatus
+      )
+    ) {
       return jsonError(
-        `Invalid lifecycle transition: ${order.status} → ${nextStatus}`,
+        `Invalid lifecycle transition: ${order.status} -> ${nextStatus}`,
         409
       );
     }
 
-    const now = new Date().toISOString();
+    const now =
+      new Date().toISOString();
 
-    if (nextStatus === "CANCELLED") {
+    /*
+     * Cancellation.
+     */
+    if (
+      nextStatus ===
+      "CANCELLED"
+    ) {
       const cancellationSource =
-        getCancellationSource(body.cancellationSource);
+        getCancellationSource(
+          body.cancellationSource
+        );
 
-      if (!cancellationSource) {
+      if (
+        !cancellationSource
+      ) {
         return jsonError(
           "cancellationSource is required and must be CUSTOMER, KITCHEN, AGGREGATOR, SYSTEM, or MANUAL"
         );
       }
 
-      if (!isNonEmptyString(body.cancellationReason)) {
+      if (
+        !isNonEmptyString(
+          body.cancellationReason
+        )
+      ) {
         return jsonError(
           "cancellationReason is required when cancelling an order"
         );
       }
 
-      const updated = updateOrder(orderId, {
-        status: "CANCELLED",
-        cancellationSource,
-        cancellationReason:
-          body.cancellationReason.trim(),
-        cancelledBy: actor,
-        updatedAt: now,
-        events: [
-          ...order.events,
-          createEvent(
-            "CANCELLED",
-            actor,
-            `${cancellationSource}: ${body.cancellationReason.trim()}`
-          ),
-        ],
-      });
+      const cancellationReason =
+        body.cancellationReason.trim();
+
+      const updated =
+        updateOrder(
+          orderId,
+          {
+            status:
+              "CANCELLED",
+
+            cancellationSource,
+
+            cancellationReason,
+
+            cancelledBy:
+              actor,
+
+            updatedAt:
+              now,
+
+            events: [
+              ...order.events,
+
+              createEvent(
+                "CANCELLED",
+                actor,
+                `${cancellationSource}: ${cancellationReason}`
+              ),
+            ],
+          }
+        );
 
       return NextResponse.json({
         success: true,
+
         order: updated,
+
         orders: getOrders(),
-        inventory: getInventory(),
+
+        inventory:
+          getInventory(),
       });
     }
 
     /*
-     * Driver-assigned and pickup transitions must use
-     * their explicit actions so required metadata cannot
-     * be skipped.
+     * Driver assignment and
+     * pickup require their
+     * explicit actions.
      */
     if (
-      nextStatus === "DRIVER_ASSIGNED" ||
-      nextStatus === "PICKED_UP"
+      nextStatus ===
+        "DRIVER_ASSIGNED" ||
+      nextStatus ===
+        "PICKED_UP"
     ) {
       return jsonError(
         `${nextStatus} must be performed using the corresponding order action`,
@@ -796,7 +1130,10 @@ export async function PATCH(request: Request) {
       );
     }
 
-    const eventType = getStatusEvent(nextStatus);
+    const eventType =
+      getStatusEvent(
+        nextStatus
+      );
 
     if (!eventType) {
       return jsonError(
@@ -804,32 +1141,101 @@ export async function PATCH(request: Request) {
       );
     }
 
+    /*
+     * READY_FOR_PICKUP marks
+     * both preparation completion
+     * and readiness.
+     */
+    if (
+      nextStatus ===
+      "READY_FOR_PICKUP"
+    ) {
+      const updated =
+        updateOrder(
+          orderId,
+          {
+            status:
+              nextStatus,
+
+            prepCompletedAt:
+              now,
+
+            readyAt:
+              now,
+
+            updatedAt:
+              now,
+
+            events: [
+              ...order.events,
+
+              createEvent(
+                eventType,
+                actor,
+                "Order preparation completed and order is ready for pickup"
+              ),
+            ],
+          }
+        );
+
+      return NextResponse.json({
+        success: true,
+
+        order: updated,
+
+        orders: getOrders(),
+
+        inventory:
+          getInventory(),
+      });
+    }
+
     const timestampField =
-      getStatusTimestamp(nextStatus);
+      getStatusTimestamp(
+        nextStatus
+      );
 
-    const timestampUpdate = timestampField
-      ? { [timestampField]: now }
-      : {};
+    const timestampUpdate =
+      timestampField
+        ? {
+            [timestampField]:
+              now,
+          }
+        : {};
 
-    const updated = updateOrder(orderId, {
-      status: nextStatus,
-      updatedAt: now,
-      ...timestampUpdate,
-      events: [
-        ...order.events,
-        createEvent(
-          eventType,
-          actor,
-          `Order moved to ${nextStatus}`
-        ),
-      ],
-    });
+    const updated =
+      updateOrder(
+        orderId,
+        {
+          status:
+            nextStatus,
+
+          updatedAt:
+            now,
+
+          ...timestampUpdate,
+
+          events: [
+            ...order.events,
+
+            createEvent(
+              eventType,
+              actor,
+              `Order moved to ${nextStatus}`
+            ),
+          ],
+        }
+      );
 
     return NextResponse.json({
       success: true,
+
       order: updated,
+
       orders: getOrders(),
-      inventory: getInventory(),
+
+      inventory:
+        getInventory(),
     });
   } catch (error) {
     const message =
@@ -837,6 +1243,9 @@ export async function PATCH(request: Request) {
         ? error.message
         : "Failed to update order";
 
-    return jsonError(message, 500);
+    return jsonError(
+      message,
+      500
+    );
   }
 }
