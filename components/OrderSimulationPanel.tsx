@@ -11,7 +11,7 @@ import {
 } from "@/lib/db";
 
 interface OrderSimulationPanelProps {
-  onInject: (newOrder: Order) => void;
+  onInject?: (newOrder: Order) => void;
 }
 
 const CHANNELS: OrderChannel[] = [
@@ -37,6 +37,12 @@ export default function OrderSimulationPanel({
 
   const [quantity, setQuantity] = useState(1);
   const [customNotes, setCustomNotes] = useState("");
+
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [message, setMessage] = useState("");
+  const [messageType, setMessageType] = useState<
+    "success" | "warning" | "error" | ""
+  >("");
 
   const kitchen = KITCHENS_DB[0];
 
@@ -68,15 +74,32 @@ export default function OrderSimulationPanel({
     }
   };
 
-  const handleSubmit = () => {
-    if (!selectedMenuItem || quantity < 1) {
+  const handleSubmit = async () => {
+    if (!selectedMenuItem || quantity < 1 || isSubmitting) {
       return;
     }
 
+    setIsSubmitting(true);
+    setMessage("");
+    setMessageType("");
+
     const now = new Date().toISOString();
 
+    const orderId = `ORD-${Date.now()}-${Math.floor(
+      Math.random() * 10000,
+    )}`;
+
+    const itemId = `item-${Date.now()}-${Math.floor(
+      Math.random() * 10000,
+    )}`;
+
+    const eventId = `evt-${Date.now()}-${Math.floor(
+      Math.random() * 10000,
+    )}`;
+
     const newOrder: Order = {
-      id: `ORD-${Date.now()}`,
+      id: orderId,
+
       brandId: selectedBrand,
       kitchenId: kitchen.id,
 
@@ -87,7 +110,7 @@ export default function OrderSimulationPanel({
 
       items: [
         {
-          id: `item-${Date.now()}`,
+          id: itemId,
           menuItemId: selectedMenuItem.id,
           name: selectedMenuItem.name,
           quantity,
@@ -102,8 +125,8 @@ export default function OrderSimulationPanel({
 
       events: [
         {
-          id: `evt-${Date.now()}`,
-          orderId: `ORD-${Date.now()}`,
+          id: eventId,
+          orderId,
           type: "RECEIVED",
           timestamp: now,
           source: "MANUAL",
@@ -115,10 +138,61 @@ export default function OrderSimulationPanel({
       ],
     };
 
-    onInject(newOrder);
+    try {
+      const response = await fetch("/api/orders", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(newOrder),
+      });
 
-    setQuantity(1);
-    setCustomNotes("");
+      const data = await response.json();
+
+      if (!response.ok) {
+        const unavailable =
+          Array.isArray(data.inventoryUnavailable) &&
+          data.inventoryUnavailable.length > 0;
+
+        setMessage(
+          unavailable
+            ? `Order not accepted: insufficient inventory for ${data.inventoryUnavailable.join(", ")}`
+            : data.error || "Failed to inject test order.",
+        );
+
+        setMessageType(
+          unavailable ? "warning" : "error",
+        );
+
+        return;
+      }
+
+      const storedOrder = data.order as Order;
+
+      onInject?.(storedOrder);
+
+      if (data.inventoryDecision === "LOW_STOCK") {
+        setMessage(
+          `Order accepted with low-stock warning.`,
+        );
+        setMessageType("warning");
+      } else {
+        setMessage(
+          `Order ${storedOrder.id} accepted successfully.`,
+        );
+        setMessageType("success");
+      }
+
+      setQuantity(1);
+      setCustomNotes("");
+    } catch {
+      setMessage(
+        "Unable to reach the Orders API.",
+      );
+      setMessageType("error");
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -150,7 +224,9 @@ export default function OrderSimulationPanel({
           <select
             value={selectedBrand}
             onChange={(event) =>
-              handleBrandChange(event.target.value as DbaBrand)
+              handleBrandChange(
+                event.target.value as DbaBrand,
+              )
             }
             className="w-full rounded-lg border border-neutral-700 bg-neutral-900 px-3 py-3 text-sm outline-none"
           >
@@ -218,7 +294,10 @@ export default function OrderSimulationPanel({
               setQuantity(
                 Math.max(
                   1,
-                  Number.parseInt(event.target.value || "1", 10),
+                  Number.parseInt(
+                    event.target.value || "1",
+                    10,
+                  ),
                 ),
               )
             }
@@ -255,13 +334,29 @@ export default function OrderSimulationPanel({
         </label>
       </div>
 
+      {message && (
+        <div
+          className={`mt-4 rounded-lg border px-3 py-3 text-xs ${
+            messageType === "success"
+              ? "border-emerald-800 bg-emerald-950/30 text-emerald-300"
+              : messageType === "warning"
+                ? "border-amber-800 bg-amber-950/30 text-amber-300"
+                : "border-red-800 bg-red-950/30 text-red-300"
+          }`}
+        >
+          {message}
+        </div>
+      )}
+
       <button
         type="button"
         onClick={handleSubmit}
-        disabled={!selectedMenuItem}
+        disabled={!selectedMenuItem || isSubmitting}
         className="mt-5 w-full rounded-lg bg-neutral-100 px-4 py-3 text-sm font-semibold text-neutral-950 transition hover:bg-white disabled:cursor-not-allowed disabled:opacity-50"
       >
-        Inject Test Order
+        {isSubmitting
+          ? "Submitting Test Order..."
+          : "Inject Test Order"}
       </button>
     </section>
   );
