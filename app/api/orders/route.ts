@@ -1,14 +1,17 @@
 import { NextResponse } from "next/server";
-import type {
-  Order,
-  OrderEvent,
-  OrderEventType,
-  OrderStatus,
-} from "@/lib/db";
+
 import {
+  type DbaBrand,
+  type Order,
+  type OrderChannel,
+  type OrderEvent,
+  type OrderEventType,
+  type OrderSource,
+  type OrderStatus,
   evaluateOrderInventory,
   processOrderDepletion,
 } from "@/lib/db";
+
 import {
   addOrder,
   findOrder,
@@ -18,31 +21,63 @@ import {
   updateOrder,
 } from "@/lib/store";
 
-export const dynamic = "force-dynamic";
+const VALID_TRANSITIONS: Record<
+  OrderStatus,
+  OrderStatus[]
+> = {
+  PENDING: [
+    "PREPARING",
+    "CANCELLED",
+  ],
 
-const VALID_TRANSITIONS: Record<OrderStatus, OrderStatus[]> = {
-  PENDING: ["PREPARING", "CANCELLED"],
-  PREPARING: ["READY_FOR_PICKUP", "CANCELLED"],
-  READY_FOR_PICKUP: ["DISPATCHED", "CANCELLED"],
+  PREPARING: [
+    "READY_FOR_PICKUP",
+    "CANCELLED",
+  ],
+
+  READY_FOR_PICKUP: [
+    "DRIVER_ASSIGNED",
+    "CANCELLED",
+  ],
+
+  DRIVER_ASSIGNED: [
+    "PICKED_UP",
+    "CANCELLED",
+  ],
+
+  PICKED_UP: [
+    "DISPATCHED",
+    "CANCELLED",
+  ],
+
   DISPATCHED: [],
+
   CANCELLED: [],
 };
 
+const ACTIONS = [
+  "DRIVER_ASSIGNED",
+  "PICKED_UP",
+] as const;
+
+type OrderAction =
+  (typeof ACTIONS)[number];
+
 function createId(prefix: string): string {
-  return `${prefix}-${Date.now()}-${Math.floor(
-    Math.random() * 10000,
-  )}`;
+  return `${prefix}-${Date.now()}-${Math.random()
+    .toString(36)
+    .slice(2, 8)}`;
 }
 
 function createEvent(
   orderId: string,
   type: OrderEventType,
-  source: Order["source"],
-  actor = "SYSTEM",
+  source: OrderSource,
+  actor: string,
   metadata?: Record<string, unknown>,
 ): OrderEvent {
   return {
-    id: createId("evt"),
+    id: createId("EVT"),
     orderId,
     type,
     timestamp: new Date().toISOString(),
@@ -52,69 +87,149 @@ function createEvent(
   };
 }
 
-function appendOrderEvent(
-  order: Order,
-  event: OrderEvent,
-): void {
-  order.events = [...(order.events ?? []), event];
+function isValidBrand(
+  value: unknown,
+): value is DbaBrand {
+  return [
+    "BurgerForge",
+    "TacoMatrix",
+    "WingProtocol",
+    "GreenBowl",
+  ].includes(value as DbaBrand);
+}
+
+function isValidChannel(
+  value: unknown,
+): value is OrderChannel {
+  return [
+    "Swiggy",
+    "Zomato",
+    "DoorDash",
+    "UberEats",
+    "GrubHub",
+    "Direct Web",
+  ].includes(value as OrderChannel);
+}
+
+function isValidSource(
+  value: unknown,
+): value is OrderSource {
+  return [
+    "MANUAL",
+    "SWIGGY",
+    "ZOMATO",
+    "DOORDASH",
+    "UBEREATS",
+    "GRUBHUB",
+    "DIRECT_WEB",
+  ].includes(value as OrderSource);
+}
+
+function isValidStatus(
+  value: unknown,
+): value is OrderStatus {
+  return [
+    "PENDING",
+    "PREPARING",
+    "READY_FOR_PICKUP",
+    "DRIVER_ASSIGNED",
+    "PICKED_UP",
+    "DISPATCHED",
+    "CANCELLED",
+  ].includes(value as OrderStatus);
 }
 
 export async function GET() {
   return NextResponse.json({
-    success: true,
     orders: getOrders(),
     inventory: getInventory(),
   });
 }
 
-export async function POST(request: Request) {
+export async function POST(
+  request: Request,
+) {
   try {
     const body = await request.json();
 
-    if (!body || typeof body !== "object") {
+    if (
+      !body ||
+      !Array.isArray(body.items) ||
+      body.items.length === 0
+    ) {
       return NextResponse.json(
         {
-          success: false,
-          error: "Invalid order payload",
+          error:
+            "Order must contain at least one item.",
         },
         { status: 400 },
       );
     }
 
-    if (!Array.isArray(body.items) || body.items.length === 0) {
+    const brandId =
+      body.brandId ?? "BurgerForge";
+
+    const channel =
+      body.channel ?? "Direct Web";
+
+    const source =
+      body.source ?? "MANUAL";
+
+    if (!isValidBrand(brandId)) {
       return NextResponse.json(
         {
-          success: false,
-          error: "An order must contain at least one item",
+          error: `Invalid brand: ${String(
+            brandId,
+          )}`,
         },
         { status: 400 },
       );
     }
 
-    const brandId = String(body.brandId || "BurgerForge");
-    const kitchenId = String(body.kitchenId || "K1");
-    const channel = String(body.channel || "Direct Web");
-    const source = body.source || "MANUAL";
+    if (!isValidChannel(channel)) {
+      return NextResponse.json(
+        {
+          error: `Invalid channel: ${String(
+            channel,
+          )}`,
+        },
+        { status: 400 },
+      );
+    }
 
-    const now = new Date().toISOString();
-    const orderId = body.id
-      ? String(body.id)
-      : createId("ORD");
+    if (!isValidSource(source)) {
+      return NextResponse.json(
+        {
+          error: `Invalid source: ${String(
+            source,
+          )}`,
+        },
+        { status: 400 },
+      );
+    }
 
-    const receivedAt = body.receivedAt
-      ? String(body.receivedAt)
-      : now;
+    const now =
+      new Date().toISOString();
+
+    const orderId =
+      body.id || createId("ORD");
+
+    const receivedAt =
+      body.receivedAt || now;
 
     const newOrder: Order = {
       id: orderId,
-      externalOrderId: body.externalOrderId
-        ? String(body.externalOrderId)
-        : undefined,
+
+      externalOrderId:
+        body.externalOrderId,
 
       brandId,
-      kitchenId,
+
+      kitchenId:
+        body.kitchenId || "K1",
 
       channel,
+
       source,
 
       status: "PENDING",
@@ -122,57 +237,56 @@ export async function POST(request: Request) {
       items: body.items,
 
       customerName:
-        body.customerName !== undefined
-          ? String(body.customerName)
-          : undefined,
+        body.customerName,
 
       driverName:
-        body.driverName !== undefined
-          ? String(body.driverName)
-          : undefined,
+        body.driverName,
 
       courierEtaMins:
-        body.courierEtaMins !== undefined
-          ? Number(body.courierEtaMins)
-          : undefined,
+        body.courierEtaMins,
 
-      createdAt: now,
+      createdAt:
+        body.createdAt || now,
+
       updatedAt: now,
 
       receivedAt,
 
-      acceptedAt: undefined,
-      prepStartedAt: undefined,
-      prepCompletedAt: undefined,
-      readyAt: undefined,
-      driverAssignedAt: undefined,
-      pickedUpAt: undefined,
-      dispatchedAt: undefined,
+      inventoryDecision:
+        undefined,
 
-      cancellationSource: undefined,
-      cancellationReason: undefined,
-      cancelledBy: undefined,
-
-      inventoryDecision: undefined,
       inventoryWarnings: [],
+
       inventoryUnavailable: [],
 
       events: [],
     };
 
-    /*
-     * STEP 1
-     * Evaluate inventory before modifying stock.
-     *
-     * This distinguishes:
-     * AVAILABLE
-     * LOW_STOCK
-     * INSUFFICIENT_STOCK
-     */
-    const inventoryEvaluation = evaluateOrderInventory(
-      newOrder,
-      getInventory(),
+    const receivedEvent =
+      createEvent(
+        newOrder.id,
+        "RECEIVED",
+        source,
+        body.actor || "SYSTEM",
+        {
+          channel,
+          externalOrderId:
+            body.externalOrderId,
+        },
+      );
+
+    newOrder.events.push(
+      receivedEvent,
     );
+
+    const inventory =
+      getInventory();
+
+    const inventoryEvaluation =
+      evaluateOrderInventory(
+        newOrder,
+        inventory,
+      );
 
     newOrder.inventoryDecision =
       inventoryEvaluation.inventoryDecision;
@@ -183,62 +297,32 @@ export async function POST(request: Request) {
     newOrder.inventoryUnavailable =
       inventoryEvaluation.insufficientStockItems;
 
-    /*
-     * STEP 2
-     * Record that the system received the order.
-     */
-    appendOrderEvent(
-      newOrder,
+    newOrder.events.push(
       createEvent(
-        orderId,
-        "RECEIVED",
-        source,
-        "SYSTEM",
-        {
-          channel,
-          kitchenId,
-          brandId,
-          externalOrderId:
-            newOrder.externalOrderId,
-        },
-      ),
-    );
-
-    /*
-     * STEP 3
-     * Record inventory evaluation.
-     */
-    appendOrderEvent(
-      newOrder,
-      createEvent(
-        orderId,
+        newOrder.id,
         "INVENTORY_CHECKED",
-        "MANUAL",
+        source,
         "SYSTEM",
         {
           decision:
             inventoryEvaluation.inventoryDecision,
+
           lowStockItems:
             inventoryEvaluation.lowStockItems,
+
           insufficientStockItems:
             inventoryEvaluation.insufficientStockItems,
         },
       ),
     );
 
-    /*
-     * INSUFFICIENT_STOCK means the order cannot currently
-     * be fulfilled. Do not deplete inventory and do not
-     * pretend the order was successfully accepted.
-     */
     if (
       inventoryEvaluation.inventoryDecision ===
       "INSUFFICIENT_STOCK"
     ) {
-      appendOrderEvent(
-        newOrder,
+      newOrder.events.push(
         createEvent(
-          orderId,
+          newOrder.id,
           "INVENTORY_UNAVAILABLE",
           source,
           "SYSTEM",
@@ -249,37 +333,27 @@ export async function POST(request: Request) {
         ),
       );
 
-      newOrder.updatedAt = new Date().toISOString();
-
       return NextResponse.json(
         {
-          success: false,
           error:
-            "Order cannot be fulfilled because required inventory is insufficient",
+            "Order cannot be accepted because required inventory is insufficient.",
           order: newOrder,
           inventoryDecision:
             inventoryEvaluation.inventoryDecision,
-          inventoryWarnings:
-            inventoryEvaluation.lowStockItems,
-          inventoryUnavailable:
+          insufficientStockItems:
             inventoryEvaluation.insufficientStockItems,
-          currentInventory: getInventory(),
         },
         { status: 409 },
       );
     }
 
-    /*
-     * LOW_STOCK is a warning, not a rejection.
-     */
     if (
       inventoryEvaluation.inventoryDecision ===
       "LOW_STOCK"
     ) {
-      appendOrderEvent(
-        newOrder,
+      newOrder.events.push(
         createEvent(
-          orderId,
+          newOrder.id,
           "INVENTORY_WARNING",
           source,
           "SYSTEM",
@@ -291,238 +365,443 @@ export async function POST(request: Request) {
       );
     }
 
-    /*
-     * STEP 4
-     * Deplete inventory only after the order has passed
-     * the sufficiency check.
-     */
-    const depletion = processOrderDepletion(
-      newOrder,
-      getInventory(),
+    const depletion =
+      processOrderDepletion(
+        newOrder,
+        inventory,
+      );
+
+    replaceInventory(
+      depletion.updatedInventory,
     );
 
-    replaceInventory(depletion.updatedInventory);
+    newOrder.acceptedAt = now;
 
-    /*
-     * STEP 5
-     * The order is accepted into the internal OS.
-     */
-    newOrder.acceptedAt = new Date().toISOString();
-
-    appendOrderEvent(
-      newOrder,
+    newOrder.events.push(
       createEvent(
-        orderId,
+        newOrder.id,
         "ACCEPTED",
         source,
-        "SYSTEM",
+        body.actor || "SYSTEM",
         {
           inventoryDecision:
-            inventoryEvaluation.inventoryDecision,
+            depletion.inventoryDecision,
         },
       ),
     );
 
-    newOrder.updatedAt = new Date().toISOString();
-
     addOrder(newOrder);
-
-    return NextResponse.json({
-      success: true,
-      order: newOrder,
-      inventoryDecision:
-        inventoryEvaluation.inventoryDecision,
-      depletedItems: depletion.depletedItems,
-      lowStockAlerts: depletion.lowStockAlerts,
-      inventoryWarnings:
-        inventoryEvaluation.lowStockItems,
-      inventoryUnavailable:
-        inventoryEvaluation.insufficientStockItems,
-      currentInventory: getInventory(),
-    });
-  } catch (error) {
-    const message =
-      error instanceof Error
-        ? error.message
-        : "Failed to process order";
 
     return NextResponse.json(
       {
-        success: false,
-        error: message,
+        order: newOrder,
+        orders: getOrders(),
+        inventory:
+          getInventory(),
+        inventoryDecision:
+          depletion.inventoryDecision,
+        lowStockItems:
+          depletion.lowStockAlerts,
+      },
+      { status: 201 },
+    );
+  } catch (error) {
+    console.error(
+      "POST /api/orders failed:",
+      error,
+    );
+
+    return NextResponse.json(
+      {
+        error:
+          "Unable to create order.",
       },
       { status: 500 },
     );
   }
 }
 
-export async function PATCH(request: Request) {
+export async function PATCH(
+  request: Request,
+) {
   try {
     const body = await request.json();
 
-    const orderId = String(body.orderId || "");
-    const requestedStatus =
-      body.status as OrderStatus | undefined;
+    const orderId =
+      body?.orderId;
 
-    if (!orderId || !requestedStatus) {
+    if (!orderId) {
       return NextResponse.json(
         {
-          success: false,
           error:
-            "orderId and status are required",
+            "orderId is required.",
         },
         { status: 400 },
       );
     }
 
-    const order = findOrder(orderId);
+    const order =
+      findOrder(orderId);
 
     if (!order) {
       return NextResponse.json(
         {
-          success: false,
-          error: "Order not found",
+          error:
+            "Order not found.",
         },
         { status: 404 },
       );
     }
 
-    const allowedTransitions =
-      VALID_TRANSITIONS[order.status];
+    const actor =
+      body.actor ||
+      "SYSTEM";
 
-    if (!allowedTransitions.includes(requestedStatus)) {
+    const source: OrderSource =
+      body.source &&
+      isValidSource(body.source)
+        ? body.source
+        : order.source;
+
+    /*
+     * ACTION: DRIVER_ASSIGNED
+     *
+     * The order remains operationally
+     * associated with the READY_FOR_PICKUP
+     * stage until the driver actually picks it up.
+     */
+    if (
+      body.action ===
+      "DRIVER_ASSIGNED"
+    ) {
+      if (
+        order.status !==
+        "READY_FOR_PICKUP"
+      ) {
+        return NextResponse.json(
+          {
+            error:
+              "A driver can only be assigned after the order is ready for pickup.",
+          },
+          { status: 409 },
+        );
+      }
+
+      if (order.driverAssignedAt) {
+        return NextResponse.json(
+          {
+            error:
+              "A driver is already assigned to this order.",
+          },
+          { status: 409 },
+        );
+      }
+
+      const driverName =
+        String(
+          body.driverName ||
+            "",
+        ).trim();
+
+      if (!driverName) {
+        return NextResponse.json(
+          {
+            error:
+              "driverName is required when assigning a driver.",
+          },
+          { status: 400 },
+        );
+      }
+
+      const timestamp =
+        new Date().toISOString();
+
+      const updatedOrder =
+        updateOrder(
+          orderId,
+          {
+            status:
+              "DRIVER_ASSIGNED",
+
+            driverName,
+
+            driverAssignedAt:
+              timestamp,
+
+            events: [
+              ...order.events,
+
+              createEvent(
+                order.id,
+                "DRIVER_ASSIGNED",
+                source,
+                actor,
+                {
+                  driverName,
+                },
+              ),
+            ],
+          },
+        );
+
+      return NextResponse.json({
+        order: updatedOrder,
+        orders: getOrders(),
+      });
+    }
+
+    /*
+     * ACTION: PICKED_UP
+     */
+    if (
+      body.action ===
+      "PICKED_UP"
+    ) {
+      if (
+        order.status !==
+        "DRIVER_ASSIGNED"
+      ) {
+        return NextResponse.json(
+          {
+            error:
+              "An order can only be picked up after a driver has been assigned.",
+          },
+          { status: 409 },
+        );
+      }
+
+      if (!order.driverAssignedAt) {
+        return NextResponse.json(
+          {
+            error:
+              "Driver assignment timestamp is missing.",
+          },
+          { status: 409 },
+        );
+      }
+
+      if (order.pickedUpAt) {
+        return NextResponse.json(
+          {
+            error:
+              "This order has already been picked up.",
+          },
+          { status: 409 },
+        );
+      }
+
+      const timestamp =
+        new Date().toISOString();
+
+      const updatedOrder =
+        updateOrder(
+          orderId,
+          {
+            status:
+              "PICKED_UP",
+
+            pickedUpAt:
+              timestamp,
+
+            events: [
+              ...order.events,
+
+              createEvent(
+                order.id,
+                "PICKED_UP",
+                source,
+                actor,
+              ),
+            ],
+          },
+        );
+
+      return NextResponse.json({
+        order: updatedOrder,
+        orders: getOrders(),
+      });
+    }
+
+    /*
+     * STATUS CHANGE
+     */
+    const requestedStatus =
+      body.status;
+
+    if (
+      !isValidStatus(
+        requestedStatus,
+      )
+    ) {
       return NextResponse.json(
         {
-          success: false,
           error:
-            `Invalid order transition: ` +
-            `${order.status} → ${requestedStatus}`,
+            "A valid status or supported action is required.",
+        },
+        { status: 400 },
+      );
+    }
+
+    const allowedTransitions =
+      VALID_TRANSITIONS[
+        order.status
+      ];
+
+    if (
+      !allowedTransitions.includes(
+        requestedStatus,
+      )
+    ) {
+      return NextResponse.json(
+        {
+          error:
+            `Invalid order transition: ${order.status} → ${requestedStatus}`,
         },
         { status: 409 },
       );
     }
 
-    const now = new Date().toISOString();
+    const timestamp =
+      new Date().toISOString();
 
-    const updates: Partial<Order> = {
-      status: requestedStatus,
-      updatedAt: now,
-    };
+    const updates: Partial<Order> =
+      {
+        status:
+          requestedStatus,
+      };
 
-    let eventType: OrderEventType;
-    let eventActor = "SYSTEM";
+    let eventType:
+      OrderEventType =
+      requestedStatus;
 
-    switch (requestedStatus) {
-      case "PREPARING":
-        updates.prepStartedAt =
-          order.prepStartedAt || now;
-        eventType = "PREPARING";
-        eventActor = body.actor
-          ? String(body.actor)
-          : "COOK";
-        break;
+    if (
+      requestedStatus ===
+      "PREPARING"
+    ) {
+      updates.prepStartedAt =
+        timestamp;
 
-      case "READY_FOR_PICKUP":
-        updates.prepCompletedAt = now;
-        updates.readyAt = now;
-        eventType = "READY_FOR_PICKUP";
-        eventActor = body.actor
-          ? String(body.actor)
-          : "COOK";
-        break;
+      eventType =
+        "PREPARING";
+    }
 
-      case "DISPATCHED":
-        updates.dispatchedAt = now;
+    if (
+      requestedStatus ===
+      "READY_FOR_PICKUP"
+    ) {
+      updates.prepCompletedAt =
+        timestamp;
 
-        if (body.driverName !== undefined) {
-          updates.driverName = String(
+      updates.readyAt =
+        timestamp;
+
+      eventType =
+        "READY_FOR_PICKUP";
+    }
+
+    if (
+      requestedStatus ===
+      "DISPATCHED"
+    ) {
+      updates.dispatchedAt =
+        timestamp;
+
+      eventType =
+        "DISPATCHED";
+
+      if (
+        body.driverName
+      ) {
+        updates.driverName =
+          String(
             body.driverName,
-          );
-        }
-
-        eventType = "DISPATCHED";
-        eventActor = body.actor
-          ? String(body.actor)
-          : "DISPATCH";
-        break;
-
-      case "CANCELLED":
-        updates.cancellationSource =
-          body.cancellationSource
-            ? String(body.cancellationSource)
-            : "MANUAL";
-
-        updates.cancellationReason =
-          body.cancellationReason
-            ? String(body.cancellationReason)
-            : "Order cancelled";
-
-        updates.cancelledBy =
-          body.cancelledBy
-            ? String(body.cancelledBy)
-            : "SYSTEM";
-
-        eventType = "CANCELLED";
-        eventActor =
-          String(updates.cancelledBy);
-        break;
-
-      default:
-        return NextResponse.json(
-          {
-            success: false,
-            error: "Unsupported order transition",
-          },
-          { status: 400 },
-        );
+          ).trim();
+      }
     }
 
-    const updatedOrder = updateOrder(
-      orderId,
-      updates,
-    );
+    if (
+      requestedStatus ===
+      "CANCELLED"
+    ) {
+      const cancellationSource =
+        body.cancellationSource;
 
-    if (!updatedOrder) {
-      return NextResponse.json(
-        {
-          success: false,
-          error: "Failed to update order",
-        },
-        { status: 500 },
-      );
+      const validCancellationSources =
+        [
+          "CUSTOMER",
+          "KITCHEN",
+          "AGGREGATOR",
+          "SYSTEM",
+          "MANUAL",
+        ];
+
+      updates.cancellationSource =
+        validCancellationSources.includes(
+          cancellationSource,
+        )
+          ? cancellationSource
+          : "MANUAL";
+
+      updates.cancellationReason =
+        String(
+          body.cancellationReason ||
+            "No reason provided",
+        ).trim();
+
+      updates.cancelledBy =
+        String(
+          body.cancelledBy ||
+            actor,
+        ).trim();
+
+      eventType =
+        "CANCELLED";
     }
 
-    appendOrderEvent(
-      updatedOrder,
+    updates.events = [
+      ...order.events,
+
       createEvent(
-        orderId,
+        order.id,
         eventType,
-        updatedOrder.source,
-        eventActor,
-        {
-          previousStatus: order.status,
-          newStatus: requestedStatus,
-        },
-      ),
-    );
+        source,
+        actor,
+        requestedStatus ===
+          "CANCELLED"
+          ? {
+              cancellationSource:
+                updates.cancellationSource,
 
-    updatedOrder.updatedAt = now;
+              cancellationReason:
+                updates.cancellationReason,
+
+              cancelledBy:
+                updates.cancelledBy,
+            }
+          : undefined,
+      ),
+    ];
+
+    const updatedOrder =
+      updateOrder(
+        orderId,
+        updates,
+      );
 
     return NextResponse.json({
-      success: true,
       order: updatedOrder,
       orders: getOrders(),
     });
   } catch (error) {
-    const message =
-      error instanceof Error
-        ? error.message
-        : "Failed to update order";
+    console.error(
+      "PATCH /api/orders failed:",
+      error,
+    );
 
     return NextResponse.json(
       {
-        success: false,
-        error: message,
+        error:
+          "Unable to update order.",
       },
       { status: 500 },
     );
