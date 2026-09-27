@@ -1,156 +1,268 @@
-
-
 "use client";
 
-import React, { useState } from 'react';
+import React, { useMemo, useState } from "react";
 import {
   BRANDS_DB,
+  KITCHENS_DB,
   MENU_CATALOG,
-  DbaBrand,
-  OrderChannel,
-  Order,
-} from '@/lib/db';
+  type DbaBrand,
+  type Order,
+  type OrderChannel,
+} from "@/lib/db";
 
 interface OrderSimulationPanelProps {
   onInject: (newOrder: Order) => void;
 }
 
-export default function OrderSimulationPanel({ onInject }: OrderSimulationPanelProps) {
-  const [selectedBrand, setSelectedBrand] = useState<DbaBrand>('BurgerForge');
-  const [selectedChannel, setSelectedChannel] = useState<OrderChannel>('DoorDash');
-  const [selectedMenuItemId, setSelectedMenuItemId] = useState<string>('MENU-BF-01');
-  const [quantity, setQuantity] = useState<number>(1);
-  const [customNotes, setCustomNotes] = useState<string>('');
+const CHANNELS: OrderChannel[] = [
+  "Swiggy",
+  "Zomato",
+  "DoorDash",
+  "UberEats",
+  "GrubHub",
+  "Direct Web",
+];
 
-  const brandMenuItems = MENU_CATALOG.filter((item) => item.brandId === selectedBrand);
+export default function OrderSimulationPanel({
+  onInject,
+}: OrderSimulationPanelProps) {
+  const [selectedBrand, setSelectedBrand] =
+    useState<DbaBrand>("BurgerForge");
+
+  const [selectedChannel, setSelectedChannel] =
+    useState<OrderChannel>("Swiggy");
+
+  const [selectedMenuItemId, setSelectedMenuItemId] =
+    useState("MENU-BF-01");
+
+  const [quantity, setQuantity] = useState(1);
+  const [customNotes, setCustomNotes] = useState("");
+
+  const kitchen = KITCHENS_DB[0];
+
+  const availableMenuItems = useMemo(
+    () =>
+      MENU_CATALOG.filter(
+        (item) => item.brandId === selectedBrand,
+      ),
+    [selectedBrand],
+  );
+
+  const selectedMenuItem = useMemo(
+    () =>
+      MENU_CATALOG.find(
+        (item) => item.id === selectedMenuItemId,
+      ),
+    [selectedMenuItemId],
+  );
 
   const handleBrandChange = (brand: DbaBrand) => {
     setSelectedBrand(brand);
-    const firstItem = MENU_CATALOG.find((item) => item.brandId === brand);
+
+    const firstItem = MENU_CATALOG.find(
+      (item) => item.brandId === brand,
+    );
+
     if (firstItem) {
       setSelectedMenuItemId(firstItem.id);
     }
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    const menuItem = MENU_CATALOG.find((m) => m.id === selectedMenuItemId);
-    if (!menuItem) return;
+  const handleSubmit = () => {
+    if (!selectedMenuItem || quantity < 1) {
+      return;
+    }
+
+    const now = new Date().toISOString();
 
     const newOrder: Order = {
-      id: `ORD-${Math.floor(1000 + Math.random() * 9000)}`,
+      id: `ORD-${Date.now()}`,
       brandId: selectedBrand,
+      kitchenId: kitchen.id,
+
       channel: selectedChannel,
-      status: 'PENDING',
+      source: "MANUAL",
+
+      status: "PENDING",
+
       items: [
         {
           id: `item-${Date.now()}`,
-          menuItemId: menuItem.id,
-          name: menuItem.name,
-          quantity: quantity,
-          notes: customNotes || undefined,
-          station: menuItem.station,
+          menuItemId: selectedMenuItem.id,
+          name: selectedMenuItem.name,
+          quantity,
+          notes: customNotes.trim() || undefined,
+          station: selectedMenuItem.station,
         },
       ],
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
+
+      createdAt: now,
+      updatedAt: now,
+      receivedAt: now,
+
+      events: [
+        {
+          id: `evt-${Date.now()}`,
+          orderId: `ORD-${Date.now()}`,
+          type: "RECEIVED",
+          timestamp: now,
+          source: "MANUAL",
+          actor: "SYSTEM",
+          metadata: {
+            testOrder: true,
+          },
+        },
+      ],
     };
 
     onInject(newOrder);
-    setCustomNotes('');
+
+    setQuantity(1);
+    setCustomNotes("");
   };
 
   return (
-    <div className="bg-gray-900 border border-sky-500/30 rounded-xl p-5 text-white font-sans">
-      <div className="flex justify-between items-center mb-4">
-        <div className="flex items-center gap-2">
-          <span className="w-2.5 h-2.5 rounded-full bg-sky-400 animate-pulse" />
-          <h2 className="text-sm font-mono font-bold uppercase tracking-wider text-sky-400">
-            ⚡ Mock Order Injector & Real-Time Depletion Engine
-          </h2>
+    <section className="rounded-xl border border-neutral-800 bg-neutral-950 p-5 text-neutral-100">
+      <div className="mb-5">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h2 className="text-sm font-semibold uppercase tracking-wider">
+              Manual Order Simulator
+            </h2>
+
+            <p className="mt-1 text-xs text-neutral-500">
+              Development test source · Kitchen {kitchen.code}
+            </p>
+          </div>
+
+          <span className="rounded-full border border-cyan-800/60 bg-cyan-950/30 px-3 py-1 text-[10px] font-mono uppercase text-cyan-300">
+            Manual Test Source
+          </span>
         </div>
-        <span className="text-[10px] font-mono bg-sky-500/10 text-sky-400 border border-sky-500/20 px-2 py-0.5 rounded">
-          POS Simulation
-        </span>
       </div>
 
-      <form onSubmit={handleSubmit} className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div>
-          <label className="block text-xs font-mono text-gray-400 mb-1 uppercase">1. Select Brand DBA</label>
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+        <label className="block">
+          <span className="mb-1 block text-xs text-neutral-400">
+            Brand
+          </span>
+
           <select
             value={selectedBrand}
-            onChange={(e) => handleBrandChange(e.target.value as DbaBrand)}
-            className="w-full bg-gray-950 border border-gray-800 rounded-lg p-2.5 text-xs font-mono text-white outline-none focus:border-sky-500"
+            onChange={(event) =>
+              handleBrandChange(event.target.value as DbaBrand)
+            }
+            className="w-full rounded-lg border border-neutral-700 bg-neutral-900 px-3 py-3 text-sm outline-none"
           >
-            {Object.values(BRANDS_DB).map((b) => (
-              <option key={b.id} value={b.id}>
-                {b.name} ({b.code})
+            {BRANDS_DB.map((brand) => (
+              <option key={brand.id} value={brand.id}>
+                {brand.name}
               </option>
             ))}
           </select>
-        </div>
+        </label>
 
-        <div>
-          <label className="block text-xs font-mono text-gray-400 mb-1 uppercase">2. Order Channel</label>
+        <label className="block">
+          <span className="mb-1 block text-xs text-neutral-400">
+            Order Source
+          </span>
+
           <select
             value={selectedChannel}
-            onChange={(e) => setSelectedChannel(e.target.value as OrderChannel)}
-            className="w-full bg-gray-950 border border-gray-800 rounded-lg p-2.5 text-xs font-mono text-white outline-none focus:border-sky-500"
+            onChange={(event) =>
+              setSelectedChannel(
+                event.target.value as OrderChannel,
+              )
+            }
+            className="w-full rounded-lg border border-neutral-700 bg-neutral-900 px-3 py-3 text-sm outline-none"
           >
-            <option value="DoorDash">DoorDash</option>
-            <option value="UberEats">UberEats</option>
-            <option value="GrubHub">GrubHub</option>
-            <option value="Direct Web">Direct Web</option>
-          </select>
-        </div>
-
-        <div>
-          <label className="block text-xs font-mono text-gray-400 mb-1 uppercase">3. Menu Item</label>
-          <select
-            value={selectedMenuItemId}
-            onChange={(e) => setSelectedMenuItemId(e.target.value)}
-            className="w-full bg-gray-950 border border-gray-800 rounded-lg p-2.5 text-xs font-mono text-white outline-none focus:border-sky-500"
-          >
-            {brandMenuItems.map((m) => (
-              <option key={m.id} value={m.id}>
-                {m.name} (\${m.price.toFixed(2)}) - [{m.station}]
+            {CHANNELS.map((channel) => (
+              <option key={channel} value={channel}>
+                {channel}
               </option>
             ))}
           </select>
-        </div>
+        </label>
 
-        <div>
-          <label className="block text-xs font-mono text-gray-400 mb-1 uppercase">Quantity</label>
+        <label className="block md:col-span-2">
+          <span className="mb-1 block text-xs text-neutral-400">
+            Menu Item
+          </span>
+
+          <select
+            value={selectedMenuItemId}
+            onChange={(event) =>
+              setSelectedMenuItemId(event.target.value)
+            }
+            className="w-full rounded-lg border border-neutral-700 bg-neutral-900 px-3 py-3 text-sm outline-none"
+          >
+            {availableMenuItems.map((item) => (
+              <option key={item.id} value={item.id}>
+                {item.name} · ${item.price.toFixed(2)} ·{" "}
+                {item.station}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        <label className="block">
+          <span className="mb-1 block text-xs text-neutral-400">
+            Quantity
+          </span>
+
           <input
             type="number"
             min={1}
-            max={10}
             value={quantity}
-            onChange={(e) => setQuantity(parseInt(e.target.value) || 1)}
-            className="w-full bg-gray-950 border border-gray-800 rounded-lg p-2.5 text-xs font-mono text-white outline-none focus:border-sky-500"
+            onChange={(event) =>
+              setQuantity(
+                Math.max(
+                  1,
+                  Number.parseInt(event.target.value || "1", 10),
+                ),
+              )
+            }
+            className="w-full rounded-lg border border-neutral-700 bg-neutral-900 px-3 py-3 text-sm outline-none"
           />
-        </div>
+        </label>
 
-        <div className="md:col-span-2">
-          <label className="block text-xs font-mono text-gray-400 mb-1 uppercase">Custom Preparation Notes</label>
+        <label className="block">
+          <span className="mb-1 block text-xs text-neutral-400">
+            Kitchen
+          </span>
+
           <input
-            type="text"
-            placeholder="e.g. Extra sauce, no pickles, allergen warning"
-            value={customNotes}
-            onChange={(e) => setCustomNotes(e.target.value)}
-            className="w-full bg-gray-950 border border-gray-800 rounded-lg p-2.5 text-xs font-mono text-white outline-none focus:border-sky-500"
+            value={kitchen.name}
+            disabled
+            className="w-full rounded-lg border border-neutral-800 bg-neutral-900/60 px-3 py-3 text-sm text-neutral-500"
           />
-        </div>
+        </label>
 
-        <div className="md:col-span-3 flex justify-end">
-          <button
-            type="submit"
-            className="bg-emerald-500 hover:bg-emerald-400 text-gray-950 font-mono font-bold px-6 py-2.5 rounded-lg text-xs uppercase tracking-wider transition-all"
-          >
-            Inject Order into Kitchen Pipeline →
-          </button>
-        </div>
-      </form>
-    </div>
+        <label className="block md:col-span-2">
+          <span className="mb-1 block text-xs text-neutral-400">
+            Kitchen Notes
+          </span>
+
+          <textarea
+            value={customNotes}
+            onChange={(event) =>
+              setCustomNotes(event.target.value)
+            }
+            rows={3}
+            placeholder="Optional preparation notes..."
+            className="w-full resize-none rounded-lg border border-neutral-700 bg-neutral-900 px-3 py-3 text-sm outline-none"
+          />
+        </label>
+      </div>
+
+      <button
+        type="button"
+        onClick={handleSubmit}
+        disabled={!selectedMenuItem}
+        className="mt-5 w-full rounded-lg bg-neutral-100 px-4 py-3 text-sm font-semibold text-neutral-950 transition hover:bg-white disabled:cursor-not-allowed disabled:opacity-50"
+      >
+        Inject Test Order
+      </button>
+    </section>
   );
 }
