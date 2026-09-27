@@ -83,8 +83,6 @@ type OrderItemInput = {
   menuItemId?: unknown;
   name?: unknown;
   quantity?: unknown;
-  unitPrice?: unknown;
-  station?: unknown;
   notes?: unknown;
 };
 
