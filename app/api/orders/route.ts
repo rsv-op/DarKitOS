@@ -26,7 +26,7 @@ import {
   getOrders,
   replaceInventory,
   updateOrder,
-} from "@/lib/store";
+} from "@/lib/store"; 
 
 export const dynamic = "force-dynamic";
 
