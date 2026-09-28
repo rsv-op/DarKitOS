@@ -4,16 +4,13 @@ import {
   EMPLOYEES_DB,
   ROLE_PERMISSIONS_DB,
   type Employee,
-  type Order,
-  type OrderEventType,
-  type OrderStatus,
+  type InventoryItem,
   type PermissionCode,
 } from "@/lib/db";
 
 import {
-  addOrder,
-  getOrders,
-  updateOrder,
+  getInventory,
+  replaceInventory,
 } from "@/lib/store";
 
 function getEmployee(
@@ -39,80 +36,16 @@ function hasPermission(
   employee: Employee,
   permissionCode: PermissionCode
 ): boolean {
-  const permission = ROLE_PERMISSIONS_DB.find(
-    (item) =>
-      item.role === employee.role &&
-      item.permissionId ===
-        `PERM-${permissionCode
-          .replace("_", "-")
-          .toUpperCase()}`
+  const permissionId =
+    `PERM-${permissionCode
+      .replaceAll("_", "-")
+      .toUpperCase()}`;
+
+  return ROLE_PERMISSIONS_DB.some(
+    (permission) =>
+      permission.role === employee.role &&
+      permission.permissionId === permissionId
   );
-
-  return Boolean(permission);
-}
-
-function canAccessOrder(
-  employee: Employee,
-  order: Order
-): boolean {
-  if (employee.role === "OWNER") {
-    return true;
-  }
-
-  return employee.kitchenId === order.kitchenId;
-}
-
-function canUseOrderAction(
-  employee: Employee,
-  action: OrderStatus
-): boolean {
-  if (
-    action === "PREPARING" ||
-    action === "READY_FOR_PICKUP"
-  ) {
-    return hasPermission(
-      employee,
-      "COOK_ORDERS"
-    );
-  }
-
-  if (
-    action === "DRIVER_ASSIGNED" ||
-    action === "PICKED_UP" ||
-    action === "DISPATCHED"
-  ) {
-    return hasPermission(
-      employee,
-      "DISPATCH_ORDERS"
-    );
-  }
-
-  if (action === "CANCELLED") {
-    return hasPermission(
-      employee,
-      "ORDER_CANCEL"
-    );
-  }
-
-  return false;
-}
-
-function createEvent(
-  type: OrderEventType,
-  actor: string,
-  details?: string
-) {
-  return {
-    id: `EVT-${Date.now()}-${Math.random()
-      .toString(36)
-      .slice(2, 8)}`,
-    type,
-    timestamp: new Date().toISOString(),
-    actor,
-    ...(details
-      ? { details }
-      : {}),
-  };
 }
 
 export async function GET(
@@ -131,55 +64,10 @@ export async function GET(
       );
     }
 
-    const orders = getOrders();
-
-    const visibleOrders =
-      orders.filter((order) =>
-        canAccessOrder(
-          employee,
-          order
-        )
-      );
-
-    return NextResponse.json({
-      orders: visibleOrders,
-    });
-  } catch (error) {
-    console.error(
-      "GET /api/orders failed:",
-      error
-    );
-
-    return NextResponse.json(
-      {
-        error:
-          "Unable to load orders",
-      },
-      { status: 500 }
-    );
-  }
-}
-
-export async function POST(
-  request: NextRequest
-) {
-  try {
-    const employee =
-      getEmployee(request);
-
-    if (!employee) {
-      return NextResponse.json(
-        {
-          error: "Unauthorized",
-        },
-        { status: 401 }
-      );
-    }
-
     if (
       !hasPermission(
         employee,
-        "KITCHEN_OPERATE"
+        "INVENTORY_VIEW"
       ) &&
       !hasPermission(
         employee,
@@ -194,122 +82,19 @@ export async function POST(
       );
     }
 
-    const body =
-      await request.json();
-
-    if (
-      !body ||
-      typeof body !== "object"
-    ) {
-      return NextResponse.json(
-        {
-          error:
-            "Invalid order payload",
-        },
-        { status: 400 }
-      );
-    }
-
-    const now =
-      new Date().toISOString();
-
-    const order = {
-      ...body,
-      status: "PENDING",
-      createdAt:
-        body.createdAt ?? now,
-      updatedAt: now,
-      receivedAt:
-        body.receivedAt ?? now,
-      events: [
-        ...(Array.isArray(
-          body.events
-        )
-          ? body.events
-          : []),
-        createEvent(
-          "RECEIVED",
-          employee.employeeCode,
-          "Order received by the OS"
-        ),
-      ],
-    } as Order;
-
-    if (!order.id) {
-      return NextResponse.json(
-        {
-          error:
-            "Order id is required",
-        },
-        { status: 400 }
-      );
-    }
-
-    if (!order.brandId) {
-      return NextResponse.json(
-        {
-          error:
-            "brandId is required",
-        },
-        { status: 400 }
-      );
-    }
-
-    if (!order.kitchenId) {
-      return NextResponse.json(
-        {
-          error:
-            "kitchenId is required",
-        },
-        { status: 400 }
-      );
-    }
-
-    if (
-      !Array.isArray(order.items) ||
-      order.items.length === 0
-    ) {
-      return NextResponse.json(
-        {
-          error:
-            "At least one order item is required",
-        },
-        { status: 400 }
-      );
-    }
-
-    if (
-      employee.role !== "OWNER" &&
-      employee.kitchenId !==
-        order.kitchenId
-    ) {
-      return NextResponse.json(
-        {
-          error:
-            "Order belongs to another kitchen",
-        },
-        { status: 403 }
-      );
-    }
-
-    addOrder(order);
-
-    return NextResponse.json(
-      {
-        order,
-      },
-      { status: 201 }
-    );
+    return NextResponse.json({
+      inventory: getInventory(),
+    });
   } catch (error) {
     console.error(
-      "POST /api/orders failed:",
+      "GET /api/inventory failed:",
       error
     );
 
     return NextResponse.json(
       {
         error:
-          "Unable to create orders",
+          "Unable to load inventory",
       },
       { status: 500 }
     );
@@ -332,84 +117,10 @@ export async function PATCH(
       );
     }
 
-    const body =
-      await request.json();
-
-    const orderId =
-      typeof body?.orderId ===
-      "string"
-        ? body.orderId
-        : typeof body?.id ===
-            "string"
-          ? body.id
-          : "";
-
-    const action =
-      typeof body?.action ===
-      "string"
-        ? (body.action as OrderStatus)
-        : null;
-
     if (
-      !orderId ||
-      !action
-    ) {
-      return NextResponse.json(
-        {
-          error:
-            "orderId and action are required",
-        },
-        { status: 400 }
-      );
-    }
-
-    const allowedActions:
-      OrderStatus[] = [
-        "PREPARING",
-        "READY_FOR_PICKUP",
-        "DRIVER_ASSIGNED",
-        "PICKED_UP",
-        "DISPATCHED",
-        "CANCELLED",
-      ];
-
-    if (
-      !allowedActions.includes(
-        action
-      )
-    ) {
-      return NextResponse.json(
-        {
-          error:
-            "Unsupported order action",
-        },
-        { status: 400 }
-      );
-    }
-
-    const existingOrders =
-      getOrders();
-
-    const existingOrder =
-      existingOrders.find(
-        (order) =>
-          order.id === orderId
-      );
-
-    if (!existingOrder) {
-      return NextResponse.json(
-        {
-          error:
-            "Order not found",
-        },
-        { status: 404 }
-      );
-    }
-
-    if (
-      !canAccessOrder(
+      !hasPermission(
         employee,
-        existingOrder
+        "INVENTORY_MANAGE"
       )
     ) {
       return NextResponse.json(
@@ -420,158 +131,116 @@ export async function PATCH(
       );
     }
 
+    const body =
+      await request.json();
+
     if (
-      !canUseOrderAction(
-        employee,
-        action
-      )
+      !body ||
+      typeof body !== "object"
     ) {
       return NextResponse.json(
         {
           error:
-            "Permission denied",
+            "Invalid inventory payload",
         },
-        { status: 403 }
+        { status: 400 }
       );
     }
 
+    const itemId =
+      typeof body.id === "string"
+        ? body.id.trim()
+        : "";
+
+    if (!itemId) {
+      return NextResponse.json(
+        {
+          error:
+            "Inventory item id is required",
+        },
+        { status: 400 }
+      );
+    }
+
+    const inventory =
+      getInventory();
+
+    const existingItem =
+      inventory.find(
+        (item) =>
+          item.id === itemId
+      );
+
+    if (!existingItem) {
+      return NextResponse.json(
+        {
+          error:
+            "Inventory item not found",
+        },
+        { status: 404 }
+      );
+    }
+
+    const nextStock =
+      typeof body.currentStock ===
+      "number"
+        ? body.currentStock
+        : existingItem.currentStock;
+
     if (
-      action === "CANCELLED" &&
-      (
-        existingOrder.status ===
-          "PICKED_UP" ||
-        existingOrder.status ===
-          "DISPATCHED"
-      )
+      !Number.isFinite(
+        nextStock
+      ) ||
+      nextStock < 0
     ) {
       return NextResponse.json(
         {
           error:
-            "Post-pickup cancellation requires aggregator/accounting handling.",
+            "currentStock must be a non-negative number",
         },
-        { status: 409 }
+        { status: 400 }
       );
     }
 
-    const now =
-      new Date().toISOString();
+    const updatedItem:
+      InventoryItem = {
+        ...existingItem,
+        currentStock:
+          nextStock,
+        lastRestocked:
+          nextStock >
+          existingItem.currentStock
+            ? new Date().toISOString()
+            : existingItem.lastRestocked,
+      };
 
-    const updatedOrder =
-      updateOrder(
-        orderId,
-        (currentOrder) => {
-          const eventType =
-            action as OrderEventType;
-
-          const nextOrder = {
-            ...currentOrder,
-            status: action,
-            updatedAt: now,
-            events: [
-              ...currentOrder.events,
-              createEvent(
-                eventType,
-                employee.employeeCode
-              ),
-            ],
-          } as Order;
-
-          if (
-            action === "PREPARING"
-          ) {
-            nextOrder.prepStartedAt =
-              currentOrder.prepStartedAt ??
-              now;
-          }
-
-          if (
-            action ===
-            "READY_FOR_PICKUP"
-          ) {
-            nextOrder.prepCompletedAt =
-              currentOrder.prepCompletedAt ??
-              now;
-
-            nextOrder.readyAt =
-              currentOrder.readyAt ??
-              now;
-          }
-
-          if (
-            action ===
-            "DRIVER_ASSIGNED"
-          ) {
-            nextOrder.driverAssignedAt =
-              currentOrder.driverAssignedAt ??
-              now;
-
-            if (
-              typeof body.driverName ===
-              "string"
-            ) {
-              nextOrder.driverName =
-                body.driverName;
-            }
-
-            if (
-              typeof body.courierEtaMins ===
-              "number"
-            ) {
-              nextOrder.courierEtaMins =
-                body.courierEtaMins;
-            }
-          }
-
-          if (
-            action === "PICKED_UP"
-          ) {
-            nextOrder.pickedUpAt =
-              currentOrder.pickedUpAt ??
-              now;
-          }
-
-          if (
-            action === "DISPATCHED"
-          ) {
-            nextOrder.dispatchedAt =
-              currentOrder.dispatchedAt ??
-              now;
-          }
-
-          if (
-            action === "CANCELLED"
-          ) {
-            nextOrder.cancellationSource =
-              body.cancellationSource ??
-              "MANUAL";
-
-            nextOrder.cancellationReason =
-              typeof body.cancellationReason ===
-              "string"
-                ? body.cancellationReason
-                : "Order cancelled";
-
-            nextOrder.cancelledBy =
-              employee.employeeCode;
-          }
-
-          return nextOrder;
-        }
+    const updatedInventory =
+      inventory.map(
+        (item) =>
+          item.id === itemId
+            ? updatedItem
+            : item
       );
+
+    replaceInventory(
+      updatedInventory
+    );
 
     return NextResponse.json({
-      order: updatedOrder,
+      inventory:
+        updatedInventory,
+      item: updatedItem,
     });
   } catch (error) {
     console.error(
-      "PATCH /api/orders failed:",
+      "PATCH /api/inventory failed:",
       error
     );
 
     return NextResponse.json(
       {
         error:
-          "Unable to update orders",
+          "Unable to update inventory",
       },
       { status: 500 }
     );
