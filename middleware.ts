@@ -1,48 +1,222 @@
+import { NextRequest, NextResponse } from "next/server";
 
-import { NextResponse } from 'next/server';
-import type { NextRequest } from 'next/server';
+import {
+  EMPLOYEES_DB,
+  ROLE_PERMISSIONS_DB,
+} from "@/lib/db";
 
-export function middleware(request: NextRequest) {
-  const path = request.nextUrl.pathname;
+const PROTECTED_ROUTES = [
+  "/cook",
+  "/dispatch",
+  "/owner",
+] as const;
 
-  const isCookRoute = path.startsWith('/cook');
-  const isDispatchRoute = path.startsWith('/dispatch');
-  const isOwnerRoute = path.startsWith('/owner');
+function getEmployeeFromRequest(
+  request: NextRequest
+) {
+  const employeeCode =
+    request.cookies.get(
+      "employee_code"
+    )?.value;
 
-  // Allow public routes, static assets, and auth endpoints through
-  if (!isCookRoute && !isDispatchRoute && !isOwnerRoute) {
+  if (!employeeCode) {
+    return undefined;
+  }
+
+  return EMPLOYEES_DB.find(
+    (employee) =>
+      employee.active &&
+      employee.employeeCode ===
+        employeeCode
+  );
+}
+
+function hasPermission(
+  role: (typeof EMPLOYEES_DB)[number]["role"],
+  permissionId: string
+): boolean {
+  return ROLE_PERMISSIONS_DB.some(
+    (mapping) =>
+      mapping.role === role &&
+      mapping.permissionId ===
+        permissionId
+  );
+}
+
+function getRequiredPermission(
+  pathname: string
+): string | null {
+  if (
+    pathname.startsWith("/owner")
+  ) {
+    return "PERM-OWNER-VIEW";
+  }
+
+  if (
+    pathname.startsWith("/cook")
+  ) {
+    return "PERM-COOK-ORDERS";
+  }
+
+  if (
+    pathname.startsWith("/dispatch")
+  ) {
+    return "PERM-DISPATCH-ORDERS";
+  }
+
+  return null;
+}
+
+function isProtectedRoute(
+  pathname: string
+): boolean {
+  return PROTECTED_ROUTES.some(
+    (route) =>
+      pathname === route ||
+      pathname.startsWith(
+        `${route}/`
+      )
+  );
+}
+
+export function middleware(
+  request: NextRequest
+) {
+  const { pathname } =
+    request.nextUrl;
+
+  if (
+    !isProtectedRoute(pathname)
+  ) {
     return NextResponse.next();
   }
 
-  // Check for active station PIN token or session cookie
-  const pinCookie = request.cookies.get('kitchen_pin')?.value || request.cookies.get('dark_cloud_session')?.value;
+  const employee =
+    getEmployeeFromRequest(
+      request
+    );
 
-  // Redirect unauthenticated traffic to the universal PIN gateway
-  if (!pinCookie) {
-    return NextResponse.redirect(new URL('/login', request.url));
+  if (!employee) {
+    const loginUrl =
+      new URL(
+        "/login",
+        request.url
+      );
+
+    loginUrl.searchParams.set(
+      "redirect",
+      pathname
+    );
+
+    return NextResponse.redirect(
+      loginUrl
+    );
   }
 
-  // Master Dev Bypass grants top-level access across all station views
-  if (pinCookie === 'dev_token' || pinCookie.endsWith('_9999')) {
+  const requiredPermission =
+    getRequiredPermission(
+      pathname
+    );
+
+  if (
+    requiredPermission &&
+    !hasPermission(
+      employee.role,
+      requiredPermission
+    )
+  ) {
+    return new NextResponse(
+      "Forbidden",
+      {
+        status: 403,
+        headers: {
+          "Content-Type":
+            "text/plain; charset=utf-8",
+        },
+      }
+    );
+  }
+
+  /*
+   * Owner operates across the
+   * complete platform and is not
+   * restricted to one kitchen.
+   */
+  if (
+    employee.role ===
+    "OWNER"
+  ) {
     return NextResponse.next();
   }
 
-  // Strict role isolation per station route
-  if (isCookRoute && !pinCookie.includes('cook')) {
-    return NextResponse.redirect(new URL('/login', request.url));
+  /*
+   * Kitchen-scoped employees must
+   * have an assigned kitchen.
+   *
+   * The actual kitchen filtering
+   * remains the responsibility of
+   * the operational API/page layer.
+   */
+  if (
+    !employee.kitchenId
+  ) {
+    return new NextResponse(
+      "Kitchen assignment required",
+      {
+        status: 403,
+        headers: {
+          "Content-Type":
+            "text/plain; charset=utf-8",
+        },
+      }
+    );
   }
 
-  if (isDispatchRoute && !pinCookie.includes('dispatch')) {
-    return NextResponse.redirect(new URL('/login', request.url));
+  const response =
+    NextResponse.next();
+
+  /*
+   * Pass the authenticated
+   * employee identity downstream
+   * through request headers.
+   *
+   * This does not grant additional
+   * permissions. It exposes the
+   * already authenticated identity
+   * to server-side application
+   * layers.
+   */
+  response.headers.set(
+    "x-employee-id",
+    employee.id
+  );
+
+  response.headers.set(
+    "x-employee-code",
+    employee.employeeCode
+  );
+
+  response.headers.set(
+    "x-employee-role",
+    employee.role
+  );
+
+  if (
+    employee.kitchenId
+  ) {
+    response.headers.set(
+      "x-kitchen-id",
+      employee.kitchenId
+    );
   }
 
-  if (isOwnerRoute && !pinCookie.includes('owner')) {
-    return NextResponse.redirect(new URL('/login', request.url));
-  }
-
-  return NextResponse.next();
+  return response;
 }
 
 export const config = {
-  matcher: ['/cook/:path*', '/dispatch/:path*', '/owner/:path*'],
+  matcher: [
+    "/cook/:path*",
+    "/dispatch/:path*",
+    "/owner/:path*",
+  ],
 };
