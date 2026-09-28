@@ -1,22 +1,14 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 
 import {
-  BRANDS_DB,
-  KITCHENS_DB,
-  MENU_CATALOG,
+  EMPLOYEES_DB,
+  ROLE_PERMISSIONS_DB,
   evaluateOrderInventory,
   processOrderDepletion,
-} from "@/lib/db";
-
-import type {
-  DbaBrand,
-  InventoryItem,
-  Order,
-  OrderChannel,
-  OrderEvent,
-  OrderEventType,
-  OrderSource,
-  OrderStatus,
+  type Employee,
+  type Order,
+  type OrderEventType,
+  type PermissionCode,
 } from "@/lib/db";
 
 import {
@@ -24,1319 +16,801 @@ import {
   findOrder,
   getInventory,
   getOrders,
-  replaceInventory,
   updateOrder,
-} from "@/lib/store"; 
-
-export const dynamic = "force-dynamic";
-
-const VALID_STATUSES: OrderStatus[] = [
-  "PENDING",
-  "PREPARING",
-  "READY_FOR_PICKUP",
-  "DRIVER_ASSIGNED",
-  "PICKED_UP",
-  "DISPATCHED",
-  "CANCELLED",
-];
-
-const VALID_CHANNELS: OrderChannel[] = [
-  "Swiggy",
-  "Zomato",
-  "DoorDash",
-  "UberEats",
-  "GrubHub",
-  "Direct Web",
-];
-
-const VALID_SOURCES: OrderSource[] = [
-  "MANUAL",
-  "SWIGGY",
-  "ZOMATO",
-  "DOORDASH",
-  "UBEREATS",
-  "GRUBHUB",
-  "DIRECT_WEB",
-];
-
-const VALID_BRANDS: DbaBrand[] = BRANDS_DB.map(
-  (brand) => brand.id
-) as DbaBrand[];
-
-const VALID_KITCHENS = KITCHENS_DB.map(
-  (kitchen) => kitchen.id
-);
-
-const VALID_TRANSITIONS: Record<
-  OrderStatus,
-  OrderStatus[]
-> = {
-  PENDING: [
-    "PREPARING",
-    "CANCELLED",
-  ],
-
-  PREPARING: [
-    "READY_FOR_PICKUP",
-    "CANCELLED",
-  ],
-
-  READY_FOR_PICKUP: [
-    "DRIVER_ASSIGNED",
-    "CANCELLED",
-  ],
-
-  DRIVER_ASSIGNED: [
-    "PICKED_UP",
-    "CANCELLED",
-  ],
-
-  PICKED_UP: [
-    "DISPATCHED",
-    "CANCELLED",
-  ],
-
-  DISPATCHED: [],
-
-  CANCELLED: [],
-};
-
-const ACTIONS = [
-  "DRIVER_ASSIGNED",
-  "PICKED_UP",
-] as const;
+} from "@/lib/store";
 
 type OrderAction =
-  (typeof ACTIONS)[number];
+  | "PREPARING"
+  | "READY_FOR_PICKUP"
+  | "DRIVER_ASSIGNED"
+  | "PICKED_UP"
+  | "DISPATCHED"
+  | "CANCELLED";
 
-type OrderItemInput = {
-  id?: unknown;
-  menuItemId?: unknown;
-  name?: unknown;
-  quantity?: unknown;
-  notes?: unknown;
+type OrderRequest = {
+  order?: Order;
+  orderId?: string;
+  action?: OrderAction;
+  status?: Order["status"];
+  driverName?: string;
+  cancellationReason?: string;
+  cancellationSource?: Order["cancellationSource"];
 };
 
-type CreateOrderBody = {
-  id?: unknown;
-  externalOrderId?: unknown;
-  brandId?: unknown;
-  kitchenId?: unknown;
-  channel?: unknown;
-  source?: unknown;
-  items?: unknown;
-  customerName?: unknown;
-  driverName?: unknown;
-  courierEtaMins?: unknown;
-};
+type AuthResult =
+  | {
+      employee: Employee;
+      error?: never;
+    }
+  | {
+      employee?: never;
+      error: NextResponse;
+    };
 
-type UpdateOrderBody = {
-  orderId?: unknown;
-  id?: unknown;
-  status?: unknown;
-  action?: unknown;
-  driverName?: unknown;
-  cancellationSource?: unknown;
-  cancellationReason?: unknown;
-  cancelledBy?: unknown;
-};
+function getEmployeeFromRequest(
+  request: NextRequest
+): Employee | null {
+  const employeeCode =
+    request.cookies.get("employee_code")?.value;
 
-function createId(
-  prefix: string
-): string {
-  return `${prefix}-${Date.now()}-${Math.floor(
-    1000 + Math.random() * 9000
-  )}`;
-}
+  if (!employeeCode) {
+    return null;
+  }
 
-function createEvent(
-  type: OrderEventType,
-  actor: string,
-  details?: string
-): OrderEvent {
-  return {
-    id: createId("EVT"),
-    type,
-    timestamp:
-      new Date().toISOString(),
-    actor,
-    details,
-  };
-}
-
-function isValidBrand(
-  value: unknown
-): value is DbaBrand {
   return (
-    typeof value === "string" &&
-    VALID_BRANDS.includes(
-      value as DbaBrand
-    )
+    EMPLOYEES_DB.find(
+      (employee) =>
+        employee.active &&
+        employee.employeeCode === employeeCode
+    ) ?? null
   );
 }
 
-function isValidKitchen(
-  value: unknown
-): value is string {
-  return (
-    typeof value === "string" &&
-    VALID_KITCHENS.includes(value)
-  );
-}
+function requireEmployee(
+  request: NextRequest,
+  permission: PermissionCode
+): AuthResult {
+  const employee =
+    getEmployeeFromRequest(request);
 
-function isValidChannel(
-  value: unknown
-): value is OrderChannel {
-  return (
-    typeof value === "string" &&
-    VALID_CHANNELS.includes(
-      value as OrderChannel
-    )
-  );
-}
-
-function isValidSource(
-  value: unknown
-): value is OrderSource {
-  return (
-    typeof value === "string" &&
-    VALID_SOURCES.includes(
-      value as OrderSource
-    )
-  );
-}
-
-function isValidStatus(
-  value: unknown
-): value is OrderStatus {
-  return (
-    typeof value === "string" &&
-    VALID_STATUSES.includes(
-      value as OrderStatus
-    )
-  );
-}
-
-function isNonEmptyString(
-  value: unknown
-): value is string {
-  return (
-    typeof value === "string" &&
-    value.trim().length > 0
-  );
-}
-
-function isPositiveInteger(
-  value: unknown
-): value is number {
-  return (
-    typeof value === "number" &&
-    Number.isInteger(value) &&
-    value > 0
-  );
-}
-
-function isFiniteNonNegativeNumber(
-  value: unknown
-): value is number {
-  return (
-    typeof value === "number" &&
-    Number.isFinite(value) &&
-    value >= 0
-  );
-}
-
-function validateOrderItems(
-  items: unknown
-): {
-  valid: boolean;
-  error?: string;
-  normalizedItems?: Order["items"];
-} {
-  if (
-    !Array.isArray(items) ||
-    items.length === 0
-  ) {
+  if (!employee) {
     return {
-      valid: false,
-      error:
-        "Order must contain at least one item",
+      error: NextResponse.json(
+        {
+          success: false,
+          error: "Authentication required",
+        },
+        { status: 401 }
+      ),
     };
   }
 
-  const normalizedItems: Order["items"] =
-    [];
+  const allowed =
+    ROLE_PERMISSIONS_DB.some(
+      (rolePermission) =>
+        rolePermission.role === employee.role &&
+        rolePermission.permissionCode ===
+          permission
+    );
 
-  for (
-    let index = 0;
-    index < items.length;
-    index += 1
-  ) {
-    const raw =
-      items[index] as OrderItemInput;
-
-    if (
-      !raw ||
-      typeof raw !== "object"
-    ) {
-      return {
-        valid: false,
-        error: `Invalid order item at index ${index}`,
-      };
-    }
-
-    if (
-      !isNonEmptyString(
-        raw.menuItemId
-      )
-    ) {
-      return {
-        valid: false,
-        error: `Missing menuItemId at item ${index}`,
-      };
-    }
-
-    const menuItem =
-      MENU_CATALOG.find(
-        (item) =>
-          item.id ===
-          raw.menuItemId
-      );
-
-    if (!menuItem) {
-      return {
-        valid: false,
-        error: `Unknown menu item: ${raw.menuItemId}`,
-      };
-    }
-
-    if (
-      !isPositiveInteger(
-        raw.quantity
-      )
-    ) {
-      return {
-        valid: false,
-        error: `Invalid quantity for ${menuItem.name}. Quantity must be a positive integer.`,
-      };
-    }
-
-    if (
-      raw.name !== undefined &&
-      !isNonEmptyString(raw.name)
-    ) {
-      return {
-        valid: false,
-        error: `Invalid item name for ${menuItem.name}`,
-      };
-    }
-
-    if (
-      raw.notes !== undefined &&
-      typeof raw.notes !== "string"
-    ) {
-      return {
-        valid: false,
-        error: `Invalid notes for ${menuItem.name}`,
-      };
-    }
-
-    normalizedItems.push({
-      id: isNonEmptyString(raw.id)
-        ? raw.id
-        : createId("ITEM"),
-
-      menuItemId:
-        menuItem.id,
-
-      name:
-        menuItem.name,
-
-      quantity:
-        raw.quantity,
-
-      station:
-        menuItem.station,
-
-      notes:
-        typeof raw.notes ===
-        "string"
-          ? raw.notes.trim()
-          : undefined,
-    });
+  if (!allowed) {
+    return {
+      error: NextResponse.json(
+        {
+          success: false,
+          error: "Permission denied",
+        },
+        { status: 403 }
+      ),
+    };
   }
 
-  return {
-    valid: true,
-    normalizedItems,
-  };
+  return { employee };
 }
 
-function jsonError(
-  message: string,
-  status = 400,
-  details?: Record<
-    string,
-    unknown
-  >
-) {
-  return NextResponse.json(
-    {
-      success: false,
-      error: message,
-      ...(details || {}),
-    },
-    { status }
+function canAccessKitchen(
+  employee: Employee,
+  kitchenId: string
+): boolean {
+  if (employee.role === "OWNER") {
+    return true;
+  }
+
+  return employee.kitchenId === kitchenId;
+}
+
+function canAccessOrder(
+  employee: Employee,
+  order: Order
+): boolean {
+  return canAccessKitchen(
+    employee,
+    order.kitchenId
   );
 }
 
-function getStatusTimestamp(
-  status: OrderStatus
-):
-  | keyof Pick<
-      Order,
-      | "prepStartedAt"
-      | "prepCompletedAt"
-      | "readyAt"
-      | "dispatchedAt"
-    >
-  | null {
-  switch (status) {
-    case "PREPARING":
-      return "prepStartedAt";
-
-    case "READY_FOR_PICKUP":
-      return "readyAt";
-
-    case "DISPATCHED":
-      return "dispatchedAt";
-
-    default:
-      return null;
-  }
+function now(): string {
+  return new Date().toISOString();
 }
 
-function getStatusEvent(
-  status: OrderStatus
-): OrderEventType | null {
-  switch (status) {
-    case "PREPARING":
-      return "PREPARING";
-
-    case "READY_FOR_PICKUP":
-      return "READY_FOR_PICKUP";
-
-    case "DISPATCHED":
-      return "DISPATCHED";
-
-    default:
-      return null;
-  }
-}
-
-function getActor(
-  body: UpdateOrderBody,
-  fallback: string
-): string {
-  return isNonEmptyString(
-    body.cancelledBy
-  )
-    ? body.cancelledBy.trim()
-    : fallback;
-}
-
-function getCancellationSource(
-  value: unknown
-):
-  | NonNullable<
-      Order["cancellationSource"]
-    >
-  | null {
-  const allowed = [
-    "CUSTOMER",
-    "KITCHEN",
-    "AGGREGATOR",
-    "SYSTEM",
-    "MANUAL",
-  ] as const;
-
-  if (
-    typeof value === "string" &&
-    allowed.includes(
-      value as (typeof allowed)[number]
-    )
-  ) {
-    return value as NonNullable<
-      Order["cancellationSource"]
-    >;
-  }
-
-  return null;
-}
-
-function getOrderRequirements(
-  order: Order
-): Map<string, number> {
-  const requirements =
-    new Map<string, number>();
-
-  for (const orderItem of order.items) {
-    const menuItem =
-      MENU_CATALOG.find(
-        (item) =>
-          item.id ===
-          orderItem.menuItemId
-      );
-
-    if (!menuItem) {
-      continue;
-    }
-
-    for (const ingredient of menuItem.recipe) {
-      const existing =
-        requirements.get(
-          ingredient.inventoryItemId
-        ) ?? 0;
-
-      requirements.set(
-        ingredient.inventoryItemId,
-        existing +
-          ingredient.quantityRequired *
-            orderItem.quantity
-      );
-    }
-  }
-
-  return requirements;
-}
-
-function restoreOrderInventory(
+function appendEvent(
   order: Order,
-  inventory: InventoryItem[]
-): {
-  updatedInventory: InventoryItem[];
-  restoredItems: string[];
-} {
-  const requirements =
-    getOrderRequirements(order);
-
-  const restoredItems: string[] = [];
-
-  const updatedInventory =
-    inventory.map(
-      (inventoryItem) => {
-        const quantityToRestore =
-          requirements.get(
-            inventoryItem.id
-          ) ?? 0;
-
-        if (
-          quantityToRestore <= 0
-        ) {
-          return {
-            ...inventoryItem,
-          };
-        }
-
-        restoredItems.push(
-          `${inventoryItem.name}: +${quantityToRestore} ${inventoryItem.unit}`
-        );
-
-        return {
-          ...inventoryItem,
-          currentStock:
-            inventoryItem.currentStock +
-            quantityToRestore,
-        };
-      }
-    );
-
+  type: OrderEventType,
+  actor: Employee,
+  details?: string
+): Order {
   return {
-    updatedInventory,
-    restoredItems,
+    ...order,
+    events: [
+      ...(order.events ?? []),
+      {
+        id: `EVT-${Date.now()}-${Math.random()
+          .toString(36)
+          .slice(2, 8)}`,
+        type,
+        timestamp: now(),
+        actor: actor.employeeCode,
+        details,
+      },
+    ],
   };
 }
 
-export async function GET() {
+function updateOrderLifecycle(
+  order: Order,
+  action: OrderAction,
+  employee: Employee,
+  driverName?: string,
+  cancellationReason?: string,
+  cancellationSource?: Order["cancellationSource"]
+): Order {
+  const timestamp = now();
+
+  switch (action) {
+    case "PREPARING":
+      return appendEvent(
+        {
+          ...order,
+          status: "PREPARING",
+          prepStartedAt:
+            order.prepStartedAt ??
+            timestamp,
+          updatedAt: timestamp,
+        },
+        "PREPARING",
+        employee
+      );
+
+    case "READY_FOR_PICKUP":
+      return appendEvent(
+        {
+          ...order,
+          status: "READY_FOR_PICKUP",
+          prepCompletedAt:
+            order.prepCompletedAt ??
+            timestamp,
+          readyAt:
+            order.readyAt ??
+            timestamp,
+          updatedAt: timestamp,
+        },
+        "READY_FOR_PICKUP",
+        employee
+      );
+
+    case "DRIVER_ASSIGNED":
+      return appendEvent(
+        {
+          ...order,
+          status: "DRIVER_ASSIGNED",
+          driverName:
+            driverName?.trim() ||
+            order.driverName,
+          driverAssignedAt:
+            order.driverAssignedAt ??
+            timestamp,
+          updatedAt: timestamp,
+        },
+        "DRIVER_ASSIGNED",
+        employee
+      );
+
+    case "PICKED_UP":
+      return appendEvent(
+        {
+          ...order,
+          status: "PICKED_UP",
+          pickedUpAt:
+            order.pickedUpAt ??
+            timestamp,
+          updatedAt: timestamp,
+        },
+        "PICKED_UP",
+        employee
+      );
+
+    case "DISPATCHED":
+      return appendEvent(
+        {
+          ...order,
+          status: "DISPATCHED",
+          dispatchedAt:
+            order.dispatchedAt ??
+            timestamp,
+          updatedAt: timestamp,
+        },
+        "DISPATCHED",
+        employee
+      );
+
+    case "CANCELLED":
+      return appendEvent(
+        {
+          ...order,
+          status: "CANCELLED",
+          cancellationSource:
+            cancellationSource ??
+            "MANUAL",
+          cancellationReason:
+            cancellationReason?.trim() ||
+            "Order cancelled",
+          cancelledBy:
+            employee.employeeCode,
+          updatedAt: timestamp,
+        },
+        "CANCELLED",
+        employee,
+        cancellationReason?.trim() ||
+          "Order cancelled"
+      );
+
+    default:
+      return order;
+  }
+}
+
+function restoreOrderInventory(
+  order: Order
+): {
+  restored: boolean;
+  lossRecorded: boolean;
+} {
+  const inventory =
+    getInventory();
+
+  const inventoryMap =
+    new Map(
+      inventory.map((item) => [
+        item.id,
+        item,
+      ])
+    );
+
+  let canRestore = true;
+
+  for (const orderItem of order.items) {
+    for (const ingredient of orderItem.ingredients ??
+      []) {
+      const inventoryItem =
+        inventoryMap.get(
+          ingredient.inventoryItemId
+        );
+
+      if (!inventoryItem) {
+        canRestore = false;
+        break;
+      }
+    }
+
+    if (!canRestore) {
+      break;
+    }
+  }
+
+  if (!canRestore) {
+    return {
+      restored: false,
+      lossRecorded: true,
+    };
+  }
+
+  for (const orderItem of order.items) {
+    for (const ingredient of orderItem.ingredients ??
+      []) {
+      const inventoryItem =
+        inventoryMap.get(
+          ingredient.inventoryItemId
+        );
+
+      if (!inventoryItem) {
+        continue;
+      }
+
+      inventoryItem.currentStock +=
+        ingredient.quantity *
+        orderItem.quantity;
+    }
+  }
+
+  return {
+    restored: true,
+    lossRecorded: false,
+  };
+}
+
+function buildOrderFromRequest(
+  requestOrder: Order,
+  employee: Employee
+): Order {
+  const timestamp = now();
+
+  return {
+    ...requestOrder,
+    kitchenId:
+      requestOrder.kitchenId ||
+      employee.kitchenId ||
+      "K1",
+    status:
+      requestOrder.status ??
+      "PENDING",
+    source:
+      requestOrder.source ??
+      "MANUAL",
+    createdAt:
+      requestOrder.createdAt ??
+      timestamp,
+    updatedAt: timestamp,
+    receivedAt:
+      requestOrder.receivedAt ??
+      timestamp,
+    events: [
+      ...(requestOrder.events ?? []),
+      {
+        id: `EVT-${Date.now()}-RECEIVED`,
+        type: "RECEIVED",
+        timestamp,
+        actor:
+          employee.employeeCode,
+        details:
+          "Order received by Dark Cloud Kitchen OS",
+      },
+    ],
+  };
+}
+
+export async function GET(
+  request: NextRequest
+) {
+  const auth = requireEmployee(
+    request,
+    "KITCHEN_OPERATE"
+  );
+
+  if (auth.error) {
+    return auth.error;
+  }
+
+  const employee = auth.employee;
+
+  const orders = getOrders();
+
+  const visibleOrders =
+    employee.role === "OWNER"
+      ? orders
+      : orders.filter(
+          (order) =>
+            order.kitchenId ===
+            employee.kitchenId
+        );
+
   return NextResponse.json({
     success: true,
-    orders: getOrders(),
-    inventory: getInventory(),
+    orders: visibleOrders,
   });
 }
 
 export async function POST(
-  request: Request
+  request: NextRequest
 ) {
+  const auth = requireEmployee(
+    request,
+    "KITCHEN_OPERATE"
+  );
+
+  if (auth.error) {
+    return auth.error;
+  }
+
+  const employee = auth.employee;
+
+  let body: OrderRequest;
+
   try {
-    const body =
-      (await request.json()) as CreateOrderBody;
+    body =
+      (await request.json()) as OrderRequest;
+  } catch {
+    return NextResponse.json(
+      {
+        success: false,
+        error: "Invalid request body",
+      },
+      { status: 400 }
+    );
+  }
 
-    const brandId =
-      body.brandId ??
-      "BurgerForge";
+  if (!body.order) {
+    return NextResponse.json(
+      {
+        success: false,
+        error: "Order is required",
+      },
+      { status: 400 }
+    );
+  }
 
-    const kitchenId =
-      body.kitchenId ??
-      "K1";
+  const order =
+    buildOrderFromRequest(
+      body.order,
+      employee
+    );
 
-    const channel =
-      body.channel ??
-      "Direct Web";
+  if (
+    !canAccessKitchen(
+      employee,
+      order.kitchenId
+    )
+  ) {
+    return NextResponse.json(
+      {
+        success: false,
+        error:
+          "Employee cannot operate this kitchen",
+      },
+      { status: 403 }
+    );
+  }
 
-    const source =
-      body.source ??
-      "MANUAL";
+  const inventory =
+    getInventory();
 
-    if (!isValidBrand(brandId)) {
-      return jsonError(
-        `Invalid brandId: ${String(
-          brandId
-        )}`
-      );
-    }
+  const evaluation =
+    evaluateOrderInventory(
+      order,
+      inventory
+    );
 
-    if (!isValidKitchen(kitchenId)) {
-      return jsonError(
-        `Invalid kitchenId: ${String(
-          kitchenId
-        )}`
-      );
-    }
-
-    if (!isValidChannel(channel)) {
-      return jsonError(
-        `Invalid channel: ${String(
-          channel
-        )}`
-      );
-    }
-
-    if (!isValidSource(source)) {
-      return jsonError(
-        `Invalid source: ${String(
-          source
-        )}`
-      );
-    }
-
-    const validation =
-      validateOrderItems(
-        body.items
-      );
-
-    if (
-      !validation.valid ||
-      !validation.normalizedItems
-    ) {
-      return jsonError(
-        validation.error ||
-          "Invalid order items"
-      );
-    }
-
-    const orderId =
-      isNonEmptyString(body.id)
-        ? body.id.trim()
-        : createId("ORD");
-
-    if (findOrder(orderId)) {
-      return jsonError(
-        `Order ${orderId} already exists`,
-        409
-      );
-    }
-
-    const externalOrderId =
-      isNonEmptyString(
-        body.externalOrderId
-      )
-        ? body.externalOrderId.trim()
-        : undefined;
-
-    const now =
-      new Date().toISOString();
-
-    const baseOrder: Order = {
-      id: orderId,
-
-      externalOrderId,
-
-      brandId,
-
-      kitchenId,
-
-      channel,
-
-      source,
-
-      status: "PENDING",
-
-      items:
-        validation.normalizedItems,
-
-      customerName:
-        isNonEmptyString(
-          body.customerName
-        )
-          ? body.customerName.trim()
-          : undefined,
-
-      driverName:
-        isNonEmptyString(
-          body.driverName
-        )
-          ? body.driverName.trim()
-          : undefined,
-
-      courierEtaMins:
-        isFiniteNonNegativeNumber(
-          body.courierEtaMins
-        )
-          ? body.courierEtaMins
-          : undefined,
-
-      createdAt: now,
-
-      updatedAt: now,
-
-      receivedAt: now,
-
-      inventoryWarnings: [],
-
-      inventoryUnavailable: [],
-
+  if (
+    evaluation.decision ===
+    "INSUFFICIENT_STOCK"
+  ) {
+    const unavailableOrder = {
+      ...order,
+      inventoryDecision:
+        evaluation.decision,
+      inventoryWarnings:
+        evaluation.warnings,
+      inventoryUnavailable:
+        evaluation.unavailable,
       events: [
-        createEvent(
-          "RECEIVED",
-          "ORDER_API",
-          `Order received from ${source}`
-        ),
+        ...(order.events ?? []),
+        {
+          id: `EVT-${Date.now()}-INVENTORY`,
+          type:
+            "INVENTORY_UNAVAILABLE" as const,
+          timestamp: now(),
+          actor:
+            employee.employeeCode,
+          details:
+            evaluation.unavailable.join(
+              "; "
+            ),
+        },
       ],
     };
 
-    const inventory =
-      getInventory();
-
-    const inventoryEvaluation =
-      evaluateOrderInventory(
-        baseOrder,
-        inventory
-      );
-
-    baseOrder.events.push(
-      createEvent(
-        "INVENTORY_CHECKED",
-        "ORDER_API",
-        `Inventory decision: ${inventoryEvaluation.inventoryDecision}`
-      )
-    );
-
-    baseOrder.inventoryDecision =
-      inventoryEvaluation.inventoryDecision;
-
-    baseOrder.inventoryWarnings =
-      inventoryEvaluation.lowStockItems;
-
-    baseOrder.inventoryUnavailable =
-      inventoryEvaluation.insufficientStockItems;
-
-    if (
-      inventoryEvaluation
-        .insufficientStockItems
-        .length > 0
-    ) {
-      baseOrder.events.push(
-        createEvent(
-          "INVENTORY_UNAVAILABLE",
-          "ORDER_API",
-          inventoryEvaluation.insufficientStockItems.join(
-            ", "
-          )
-        )
-      );
-
-      return NextResponse.json(
-        {
-          success: false,
-
-          error:
-            "Order cannot be accepted because required inventory is insufficient.",
-
-          order: baseOrder,
-
-          inventoryDecision:
-            inventoryEvaluation.inventoryDecision,
-
-          inventoryUnavailable:
-            inventoryEvaluation.insufficientStockItems,
-
-          lowStockItems:
-            inventoryEvaluation.lowStockItems,
-        },
-        { status: 409 }
-      );
-    }
-
-    const depletion =
-      processOrderDepletion(
-        baseOrder,
-        inventory
-      );
-
-    replaceInventory(
-      depletion.updatedInventory
-    );
-
-    if (
-      depletion.lowStockAlerts
-        .length > 0
-    ) {
-      baseOrder.inventoryWarnings =
-        depletion.lowStockAlerts;
-
-      baseOrder.events.push(
-        createEvent(
-          "INVENTORY_WARNING",
-          "INVENTORY_ENGINE",
-          depletion.lowStockAlerts.join(
-            ", "
-          )
-        )
-      );
-    }
-
-    baseOrder.acceptedAt =
-      now;
-
-    baseOrder.events.push(
-      createEvent(
-        "ACCEPTED",
-        "ORDER_API",
-        "Order accepted and inventory reserved/depleted"
-      )
-    );
-
-    addOrder(baseOrder);
+    addOrder(unavailableOrder);
 
     return NextResponse.json(
       {
         success: true,
-
-        order: baseOrder,
-
-        orders: getOrders(),
-
-        inventory:
-          getInventory(),
-
-        depletedItems:
-          depletion.depletedItems,
-
-        lowStockItems:
-          depletion.lowStockAlerts,
-
+        order: unavailableOrder,
         inventoryDecision:
-          inventoryEvaluation.inventoryDecision,
+          evaluation.decision,
       },
       { status: 201 }
     );
-  } catch (error) {
-    const message =
-      error instanceof Error
-        ? error.message
-        : "Failed to create order";
+  }
 
-    return jsonError(
-      message,
-      500
+  const depletion =
+    processOrderDepletion(
+      order,
+      inventory
+    );
+
+  const persistedOrder = {
+    ...order,
+    inventoryDecision:
+      evaluation.decision,
+    inventoryWarnings:
+      evaluation.warnings,
+    inventoryUnavailable:
+      evaluation.unavailable,
+    events: [
+      ...(order.events ?? []),
+      ...(evaluation.warnings.length
+        ? [
+            {
+              id: `EVT-${Date.now()}-WARNING`,
+              type:
+                "INVENTORY_WARNING" as const,
+              timestamp: now(),
+              actor:
+                employee.employeeCode,
+              details:
+                evaluation.warnings.join(
+                  "; "
+                ),
+            },
+          ]
+        : []),
+      {
+        id: `EVT-${Date.now()}-ACCEPTED`,
+        type: "ACCEPTED" as const,
+        timestamp: now(),
+        actor:
+          employee.employeeCode,
+        details:
+          "Order accepted after inventory evaluation",
+      },
+    ],
+    updatedAt: now(),
+  };
+
+  if (!depletion.success) {
+    return NextResponse.json(
+      {
+        success: false,
+        error:
+          depletion.error ??
+          "Unable to deplete inventory",
+      },
+      { status: 409 }
     );
   }
+
+  addOrder(persistedOrder);
+
+  return NextResponse.json(
+    {
+      success: true,
+      order: persistedOrder,
+      inventoryDecision:
+        evaluation.decision,
+    },
+    { status: 201 }
+  );
 }
 
 export async function PATCH(
-  request: Request
+  request: NextRequest
 ) {
+  const auth = requireEmployee(
+    request,
+    "KITCHEN_OPERATE"
+  );
+
+  if (auth.error) {
+    return auth.error;
+  }
+
+  const employee = auth.employee;
+
+  let body: OrderRequest;
+
   try {
-    const body =
-      (await request.json()) as UpdateOrderBody;
-
-    if (
-      !isNonEmptyString(
-        body.status
-      ) &&
-      !isNonEmptyString(
-        body.action
-      )
-    ) {
-      return jsonError(
-        "PATCH requires either status or action"
-      );
-    }
-
-    const orderId =
-      isNonEmptyString(
-        body.orderId
-      )
-        ? body.orderId.trim()
-        : isNonEmptyString(
-            body.id
-          )
-          ? body.id.trim()
-          : undefined;
-
-    if (!orderId) {
-      return jsonError(
-        "Missing orderId"
-      );
-    }
-
-    const order =
-      findOrder(orderId);
-
-    if (!order) {
-      return jsonError(
-        `Order ${orderId} not found`,
-        404
-      );
-    }
-
-    const actor =
-      getActor(
-        body,
-        "SYSTEM"
-      );
-
-    if (
-      body.action ===
-      "DRIVER_ASSIGNED"
-    ) {
-      if (
-        order.status !==
-        "READY_FOR_PICKUP"
-      ) {
-        return jsonError(
-          `Cannot assign driver while order is ${order.status}`,
-          409
-        );
-      }
-
-      if (
-        !isNonEmptyString(
-          body.driverName
-        )
-      ) {
-        return jsonError(
-          "driverName is required when assigning a driver"
-        );
-      }
-
-      const now =
-        new Date().toISOString();
-
-      const driverName =
-        body.driverName.trim();
-
-      const updated =
-        updateOrder(
-          orderId,
-          {
-            status:
-              "DRIVER_ASSIGNED",
-
-            driverName,
-
-            driverAssignedAt:
-              now,
-
-            updatedAt:
-              now,
-
-            events: [
-              ...order.events,
-
-              createEvent(
-                "DRIVER_ASSIGNED",
-                actor,
-                `Driver assigned: ${driverName}`
-              ),
-            ],
-          }
-        );
-
-      return NextResponse.json({
-        success: true,
-
-        order: updated,
-
-        orders: getOrders(),
-
-        inventory:
-          getInventory(),
-      });
-    }
-
-    if (
-      body.action ===
-      "PICKED_UP"
-    ) {
-      if (
-        order.status !==
-        "DRIVER_ASSIGNED"
-      ) {
-        return jsonError(
-          `Cannot mark pickup while order is ${order.status}`,
-          409
-        );
-      }
-
-      if (
-        !order.driverAssignedAt
-      ) {
-        return jsonError(
-          "Order cannot be picked up before driver assignment",
-          409
-        );
-      }
-
-      const now =
-        new Date().toISOString();
-
-      const updated =
-        updateOrder(
-          orderId,
-          {
-            status:
-              "PICKED_UP",
-
-            pickedUpAt:
-              now,
-
-            updatedAt:
-              now,
-
-            events: [
-              ...order.events,
-
-              createEvent(
-                "PICKED_UP",
-                actor,
-                order.driverName
-                  ? `Picked up by ${order.driverName}`
-                  : "Order picked up"
-              ),
-            ],
-          }
-        );
-
-      return NextResponse.json({
-        success: true,
-
-        order: updated,
-
-        orders: getOrders(),
-
-        inventory:
-          getInventory(),
-      });
-    }
-
-    if (
-      body.action !==
-        undefined &&
-      !ACTIONS.includes(
-        body.action as OrderAction
-      )
-    ) {
-      return jsonError(
-        `Unsupported order action: ${String(
-          body.action
-        )}`
-      );
-    }
-
-    if (
-      !isValidStatus(
-        body.status
-      )
-    ) {
-      return jsonError(
-        `Invalid order status: ${String(
-          body.status
-        )}`
-      );
-    }
-
-    const nextStatus =
-      body.status;
-
-    if (
-      nextStatus ===
-      order.status
-    ) {
-      return NextResponse.json({
-        success: true,
-
-        order,
-
-        orders: getOrders(),
-
-        inventory:
-          getInventory(),
-
-        unchanged: true,
-      });
-    }
-
-    if (
-      !VALID_TRANSITIONS[
-        order.status
-      ].includes(
-        nextStatus
-      )
-    ) {
-      return jsonError(
-        `Invalid lifecycle transition: ${order.status} -> ${nextStatus}`,
-        409
-      );
-    }
-
-    if (
-      nextStatus ===
-      "CANCELLED"
-    ) {
-      const cancellationSource =
-        getCancellationSource(
-          body.cancellationSource
-        );
-
-      if (
-        !cancellationSource
-      ) {
-        return jsonError(
-          "cancellationSource is required and must be CUSTOMER, KITCHEN, AGGREGATOR, SYSTEM, or MANUAL"
-        );
-      }
-
-      if (
-        !isNonEmptyString(
-          body.cancellationReason
-        )
-      ) {
-        return jsonError(
-          "cancellationReason is required when cancelling an order"
-        );
-      }
-
-      const cancellationReason =
-        body.cancellationReason.trim();
-
-      let cancellationDetails =
-        `${cancellationSource}: ${cancellationReason}`;
-
-      if (
-        order.status ===
-        "PENDING"
-      ) {
-        const restoration =
-          restoreOrderInventory(
-            order,
-            getInventory()
-          );
-
-        replaceInventory(
-          restoration.updatedInventory
-        );
-
-        cancellationDetails +=
-          restoration.restoredItems.length >
-          0
-            ? ` | Inventory restored: ${restoration.restoredItems.join(
-                "; "
-              )}`
-            : " | No recipe inventory required restoration";
-      } else if (
-        order.status ===
-          "PREPARING" ||
-        order.status ===
-          "READY_FOR_PICKUP" ||
-        order.status ===
-          "DRIVER_ASSIGNED"
-      ) {
-        cancellationDetails +=
-          " | Food/labor consumption recorded as operational loss; inventory not restored";
-      } else if (
-        order.status ===
-        "PICKED_UP"
-      ) {
-        cancellationDetails +=
-          " | Pickup-stage cancellation recorded as aggregator/accounting claim evidence; inventory not restored";
-      }
-
-      const updated =
-        updateOrder(
-          orderId,
-          {
-            status:
-              "CANCELLED",
-
-            cancellationSource,
-
-            cancellationReason,
-
-            cancelledBy:
-              actor,
-
-            updatedAt:
-              now,
-
-            events: [
-              ...order.events,
-
-              createEvent(
-                "CANCELLED",
-                actor,
-                cancellationDetails
-              ),
-            ],
-          }
-        );
-
-      return NextResponse.json({
-        success: true,
-
-        order: updated,
-
-        orders: getOrders(),
-
-        inventory:
-          getInventory(),
-      });
-    }
-
-    if (
-      nextStatus ===
-        "DRIVER_ASSIGNED" ||
-      nextStatus ===
-        "PICKED_UP"
-    ) {
-      return jsonError(
-        `${nextStatus} must be performed using the corresponding order action`,
-        409
-      );
-    }
-
-    const eventType =
-      getStatusEvent(
-        nextStatus
-      );
-
-    if (!eventType) {
-      return jsonError(
-        `Unsupported lifecycle status transition: ${nextStatus}`
-      );
-    }
-
-    if (
-      nextStatus ===
-      "READY_FOR_PICKUP"
-    ) {
-      const updated =
-        updateOrder(
-          orderId,
-          {
-            status:
-              nextStatus,
-
-            prepCompletedAt:
-              now,
-
-            readyAt:
-              now,
-
-            updatedAt:
-              now,
-
-            events: [
-              ...order.events,
-
-              createEvent(
-                eventType,
-                actor,
-                "Order preparation completed and order is ready for pickup"
-              ),
-            ],
-          }
-        );
-
-      return NextResponse.json({
-        success: true,
-
-        order: updated,
-
-        orders: getOrders(),
-
-        inventory:
-          getInventory(),
-      });
-    }
-
-    const timestampField =
-      getStatusTimestamp(
-        nextStatus
-      );
-
-    const timestampUpdate =
-      timestampField
-        ? {
-            [timestampField]:
-              now,
-          }
-        : {};
-
-    const updated =
-      updateOrder(
-        orderId,
-        {
-          status:
-            nextStatus,
-
-          updatedAt:
-            now,
-
-          ...timestampUpdate,
-
-          events: [
-            ...order.events,
-
-            createEvent(
-              eventType,
-              actor,
-              `Order moved to ${nextStatus}`
-            ),
-          ],
-        }
-      );
-
-    return NextResponse.json({
-      success: true,
-
-      order: updated,
-
-      orders: getOrders(),
-
-      inventory:
-        getInventory(),
-    });
-  } catch (error) {
-    const message =
-      error instanceof Error
-        ? error.message
-        : "Failed to update order";
-
-    return jsonError(
-      message,
-      500
+    body =
+      (await request.json()) as OrderRequest;
+  } catch {
+    return NextResponse.json(
+      {
+        success: false,
+        error: "Invalid request body",
+      },
+      { status: 400 }
     );
   }
+
+  if (!body.orderId) {
+    return NextResponse.json(
+      {
+        success: false,
+        error: "orderId is required",
+      },
+      { status: 400 }
+    );
+  }
+
+  const existingOrder =
+    findOrder(body.orderId);
+
+  if (!existingOrder) {
+    return NextResponse.json(
+      {
+        success: false,
+        error: "Order not found",
+      },
+      { status: 404 }
+    );
+  }
+
+  if (
+    !canAccessOrder(
+      employee,
+      existingOrder
+    )
+  ) {
+    return NextResponse.json(
+      {
+        success: false,
+        error:
+          "Employee cannot operate this order",
+      },
+      { status: 403 }
+    );
+  }
+
+  const action =
+    body.action ??
+    body.status;
+
+  if (!action) {
+    return NextResponse.json(
+      {
+        success: false,
+        error:
+          "Order action is required",
+      },
+      { status: 400 }
+    );
+  }
+
+  if (
+    action === "PREPARING" ||
+    action === "READY_FOR_PICKUP"
+  ) {
+    if (
+      !ROLE_PERMISSIONS_DB.some(
+        (permission) =>
+          permission.role ===
+            employee.role &&
+          permission.permissionCode ===
+            "COOK_ORDERS"
+      )
+    ) {
+      return NextResponse.json(
+        {
+          success: false,
+          error:
+            "Cook permission required",
+        },
+        { status: 403 }
+      );
+    }
+  }
+
+  if (
+    action === "DRIVER_ASSIGNED" ||
+    action === "PICKED_UP" ||
+    action === "DISPATCHED"
+  ) {
+    if (
+      !ROLE_PERMISSIONS_DB.some(
+        (permission) =>
+          permission.role ===
+            employee.role &&
+          permission.permissionCode ===
+            "DISPATCH_ORDERS"
+      )
+    ) {
+      return NextResponse.json(
+        {
+          success: false,
+          error:
+            "Dispatch permission required",
+        },
+        { status: 403 }
+      );
+    }
+  }
+
+  if (action === "CANCELLED") {
+    if (
+      !ROLE_PERMISSIONS_DB.some(
+        (permission) =>
+          permission.role ===
+            employee.role &&
+          permission.permissionCode ===
+            "ORDER_CANCEL"
+      )
+    ) {
+      return NextResponse.json(
+        {
+          success: false,
+          error:
+            "Cancellation permission required",
+        },
+        { status: 403 }
+      );
+    }
+
+    if (
+      existingOrder.status ===
+        "PICKED_UP" ||
+      existingOrder.status ===
+        "DISPATCHED"
+    ) {
+      return NextResponse.json(
+        {
+          success: false,
+          error:
+            "This order requires post-pickup aggregator/accounting handling",
+        },
+        { status: 409 }
+      );
+    }
+  }
+
+  const updatedOrder =
+    updateOrder(
+      existingOrder.id,
+      (currentOrder) => {
+        const nextOrder =
+          updateOrderLifecycle(
+            currentOrder,
+            action,
+            employee,
+            body.driverName,
+            body.cancellationReason,
+            body.cancellationSource
+          );
+
+        if (
+          action === "CANCELLED"
+        ) {
+          const restoration =
+            restoreOrderInventory(
+              currentOrder
+            );
+
+          return {
+            ...nextOrder,
+            inventoryWarnings: [
+              ...(nextOrder.inventoryWarnings ??
+                []),
+              restoration.restored
+                ? "Inventory restored after cancellation"
+                : "Consumed ingredients recorded as operational loss",
+            ],
+          };
+        }
+
+        return nextOrder;
+      }
+    );
+
+  if (!updatedOrder) {
+    return NextResponse.json(
+      {
+        success: false,
+        error:
+          "Unable to update order",
+      },
+      { status: 500 }
+    );
+  }
+
+  return NextResponse.json({
+    success: true,
+    order: updatedOrder,
+  });
 }
