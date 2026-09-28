@@ -1,214 +1,248 @@
-import { NextRequest, NextResponse } from "next/server";
-
-import {
-  EMPLOYEES_DB,
-  ROLE_PERMISSIONS_DB,
-  type Employee,
-  type InventoryItem,
-  type PermissionCode,
+import type {
+  InventoryItem,
+  Order,
 } from "@/lib/db";
 
-import {
-  getInventory,
-  replaceInventory,
-} from "@/lib/store";
+import { INVENTORY_DB } from "@/lib/db";
 
-function getEmployee(
-  request: NextRequest
-): Employee | null {
-  const employeeCode =
-    request.cookies.get("employee_code")?.value;
+export interface KitchenState {
+  orders: Order[];
+  inventory: InventoryItem[];
+}
 
-  if (!employeeCode) {
-    return null;
-  }
+export interface StoreSnapshot {
+  orders: Order[];
+  inventory: InventoryItem[];
+}
 
-  return (
-    EMPLOYEES_DB.find(
-      (employee) =>
-        employee.active &&
-        employee.employeeCode === employeeCode
-    ) ?? null
+const globalState: KitchenState = {
+  orders: [],
+  inventory: INVENTORY_DB.map(
+    (item) => ({ ...item })
+  ),
+};
+
+function cloneOrder(
+  order: Order
+): Order {
+  return {
+    ...order,
+
+    items: order.items.map(
+      (item) => ({ ...item })
+    ),
+
+    events: order.events.map(
+      (event) => ({ ...event })
+    ),
+
+    inventoryWarnings:
+      order.inventoryWarnings
+        ? [
+            ...order.inventoryWarnings,
+          ]
+        : undefined,
+
+    inventoryUnavailable:
+      order.inventoryUnavailable
+        ? [
+            ...order.inventoryUnavailable,
+          ]
+        : undefined,
+  };
+}
+
+function cloneInventoryItem(
+  item: InventoryItem
+): InventoryItem {
+  return {
+    ...item,
+  };
+}
+
+function cloneState(
+  state: KitchenState
+): KitchenState {
+  return {
+    orders: state.orders.map(
+      cloneOrder
+    ),
+
+    inventory:
+      state.inventory.map(
+        cloneInventoryItem
+      ),
+  };
+}
+
+export function getOrders(): Order[] {
+  return globalState.orders.map(
+    cloneOrder
   );
 }
 
-function hasPermission(
-  employee: Employee,
-  permissionCode: PermissionCode
-): boolean {
-  return ROLE_PERMISSIONS_DB.some(
-    (permission) =>
-      permission.role === employee.role &&
-      permission.permissionCode === permissionCode
+export function getInventory(): InventoryItem[] {
+  return globalState.inventory.map(
+    cloneInventoryItem
   );
 }
 
-export async function GET(
-  request: NextRequest
-) {
+export function getStoreSnapshot(): StoreSnapshot {
+  const snapshot =
+    cloneState(globalState);
+
+  return {
+    orders: snapshot.orders,
+    inventory: snapshot.inventory,
+  };
+}
+
+export function addOrder(
+  order: Order
+): Order {
+  const storedOrder =
+    cloneOrder(order);
+
+  globalState.orders.push(
+    storedOrder
+  );
+
+  return cloneOrder(
+    storedOrder
+  );
+}
+
+export function replaceOrders(
+  orders: Order[]
+): void {
+  globalState.orders =
+    orders.map(
+      cloneOrder
+    );
+}
+
+export function replaceInventory(
+  inventory: InventoryItem[]
+): void {
+  globalState.inventory =
+    inventory.map(
+      cloneInventoryItem
+    );
+}
+
+export function findOrder(
+  orderId: string
+): Order | undefined {
+  const order =
+    globalState.orders.find(
+      (item) =>
+        item.id === orderId
+    );
+
+  return order
+    ? cloneOrder(order)
+    : undefined;
+}
+
+export function updateOrder(
+  orderId: string,
+  updater: (
+    order: Order
+  ) => Order
+): Order {
+  const index =
+    globalState.orders.findIndex(
+      (order) =>
+        order.id === orderId
+    );
+
+  if (index === -1) {
+    throw new Error(
+      `Order not found: ${orderId}`
+    );
+  }
+
+  const currentOrder =
+    cloneOrder(
+      globalState.orders[index]
+    );
+
+  const updatedOrder =
+    updater(currentOrder);
+
+  globalState.orders[index] =
+    cloneOrder(
+      updatedOrder
+    );
+
+  return cloneOrder(
+    updatedOrder
+  );
+}
+
+export function updateInventory(
+  updater: (
+    inventory: InventoryItem[]
+  ) => InventoryItem[]
+): InventoryItem[] {
+  const currentInventory =
+    getInventory();
+
+  const updatedInventory =
+    updater(
+      currentInventory
+    );
+
+  replaceInventory(
+    updatedInventory
+  );
+
+  return getInventory();
+}
+
+export function transaction<T>(
+  callback: (
+    state: KitchenState
+  ) => T
+): T {
+  const backup =
+    cloneState(
+      globalState
+    );
+
   try {
-    const employee = getEmployee(request);
-
-    if (!employee) {
-      return NextResponse.json(
-        { error: "Unauthorized" },
-        { status: 401 }
-      );
-    }
-
-    if (
-      !hasPermission(employee, "INVENTORY_VIEW") &&
-      !hasPermission(employee, "OWNER_VIEW")
-    ) {
-      return NextResponse.json(
-        { error: "Forbidden" },
-        { status: 403 }
-      );
-    }
-
-    const inventory = getInventory();
-
-    return NextResponse.json({
-      inventory,
-    });
+    return callback(
+      globalState
+    );
   } catch (error) {
-    console.error(
-      "GET /api/inventory failed:",
-      error
-    );
+    globalState.orders =
+      backup.orders;
 
-    return NextResponse.json(
-      {
-        error: "Unable to load inventory",
-      },
-      { status: 500 }
-    );
+    globalState.inventory =
+      backup.inventory;
+
+    throw error;
   }
 }
 
-export async function PATCH(
-  request: NextRequest
-) {
-  try {
-    const employee = getEmployee(request);
+export function replaceState(
+  state: KitchenState
+): void {
+  const clonedState =
+    cloneState(state);
 
-    if (!employee) {
-      return NextResponse.json(
-        { error: "Unauthorized" },
-        { status: 401 }
-      );
-    }
+  globalState.orders =
+    clonedState.orders;
 
-    if (
-      !hasPermission(
-        employee,
-        "INVENTORY_MANAGE"
-      )
-    ) {
-      return NextResponse.json(
-        { error: "Forbidden" },
-        { status: 403 }
-      );
-    }
+  globalState.inventory =
+    clonedState.inventory;
+}
 
-    const body = await request.json();
+export function resetStore(): void {
+  globalState.orders = [];
 
-    if (!body || typeof body !== "object") {
-      return NextResponse.json(
-        {
-          error:
-            "Invalid inventory payload",
-        },
-        { status: 400 }
-      );
-    }
-
-    const itemId =
-      typeof body.id === "string"
-        ? body.id
-        : "";
-
-    if (!itemId) {
-      return NextResponse.json(
-        {
-          error:
-            "Inventory item id is required",
-        },
-        { status: 400 }
-      );
-    }
-
-    const inventory = getInventory();
-
-    const existingItem =
-      inventory.find(
-        (item) => item.id === itemId
-      );
-
-    if (!existingItem) {
-      return NextResponse.json(
-        {
-          error:
-            "Inventory item not found",
-        },
-        { status: 404 }
-      );
-    }
-
-    const nextStock =
-      typeof body.currentStock === "number"
-        ? body.currentStock
-        : existingItem.currentStock;
-
-    if (
-      !Number.isFinite(nextStock) ||
-      nextStock < 0
-    ) {
-      return NextResponse.json(
-        {
-          error:
-            "currentStock must be a non-negative number",
-        },
-        { status: 400 }
-      );
-    }
-
-    const updatedItem: InventoryItem = {
-      ...existingItem,
-      currentStock: nextStock,
-      lastRestocked:
-        nextStock > existingItem.currentStock
-          ? new Date().toISOString()
-          : existingItem.lastRestocked,
-    };
-
-    const updatedInventory =
-      inventory.map((item) =>
-        item.id === itemId
-          ? updatedItem
-          : item
-      );
-
-    replaceInventory(
-      updatedInventory
+  globalState.inventory =
+    INVENTORY_DB.map(
+      cloneInventoryItem
     );
-
-    return NextResponse.json({
-      inventory: updatedInventory,
-      item: updatedItem,
-    });
-  } catch (error) {
-    console.error(
-      "PATCH /api/inventory failed:",
-      error
-    );
-
-    return NextResponse.json(
-      {
-        error:
-          "Unable to update inventory",
-      },
-      { status: 500 }
-    );
-  }
 }
