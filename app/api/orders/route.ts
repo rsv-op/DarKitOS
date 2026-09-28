@@ -387,4 +387,352 @@ export async function POST(
               : undefined,
           events: [
             ...order.events,
-            create
+            createEvent(
+              "INVENTORY_CHECKED",
+              employee.employeeCode,
+              depletion.inventoryDecision
+            ),
+            ...(depletion.lowStockAlerts
+              .length > 0
+              ? [
+                  createEvent(
+                    "INVENTORY_WARNING",
+                    employee.employeeCode,
+                    depletion.lowStockAlerts.join(
+                      ", "
+                    )
+                  ),
+                ]
+              : []),
+            createEvent(
+              "ACCEPTED",
+              employee.employeeCode,
+              "Order accepted and inventory allocated"
+            ),
+          ],
+        };
+
+        replaceInventory(
+          depletion.updatedInventory
+        );
+
+        const storedOrder =
+          addOrder(
+            acceptedOrder
+          );
+
+        return {
+          accepted: true,
+          order: storedOrder,
+          depletedItems:
+            depletion.depletedItems,
+          lowStockAlerts:
+            depletion.lowStockAlerts,
+          currentInventory:
+            depletion.updatedInventory,
+        };
+      });
+
+    if (!result.accepted) {
+      return NextResponse.json(
+        {
+          error:
+            "Order cannot be accepted because required inventory is insufficient.",
+          order: result.order,
+          inventoryUnavailable:
+            result.order
+              .inventoryUnavailable ??
+            [],
+        },
+        { status: 409 }
+      );
+    }
+
+    return NextResponse.json(
+      {
+        order: result.order,
+        depletedItems:
+          result.depletedItems,
+        lowStockAlerts:
+          result.lowStockAlerts,
+        currentInventory:
+          result.currentInventory,
+      },
+      { status: 201 }
+    );
+  } catch (error) {
+    console.error(
+      "POST /api/orders failed:",
+      error
+    );
+
+    return NextResponse.json(
+      {
+        error:
+          "Unable to create order",
+      },
+      { status: 500 }
+    );
+  }
+}
+
+export async function PATCH(
+  request: NextRequest
+) {
+  try {
+    const employee =
+      getEmployee(request);
+
+    if (!employee) {
+      return NextResponse.json(
+        { error: "Unauthorized" },
+        { status: 401 }
+      );
+    }
+
+    const body =
+      await request.json();
+
+    const orderId =
+      typeof body?.orderId ===
+      "string"
+        ? body.orderId
+        : typeof body?.id ===
+            "string"
+          ? body.id
+          : "";
+
+    const action =
+      typeof body?.action ===
+      "string"
+        ? (body.action as OrderStatus)
+        : null;
+
+    if (
+      !orderId ||
+      !action
+    ) {
+      return NextResponse.json(
+        {
+          error:
+            "orderId and action are required",
+        },
+        { status: 400 }
+      );
+    }
+
+    const allowedActions:
+      OrderStatus[] = [
+        "PREPARING",
+        "READY_FOR_PICKUP",
+        "DRIVER_ASSIGNED",
+        "PICKED_UP",
+        "DISPATCHED",
+        "CANCELLED",
+      ];
+
+    if (
+      !allowedActions.includes(
+        action
+      )
+    ) {
+      return NextResponse.json(
+        {
+          error:
+            "Unsupported order action",
+        },
+        { status: 400 }
+      );
+    }
+
+    const existingOrders =
+      getOrders();
+
+    const existingOrder =
+      existingOrders.find(
+        (order) =>
+          order.id === orderId
+      );
+
+    if (!existingOrder) {
+      return NextResponse.json(
+        {
+          error:
+            "Order not found",
+        },
+        { status: 404 }
+      );
+    }
+
+    if (
+      !canAccessOrder(
+        employee,
+        existingOrder
+      )
+    ) {
+      return NextResponse.json(
+        { error: "Forbidden" },
+        { status: 403 }
+      );
+    }
+
+    if (
+      !canUseOrderAction(
+        employee,
+        action
+      )
+    ) {
+      return NextResponse.json(
+        {
+          error:
+            "Permission denied",
+        },
+        { status: 403 }
+      );
+    }
+
+    if (
+      action ===
+        "CANCELLED" &&
+      (
+        existingOrder.status ===
+          "PICKED_UP" ||
+        existingOrder.status ===
+          "DISPATCHED"
+      )
+    ) {
+      return NextResponse.json(
+        {
+          error:
+            "Post-pickup cancellation requires aggregator/accounting handling.",
+        },
+        { status: 409 }
+      );
+    }
+
+    const now =
+      new Date().toISOString();
+
+    const updatedOrder =
+      updateOrder(
+        orderId,
+        (currentOrder) => {
+          const nextOrder =
+            {
+              ...currentOrder,
+              status: action,
+              updatedAt: now,
+              events: [
+                ...currentOrder.events,
+                createEvent(
+                  action as OrderEventType,
+                  employee.employeeCode
+                ),
+              ],
+            } as Order;
+
+          if (
+            action ===
+            "PREPARING"
+          ) {
+            nextOrder.prepStartedAt =
+              currentOrder.prepStartedAt ??
+              now;
+          }
+
+          if (
+            action ===
+            "READY_FOR_PICKUP"
+          ) {
+            nextOrder.prepCompletedAt =
+              currentOrder.prepCompletedAt ??
+              now;
+
+            nextOrder.readyAt =
+              currentOrder.readyAt ??
+              now;
+          }
+
+          if (
+            action ===
+            "DRIVER_ASSIGNED"
+          ) {
+            nextOrder.driverAssignedAt =
+              currentOrder.driverAssignedAt ??
+              now;
+
+            if (
+              typeof body.driverName ===
+              "string"
+            ) {
+              nextOrder.driverName =
+                body.driverName;
+            }
+
+            if (
+              typeof body.courierEtaMins ===
+              "number"
+            ) {
+              nextOrder.courierEtaMins =
+                body.courierEtaMins;
+            }
+          }
+
+          if (
+            action ===
+            "PICKED_UP"
+          ) {
+            nextOrder.pickedUpAt =
+              currentOrder.pickedUpAt ??
+              now;
+          }
+
+          if (
+            action ===
+            "DISPATCHED"
+          ) {
+            nextOrder.dispatchedAt =
+              currentOrder.dispatchedAt ??
+              now;
+          }
+
+          if (
+            action ===
+            "CANCELLED"
+          ) {
+            nextOrder.cancellationSource =
+              body.cancellationSource ??
+              "MANUAL";
+
+            nextOrder.cancellationReason =
+              typeof body.cancellationReason ===
+              "string"
+                ? body.cancellationReason
+                : "Order cancelled";
+
+            nextOrder.cancelledBy =
+              employee.employeeCode;
+          }
+
+          return nextOrder;
+        }
+      );
+
+    return NextResponse.json({
+      order: updatedOrder,
+    });
+  } catch (error) {
+    console.error(
+      "PATCH /api/orders failed:",
+      error
+    );
+
+    return NextResponse.json(
+      {
+        error:
+          "Unable to update order",
+      },
+      { status: 500 }
+    );
+  }
+}
