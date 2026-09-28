@@ -1,40 +1,73 @@
 import { NextRequest, NextResponse } from "next/server";
 
-import { EMPLOYEES_DB } from "@/lib/db";
+import {
+  EMPLOYEES_DB,
+  type Employee,
+} from "@/lib/db";
+
+function getDefaultRoute(
+  employee: Employee
+): string {
+  if (employee.role === "OWNER") {
+    return "/owner";
+  }
+
+  if (
+    employee.role === "MANAGER" ||
+    employee.role === "LINE_COOK"
+  ) {
+    return "/cook";
+  }
+
+  if (employee.role === "DISPATCH") {
+    return "/dispatch";
+  }
+
+  return "/login";
+}
+
+function canAccessRoute(
+  employee: Employee,
+  pathname: string
+): boolean {
+  if (pathname.startsWith("/owner")) {
+    return employee.role === "OWNER";
+  }
+
+  if (
+    pathname.startsWith("/cook") ||
+    pathname.startsWith("/dispatch")
+  ) {
+    return Boolean(employee.kitchenId);
+  }
+
+  return true;
+}
 
 export async function POST(
   request: NextRequest
 ) {
   try {
-    const body =
-      await request.json();
+    const body = await request.json();
 
-    if (
-      !body ||
-      typeof body !== "object"
-    ) {
+    if (!body || typeof body !== "object") {
       return NextResponse.json(
         {
-          success: false,
-          error:
-            "Invalid login payload",
+          error: "Invalid login payload",
         },
         { status: 400 }
       );
     }
 
     const employeeCode =
-      typeof body.employeeCode ===
-      "string"
+      typeof body.employeeCode === "string"
         ? body.employeeCode.trim()
         : "";
 
     if (!employeeCode) {
       return NextResponse.json(
         {
-          success: false,
-          error:
-            "Employee code is required",
+          error: "Employee code is required",
         },
         { status: 400 }
       );
@@ -44,24 +77,35 @@ export async function POST(
       EMPLOYEES_DB.find(
         (item) =>
           item.active &&
-          item.employeeCode ===
-            employeeCode
+          item.employeeCode.toLowerCase() ===
+            employeeCode.toLowerCase()
       );
 
     if (!employee) {
       return NextResponse.json(
         {
-          success: false,
-          error:
-            "Invalid employee code",
+          error: "Invalid employee code",
         },
         { status: 401 }
       );
     }
 
+    const requestedRoute =
+      typeof body.redirect === "string"
+        ? body.redirect
+        : "";
+
+    const destination =
+      requestedRoute &&
+      canAccessRoute(
+        employee,
+        requestedRoute
+      )
+        ? requestedRoute
+        : getDefaultRoute(employee);
+
     const response =
       NextResponse.json({
-        success: true,
         employee: {
           id: employee.id,
           employeeCode:
@@ -71,7 +115,7 @@ export async function POST(
           kitchenId:
             employee.kitchenId,
         },
-        redirectTo: "/",
+        redirectTo: destination,
       });
 
     response.cookies.set(
@@ -80,12 +124,10 @@ export async function POST(
       {
         httpOnly: true,
         sameSite: "lax",
+        path: "/",
         secure:
           process.env.NODE_ENV ===
           "production",
-        path: "/",
-        maxAge:
-          60 * 60 * 12,
       }
     );
 
@@ -98,9 +140,7 @@ export async function POST(
 
     return NextResponse.json(
       {
-        success: false,
-        error:
-          "Unable to process login",
+        error: "Unable to process login",
       },
       { status: 500 }
     );
