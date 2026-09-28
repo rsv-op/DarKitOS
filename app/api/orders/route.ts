@@ -16,9 +16,9 @@ import {
   addOrder,
   getInventory,
   getOrders,
+  replaceInventory,
   transaction,
   updateOrder,
-  replaceInventory,
 } from "@/lib/store";
 
 function getEmployee(
@@ -109,7 +109,9 @@ function createEvent(
     type,
     timestamp: new Date().toISOString(),
     actor,
-    ...(details ? { details } : {}),
+    ...(details
+      ? { details }
+      : {}),
   };
 }
 
@@ -257,28 +259,10 @@ export async function POST(
       );
     }
 
-    if (!order.source) {
-      return NextResponse.json(
-        {
-          error:
-            "source is required",
-        },
-        { status: 400 }
-      );
-    }
-
-    if (!order.channel) {
-      return NextResponse.json(
-        {
-          error:
-            "channel is required",
-        },
-        { status: 400 }
-      );
-    }
-
     if (
-      !Array.isArray(order.items) ||
+      !Array.isArray(
+        order.items
+      ) ||
       order.items.length === 0
     ) {
       return NextResponse.json(
@@ -304,6 +288,22 @@ export async function POST(
       );
     }
 
+    const existingOrder =
+      getOrders().find(
+        (existing) =>
+          existing.id === order.id
+      );
+
+    if (existingOrder) {
+      return NextResponse.json(
+        {
+          error:
+            "Order already exists",
+        },
+        { status: 409 }
+      );
+    }
+
     const result =
       transaction(() => {
         const inventory =
@@ -315,53 +315,44 @@ export async function POST(
             inventory
           );
 
-        const inventoryWarnings =
-          evaluation.lowStockItems;
-
-        const inventoryUnavailable =
-          evaluation.insufficientStockItems;
-
         if (
           evaluation.inventoryDecision ===
           "INSUFFICIENT_STOCK"
         ) {
-          const blockedOrder: Order = {
+          const unavailable =
+            evaluation.insufficientStockItems ??
+            [];
+
+          const warnings =
+            evaluation.lowStockItems ??
+            [];
+
+          const rejectedOrder: Order = {
             ...order,
             inventoryDecision:
-              evaluation.inventoryDecision,
-            inventoryWarnings:
-              inventoryWarnings.length > 0
-                ? inventoryWarnings
-                : undefined,
+              "INSUFFICIENT_STOCK",
             inventoryUnavailable:
-              inventoryUnavailable.length > 0
-                ? inventoryUnavailable
-                : undefined,
+              unavailable,
+            inventoryWarnings:
+              warnings,
             events: [
               ...order.events,
               createEvent(
                 "INVENTORY_CHECKED",
                 employee.employeeCode,
-                "Inventory checked before order acceptance"
+                "Inventory check completed"
               ),
               createEvent(
                 "INVENTORY_UNAVAILABLE",
                 employee.employeeCode,
-                inventoryUnavailable.join(
-                  ", "
-                )
+                unavailable.join(", ")
               ),
             ],
           };
 
           return {
             accepted: false,
-            order: blockedOrder,
-            depletedItems: [],
-            lowStockAlerts:
-              inventoryWarnings,
-            currentInventory:
-              inventory,
+            order: rejectedOrder,
           };
         }
 
@@ -371,34 +362,36 @@ export async function POST(
             inventory
           );
 
-        const acceptedOrder: Order = {
+        const inventoryWarnings =
+          evaluation.lowStockItems ??
+          [];
+
+        const depletedItems =
+          depletion.depletedItems ??
+          [];
+
+        const updatedOrder: Order = {
           ...order,
           inventoryDecision:
-            depletion.inventoryDecision,
-          inventoryWarnings:
-            depletion.lowStockAlerts.length >
-            0
-              ? depletion.lowStockAlerts
-              : undefined,
+            evaluation.inventoryDecision,
+          inventoryWarnings,
           inventoryUnavailable:
-            depletion.insufficientStockItems
-                .length > 0
-              ? depletion.insufficientStockItems
-              : undefined,
+            evaluation.insufficientStockItems ??
+            [],
           events: [
             ...order.events,
             createEvent(
               "INVENTORY_CHECKED",
               employee.employeeCode,
-              depletion.inventoryDecision
+              "Inventory check completed"
             ),
-            ...(depletion.lowStockAlerts
-              .length > 0
+            ...(inventoryWarnings.length >
+            0
               ? [
                   createEvent(
                     "INVENTORY_WARNING",
                     employee.employeeCode,
-                    depletion.lowStockAlerts.join(
+                    inventoryWarnings.join(
                       ", "
                     )
                   ),
@@ -407,7 +400,7 @@ export async function POST(
             createEvent(
               "ACCEPTED",
               employee.employeeCode,
-              "Order accepted and inventory allocated"
+              "Order accepted and inventory reserved"
             ),
           ],
         };
@@ -416,19 +409,15 @@ export async function POST(
           depletion.updatedInventory
         );
 
-        const storedOrder =
-          addOrder(
-            acceptedOrder
-          );
+        addOrder(
+          updatedOrder
+        );
 
         return {
           accepted: true,
-          order: storedOrder,
-          depletedItems:
-            depletion.depletedItems,
-          lowStockAlerts:
-            depletion.lowStockAlerts,
-          currentInventory:
+          order: updatedOrder,
+          depletedItems,
+          inventory:
             depletion.updatedInventory,
         };
       });
@@ -437,12 +426,14 @@ export async function POST(
       return NextResponse.json(
         {
           error:
-            "Order cannot be accepted because required inventory is insufficient.",
+            "Insufficient inventory",
           order: result.order,
+          inventoryDecision:
+            result.order
+              .inventoryDecision,
           inventoryUnavailable:
             result.order
-              .inventoryUnavailable ??
-            [],
+              .inventoryUnavailable,
         },
         { status: 409 }
       );
@@ -451,12 +442,10 @@ export async function POST(
     return NextResponse.json(
       {
         order: result.order,
+        inventory:
+          result.inventory,
         depletedItems:
           result.depletedItems,
-        lowStockAlerts:
-          result.lowStockAlerts,
-        currentInventory:
-          result.currentInventory,
       },
       { status: 201 }
     );
@@ -498,7 +487,7 @@ export async function PATCH(
       "string"
         ? body.orderId
         : typeof body?.id ===
-            "string"
+          "string"
           ? body.id
           : "";
 
@@ -508,10 +497,7 @@ export async function PATCH(
         ? (body.action as OrderStatus)
         : null;
 
-    if (
-      !orderId ||
-      !action
-    ) {
+    if (!orderId || !action) {
       return NextResponse.json(
         {
           error:
@@ -592,8 +578,7 @@ export async function PATCH(
     }
 
     if (
-      action ===
-        "CANCELLED" &&
+      action === "CANCELLED" &&
       (
         existingOrder.status ===
           "PICKED_UP" ||
@@ -632,8 +617,7 @@ export async function PATCH(
             } as Order;
 
           if (
-            action ===
-            "PREPARING"
+            action === "PREPARING"
           ) {
             nextOrder.prepStartedAt =
               currentOrder.prepStartedAt ??
@@ -679,8 +663,7 @@ export async function PATCH(
           }
 
           if (
-            action ===
-            "PICKED_UP"
+            action === "PICKED_UP"
           ) {
             nextOrder.pickedUpAt =
               currentOrder.pickedUpAt ??
@@ -688,8 +671,7 @@ export async function PATCH(
           }
 
           if (
-            action ===
-            "DISPATCHED"
+            action === "DISPATCHED"
           ) {
             nextOrder.dispatchedAt =
               currentOrder.dispatchedAt ??
@@ -697,8 +679,7 @@ export async function PATCH(
           }
 
           if (
-            action ===
-            "CANCELLED"
+            action === "CANCELLED"
           ) {
             nextOrder.cancellationSource =
               body.cancellationSource ??
