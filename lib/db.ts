@@ -1,4 +1,3 @@
-
 export type DbaBrand =
   | "BurgerForge"
   | "TacoMatrix"
@@ -23,6 +22,22 @@ export type OrderSource =
   | "DIRECT_WEB";
 
 export type StationRole = "cook" | "dispatch" | "owner";
+
+export type EmployeeRole =
+  | "OWNER"
+  | "MANAGER"
+  | "LINE_COOK"
+  | "DISPATCH";
+
+export type PermissionCode =
+  | "OWNER_VIEW"
+  | "KITCHEN_OPERATE"
+  | "COOK_ORDERS"
+  | "DISPATCH_ORDERS"
+  | "INVENTORY_VIEW"
+  | "INVENTORY_MANAGE"
+  | "ORDER_CANCEL"
+  | "STAFF_MANAGE";
 
 export type OrderStatus =
   | "PENDING"
@@ -76,8 +91,36 @@ export interface KitchenConfig {
   id: string;
   name: string;
   code: string;
+  location?: string;
+  areaCode?: string;
   active: boolean;
   timezone: string;
+}
+
+export interface BrandKitchenConfig {
+  brandId: DbaBrand;
+  kitchenId: string;
+  active: boolean;
+}
+
+export interface Employee {
+  id: string;
+  employeeCode: string;
+  name: string;
+  role: EmployeeRole;
+  kitchenId?: string;
+  active: boolean;
+}
+
+export interface Permission {
+  id: string;
+  code: PermissionCode;
+  description: string;
+}
+
+export interface RolePermission {
+  role: EmployeeRole;
+  permissionId: string;
 }
 
 export interface InventoryItem {
@@ -218,11 +261,186 @@ export const BRANDS_DB: BrandConfig[] = [
 export const KITCHENS_DB: KitchenConfig[] = [
   {
     id: "K1",
-    name: "Kitchen 1",
-    code: "K1",
+    name: "Gurugram Central Hub",
+    code: "GGN-01",
+    location: "Sector 29, Gurugram",
+    areaCode: "GGN-01",
     active: true,
     timezone: "Asia/Kolkata",
   },
+  {
+    id: "K2",
+    name: "Noida Sector 62 Cloud Unit B",
+    code: "NDA-02",
+    location: "Sector 62, Noida",
+    areaCode: "NDA-02",
+    active: true,
+    timezone: "Asia/Kolkata",
+  },
+  {
+    id: "K3",
+    name: "South Delhi Dark Kitchen",
+    code: "DEL-03",
+    location: "Greater Kailash, New Delhi",
+    areaCode: "DEL-03",
+    active: true,
+    timezone: "Asia/Kolkata",
+  },
+  {
+    id: "K4",
+    name: "Cyber City Express Hatch",
+    code: "CYB-04",
+    location: "DLF Phase 3, Gurugram",
+    areaCode: "CYB-04",
+    active: true,
+    timezone: "Asia/Kolkata",
+  },
+];
+
+export const BRAND_KITCHENS_DB: BrandKitchenConfig[] =
+  BRANDS_DB.map((brand) => ({
+    brandId: brand.id,
+    kitchenId: "K1",
+    active: true,
+  }));
+
+export const EMPLOYEES_DB: Employee[] = [
+  {
+    id: "EMP-OWNER-01",
+    employeeCode: "OWNER-01",
+    name: "Patric Revuelto",
+    role: "OWNER",
+    active: true,
+  },
+  {
+    id: "EMP-K1-MGR-01",
+    employeeCode: "0001",
+    name: "Priya Sharma",
+    role: "MANAGER",
+    kitchenId: "K1",
+    active: true,
+  },
+  {
+    id: "EMP-K1-COOK-01",
+    employeeCode: "2001",
+    name: "Rajesh Kumar",
+    role: "LINE_COOK",
+    kitchenId: "K1",
+    active: true,
+  },
+  {
+    id: "EMP-K2-MGR-01",
+    employeeCode: "0002",
+    name: "Amit Verma",
+    role: "MANAGER",
+    kitchenId: "K2",
+    active: true,
+  },
+  {
+    id: "EMP-K2-COOK-01",
+    employeeCode: "2002",
+    name: "Sunita Rao",
+    role: "LINE_COOK",
+    kitchenId: "K2",
+    active: true,
+  },
+  {
+    id: "EMP-K3-MGR-01",
+    employeeCode: "0003",
+    name: "Vikram Malhotra",
+    role: "MANAGER",
+    kitchenId: "K3",
+    active: true,
+  },
+  {
+    id: "EMP-K3-COOK-01",
+    employeeCode: "2003",
+    name: "Pooja Iyer",
+    role: "LINE_COOK",
+    kitchenId: "K3",
+    active: true,
+  },
+  {
+    id: "EMP-K4-MGR-01",
+    employeeCode: "0004",
+    name: "Deepesh Nair",
+    role: "MANAGER",
+    kitchenId: "K4",
+    active: true,
+  },
+  {
+    id: "EMP-K4-COOK-01",
+    employeeCode: "2004",
+    name: "Anjali Das",
+    role: "LINE_COOK",
+    kitchenId: "K4",
+    active: true,
+  },
+];
+
+export const PERMISSIONS_DB: Permission[] = [
+  {
+    id: "PERM-OWNER-VIEW",
+    code: "OWNER_VIEW",
+    description: "View unified owner analytics and operations.",
+  },
+  {
+    id: "PERM-KITCHEN-OPERATE",
+    code: "KITCHEN_OPERATE",
+    description: "Operate within an assigned kitchen.",
+  },
+  {
+    id: "PERM-COOK-ORDERS",
+    code: "COOK_ORDERS",
+    description: "Process cooking-stage orders.",
+  },
+  {
+    id: "PERM-DISPATCH-ORDERS",
+    code: "DISPATCH_ORDERS",
+    description: "Process dispatch-stage orders.",
+  },
+  {
+    id: "PERM-INVENTORY-VIEW",
+    code: "INVENTORY_VIEW",
+    description: "View kitchen inventory.",
+  },
+  {
+    id: "PERM-INVENTORY-MANAGE",
+    code: "INVENTORY_MANAGE",
+    description: "Manage kitchen inventory.",
+  },
+  {
+    id: "PERM-ORDER-CANCEL",
+    code: "ORDER_CANCEL",
+    description: "Cancel eligible orders.",
+  },
+  {
+    id: "PERM-STAFF-MANAGE",
+    code: "STAFF_MANAGE",
+    description: "Manage staff access.",
+  },
+];
+
+export const ROLE_PERMISSIONS_DB: RolePermission[] = [
+  { role: "OWNER", permissionId: "PERM-OWNER-VIEW" },
+  { role: "OWNER", permissionId: "PERM-KITCHEN-OPERATE" },
+  { role: "OWNER", permissionId: "PERM-COOK-ORDERS" },
+  { role: "OWNER", permissionId: "PERM-DISPATCH-ORDERS" },
+  { role: "OWNER", permissionId: "PERM-INVENTORY-VIEW" },
+  { role: "OWNER", permissionId: "PERM-INVENTORY-MANAGE" },
+  { role: "OWNER", permissionId: "PERM-ORDER-CANCEL" },
+  { role: "OWNER", permissionId: "PERM-STAFF-MANAGE" },
+  { role: "MANAGER", permissionId: "PERM-KITCHEN-OPERATE" },
+  { role: "MANAGER", permissionId: "PERM-INVENTORY-VIEW" },
+  { role: "MANAGER", permissionId: "PERM-INVENTORY-MANAGE" },
+  { role: "MANAGER", permissionId: "PERM-ORDER-CANCEL" },
+  { role: "MANAGER", permissionId: "PERM-STAFF-MANAGE" },
+  { role: "LINE_COOK", permissionId: "PERM-KITCHEN-OPERATE" },
+  { role: "LINE_COOK", permissionId: "PERM-COOK-ORDERS" },
+  { role: "LINE_COOK", permissionId: "PERM-INVENTORY-VIEW" },
+  { role: "DISPATCH", permissionId: "PERM-KITCHEN-OPERATE" },
+  { role: "DISPATCH", permissionId: "PERM-DISPATCH-ORDERS" },
+  { role: "DISPATCH", permissionId: "PERM-INVENTORY-VIEW" },
 ];
 
 export const INVENTORY_DB: InventoryItem[] = [
