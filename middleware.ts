@@ -82,6 +82,25 @@ function isProtectedRoute(
   );
 }
 
+function redirectToLogin(
+  request: NextRequest
+): NextResponse {
+  const loginUrl =
+    new URL(
+      "/login",
+      request.url
+    );
+
+  loginUrl.searchParams.set(
+    "redirect",
+    request.nextUrl.pathname
+  );
+
+  return NextResponse.redirect(
+    loginUrl
+  );
+}
+
 export function middleware(
   request: NextRequest
 ) {
@@ -89,9 +108,16 @@ export function middleware(
     request.nextUrl;
 
   if (
-    !isProtectedRoute(
-      pathname
+    pathname === "/login" ||
+    pathname.startsWith(
+      "/api/login"
     )
+  ) {
+    return NextResponse.next();
+  }
+
+  if (
+    !isProtectedRoute(pathname)
   ) {
     return NextResponse.next();
   }
@@ -102,19 +128,8 @@ export function middleware(
     );
 
   if (!employee) {
-    const loginUrl =
-      new URL(
-        "/login",
-        request.url
-      );
-
-    loginUrl.searchParams.set(
-      "redirect",
-      pathname
-    );
-
-    return NextResponse.redirect(
-      loginUrl
+    return redirectToLogin(
+      request
     );
   }
 
@@ -142,23 +157,8 @@ export function middleware(
     );
   }
 
-  /*
-   * Owner has platform-wide
-   * visibility and does not require
-   * a kitchen assignment.
-   */
   if (
-    employee.role ===
-    "OWNER"
-  ) {
-    return NextResponse.next();
-  }
-
-  /*
-   * Kitchen-scoped employees must
-   * have an assigned kitchen.
-   */
-  if (
+    employee.role !== "OWNER" &&
     !employee.kitchenId
   ) {
     return new NextResponse(
@@ -176,11 +176,6 @@ export function middleware(
   const response =
     NextResponse.next();
 
-  /*
-   * Expose authenticated identity
-   * to downstream server-side
-   * application layers.
-   */
   response.headers.set(
     "x-employee-id",
     employee.id
@@ -196,10 +191,12 @@ export function middleware(
     employee.role
   );
 
-  response.headers.set(
-    "x-kitchen-id",
-    employee.kitchenId
-  );
+  if (employee.kitchenId) {
+    response.headers.set(
+      "x-kitchen-id",
+      employee.kitchenId
+    );
+  }
 
   return response;
 }
@@ -209,5 +206,7 @@ export const config = {
     "/cook/:path*",
     "/dispatch/:path*",
     "/owner/:path*",
+    "/login",
+    "/api/login",
   ],
 };
