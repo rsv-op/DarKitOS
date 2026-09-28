@@ -10,6 +10,7 @@ import {
 
 import type {
   DbaBrand,
+  InventoryItem,
   Order,
   OrderChannel,
   OrderEvent,
@@ -473,6 +474,89 @@ function getCancellationSource(
   return null;
 }
 
+function getOrderRequirements(
+  order: Order
+): Map<string, number> {
+  const requirements =
+    new Map<string, number>();
+
+  for (const orderItem of order.items) {
+    const menuItem =
+      MENU_CATALOG.find(
+        (item) =>
+          item.id ===
+          orderItem.menuItemId
+      );
+
+    if (!menuItem) {
+      continue;
+    }
+
+    for (const ingredient of menuItem.recipe) {
+      const existing =
+        requirements.get(
+          ingredient.inventoryItemId
+        ) ?? 0;
+
+      requirements.set(
+        ingredient.inventoryItemId,
+        existing +
+          ingredient.quantityRequired *
+            orderItem.quantity
+      );
+    }
+  }
+
+  return requirements;
+}
+
+function restoreOrderInventory(
+  order: Order,
+  inventory: InventoryItem[]
+): {
+  updatedInventory: InventoryItem[];
+  restoredItems: string[];
+} {
+  const requirements =
+    getOrderRequirements(order);
+
+  const restoredItems: string[] = [];
+
+  const updatedInventory =
+    inventory.map(
+      (inventoryItem) => {
+        const quantityToRestore =
+          requirements.get(
+            inventoryItem.id
+          ) ?? 0;
+
+        if (
+          quantityToRestore <= 0
+        ) {
+          return {
+            ...inventoryItem,
+          };
+        }
+
+        restoredItems.push(
+          `${inventoryItem.name}: +${quantityToRestore} ${inventoryItem.unit}`
+        );
+
+        return {
+          ...inventoryItem,
+          currentStock:
+            inventoryItem.currentStock +
+            quantityToRestore,
+        };
+      }
+    );
+
+  return {
+    updatedInventory,
+    restoredItems,
+  };
+}
+
 export async function GET() {
   return NextResponse.json({
     success: true,
@@ -640,15 +724,12 @@ export async function POST(
         inventory
       );
 
-    const inventoryCheckedEvent =
+    baseOrder.events.push(
       createEvent(
         "INVENTORY_CHECKED",
         "ORDER_API",
         `Inventory decision: ${inventoryEvaluation.inventoryDecision}`
-      );
-
-    baseOrder.events.push(
-      inventoryCheckedEvent
+      )
     );
 
     baseOrder.inventoryDecision =
@@ -826,10 +907,6 @@ export async function PATCH(
         "SYSTEM"
       );
 
-    /*
-     * Explicit action:
-     * assign driver.
-     */
     if (
       body.action ===
       "DRIVER_ASSIGNED"
@@ -899,10 +976,6 @@ export async function PATCH(
       });
     }
 
-    /*
-     * Explicit action:
-     * pickup.
-     */
     if (
       body.action ===
       "PICKED_UP"
@@ -968,10 +1041,6 @@ export async function PATCH(
       });
     }
 
-    /*
-     * Reject unsupported
-     * explicit actions.
-     */
     if (
       body.action !==
         undefined &&
@@ -986,10 +1055,6 @@ export async function PATCH(
       );
     }
 
-    /*
-     * Standard lifecycle
-     * status transition.
-     */
     if (
       !isValidStatus(
         body.status
@@ -1036,12 +1101,6 @@ export async function PATCH(
       );
     }
 
-    const now =
-      new Date().toISOString();
-
-    /*
-     * Cancellation.
-     */
     if (
       nextStatus ===
       "CANCELLED"
@@ -1072,6 +1131,48 @@ export async function PATCH(
       const cancellationReason =
         body.cancellationReason.trim();
 
+      let cancellationDetails =
+        `${cancellationSource}: ${cancellationReason}`;
+
+      if (
+        order.status ===
+        "PENDING"
+      ) {
+        const restoration =
+          restoreOrderInventory(
+            order,
+            getInventory()
+          );
+
+        replaceInventory(
+          restoration.updatedInventory
+        );
+
+        cancellationDetails +=
+          restoration.restoredItems.length >
+          0
+            ? ` | Inventory restored: ${restoration.restoredItems.join(
+                "; "
+              )}`
+            : " | No recipe inventory required restoration";
+      } else if (
+        order.status ===
+          "PREPARING" ||
+        order.status ===
+          "READY_FOR_PICKUP" ||
+        order.status ===
+          "DRIVER_ASSIGNED"
+      ) {
+        cancellationDetails +=
+          " | Food/labor consumption recorded as operational loss; inventory not restored";
+      } else if (
+        order.status ===
+        "PICKED_UP"
+      ) {
+        cancellationDetails +=
+          " | Pickup-stage cancellation recorded as aggregator/accounting claim evidence; inventory not restored";
+      }
+
       const updated =
         updateOrder(
           orderId,
@@ -1095,7 +1196,7 @@ export async function PATCH(
               createEvent(
                 "CANCELLED",
                 actor,
-                `${cancellationSource}: ${cancellationReason}`
+                cancellationDetails
               ),
             ],
           }
@@ -1113,11 +1214,6 @@ export async function PATCH(
       });
     }
 
-    /*
-     * Driver assignment and
-     * pickup require their
-     * explicit actions.
-     */
     if (
       nextStatus ===
         "DRIVER_ASSIGNED" ||
@@ -1141,11 +1237,6 @@ export async function PATCH(
       );
     }
 
-    /*
-     * READY_FOR_PICKUP marks
-     * both preparation completion
-     * and readiness.
-     */
     if (
       nextStatus ===
       "READY_FOR_PICKUP"
