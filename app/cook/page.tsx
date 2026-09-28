@@ -1,372 +1,527 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
-import type { Order, OrderStatus } from "@/lib/db";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
 
-const POLL_INTERVAL_MS = 3000;
+import type {
+  InventoryDecision,
+  Order,
+} from "@/lib/db";
 
-function statusLabel(status: OrderStatus): string {
+type OrdersResponse = {
+  success: boolean;
+  orders?: Order[];
+  inventory?: unknown[];
+  error?: string;
+};
+
+type ActionResponse = {
+  success: boolean;
+  order?: Order;
+  error?: string;
+};
+
+function getEmployeeCode(): string {
+  if (
+    typeof document === "undefined"
+  ) {
+    return "";
+  }
+
+  const cookie =
+    document.cookie
+      .split("; ")
+      .find((item) =>
+        item.startsWith(
+          "employee_code="
+        )
+      );
+
+  return cookie
+    ? decodeURIComponent(
+        cookie.split("=")[1]
+      )
+    : "";
+}
+
+function formatTime(
+  timestamp?: string
+): string {
+  if (!timestamp) {
+    return "Not recorded";
+  }
+
+  return new Date(
+    timestamp
+  ).toLocaleTimeString([], {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function getInventoryLabel(
+  decision?: InventoryDecision
+): string {
+  switch (decision) {
+    case "LOW_STOCK":
+      return "Stock low";
+
+    case "INSUFFICIENT_STOCK":
+      return "Insufficient stock";
+
+    case "AVAILABLE":
+      return "Stock available";
+
+    default:
+      return "Inventory unchecked";
+  }
+}
+
+function getInventoryClass(
+  decision?: InventoryDecision
+): string {
+  switch (decision) {
+    case "LOW_STOCK":
+      return "border-amber-700 bg-amber-950/40 text-amber-300";
+
+    case "INSUFFICIENT_STOCK":
+      return "border-red-700 bg-red-950/40 text-red-300";
+
+    case "AVAILABLE":
+      return "border-emerald-700 bg-emerald-950/40 text-emerald-300";
+
+    default:
+      return "border-slate-700 bg-slate-900 text-slate-400";
+  }
+}
+
+function getStatusLabel(
+  status: Order["status"]
+): string {
   switch (status) {
     case "PENDING":
-      return "NEW";
+      return "Queued";
+
     case "PREPARING":
-      return "PREPARING";
+      return "Cooking";
+
     case "READY_FOR_PICKUP":
-      return "READY";
+      return "Ready";
+
+    case "DRIVER_ASSIGNED":
+      return "Driver assigned";
+
+    case "PICKED_UP":
+      return "Picked up";
+
     case "DISPATCHED":
-      return "DISPATCHED";
+      return "Dispatched";
+
     case "CANCELLED":
-      return "CANCELLED";
+      return "Cancelled";
+
     default:
       return status;
   }
 }
 
-function statusClass(status: OrderStatus): string {
-  switch (status) {
-    case "PENDING":
-      return "border-amber-500/40 bg-amber-500/10 text-amber-300";
-    case "PREPARING":
-      return "border-sky-500/40 bg-sky-500/10 text-sky-300";
-    case "READY_FOR_PICKUP":
-      return "border-emerald-500/40 bg-emerald-500/10 text-emerald-300";
-    case "CANCELLED":
-      return "border-red-500/40 bg-red-500/10 text-red-300";
-    default:
-      return "border-neutral-700 bg-neutral-900 text-neutral-400";
-  }
-}
+export default function CookPage() {
+  const [
+    orders,
+    setOrders,
+  ] = useState<Order[]>([]);
 
-export default function CookDashboard() {
-  const [orders, setOrders] = useState<Order[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [busyOrderId, setBusyOrderId] = useState<string | null>(null);
-  const [error, setError] = useState("");
+  const [
+    employeeCode,
+    setEmployeeCode,
+  ] = useState("");
 
-  const loadOrders = useCallback(async () => {
-    try {
-      const response = await fetch("/api/orders", {
-        method: "GET",
-        cache: "no-store",
-      });
+  const [
+    loading,
+    setLoading,
+  ] = useState(true);
 
-      if (!response.ok) {
-        throw new Error("Failed to load orders");
-      }
+  const [
+    error,
+    setError,
+  ] = useState("");
 
-      const data = await response.json();
+  const [
+    actionOrderId,
+    setActionOrderId,
+  ] = useState("");
 
-      if (!data.success || !Array.isArray(data.orders)) {
-        throw new Error("Invalid Orders API response");
-      }
+  const loadOrders =
+    useCallback(
+      async () => {
+        try {
+          const response =
+            await fetch(
+              "/api/orders",
+              {
+                cache: "no-store",
+              }
+            );
 
-      setOrders(data.orders);
-      setError("");
-    } catch (err) {
-      setError(
-        err instanceof Error
-          ? err.message
-          : "Unable to load kitchen orders",
-      );
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+          const data =
+            (await response.json()) as OrdersResponse;
+
+          if (!response.ok) {
+            throw new Error(
+              data.error ||
+                "Unable to load orders"
+            );
+          }
+
+          setOrders(
+            data.orders ?? []
+          );
+
+          setError("");
+        } catch (loadError) {
+          setError(
+            loadError instanceof Error
+              ? loadError.message
+              : "Unable to load orders"
+          );
+        } finally {
+          setLoading(false);
+        }
+      },
+      []
+    );
 
   useEffect(() => {
+    setEmployeeCode(
+      getEmployeeCode()
+    );
+
     void loadOrders();
 
-    const interval = window.setInterval(() => {
-      void loadOrders();
-    }, POLL_INTERVAL_MS);
+    const interval =
+      window.setInterval(
+        () => {
+          void loadOrders();
+        },
+        3000
+      );
 
-    return () => {
-      window.clearInterval(interval);
-    };
+    return () =>
+      window.clearInterval(
+        interval
+      );
   }, [loadOrders]);
 
-  const kitchenOrders = useMemo(
-    () =>
-      orders.filter(
-        (order) =>
-          order.status === "PENDING" ||
-          order.status === "PREPARING",
-      ),
-    [orders],
-  );
+  const activeOrders =
+    useMemo(
+      () =>
+        orders.filter(
+          (order) =>
+            order.status ===
+              "PENDING" ||
+            order.status ===
+              "PREPARING"
+        ),
+      [orders]
+    );
 
-  const readyCount = useMemo(
-    () =>
-      orders.filter(
-        (order) => order.status === "READY_FOR_PICKUP",
-      ).length,
-    [orders],
-  );
+  const readyCount =
+    useMemo(
+      () =>
+        orders.filter(
+          (order) =>
+            order.status ===
+            "READY_FOR_PICKUP"
+        ).length,
+      [orders]
+    );
 
-  const updateOrder = async (
-    order: Order,
-    status: "PREPARING" | "READY_FOR_PICKUP",
-  ) => {
-    if (busyOrderId) {
-      return;
-    }
-
-    setBusyOrderId(order.id);
+  async function updateOrder(
+    orderId: string,
+    status: Order["status"]
+  ) {
+    setActionOrderId(
+      orderId
+    );
     setError("");
 
     try {
-      const response = await fetch("/api/orders", {
-        method: "PATCH",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          orderId: order.id,
-          status,
-          actor: "COOK",
-        }),
-      });
+      const response =
+        await fetch(
+          "/api/orders",
+          {
+            method: "PATCH",
+            headers: {
+              "Content-Type":
+                "application/json",
+            },
+            body: JSON.stringify({
+              orderId,
+              status,
+            }),
+          }
+        );
 
-      const data = await response.json();
+      const data =
+        (await response.json()) as ActionResponse;
 
       if (!response.ok) {
         throw new Error(
-          data.error || "Failed to update order",
+          data.error ||
+            "Unable to update order"
         );
       }
 
-      if (Array.isArray(data.orders)) {
-        setOrders(data.orders);
-      } else {
-        await loadOrders();
-      }
-    } catch (err) {
+      await loadOrders();
+    } catch (actionError) {
       setError(
-        err instanceof Error
-          ? err.message
-          : "Unable to update order",
+        actionError instanceof Error
+          ? actionError.message
+          : "Unable to update order"
       );
     } finally {
-      setBusyOrderId(null);
+      setActionOrderId("");
     }
-  };
+  }
 
   return (
-    <main className="min-h-screen bg-neutral-950 text-neutral-100">
-      <header className="sticky top-0 z-20 border-b border-neutral-800 bg-neutral-950/95 px-4 py-4 backdrop-blur md:px-6">
-        <div className="mx-auto flex max-w-7xl items-center justify-between gap-4">
+    <main className="min-h-screen bg-slate-950 text-white">
+      <header className="sticky top-0 z-10 border-b border-slate-800 bg-slate-950/95 px-4 py-4 backdrop-blur">
+        <div className="mx-auto flex max-w-6xl items-center justify-between gap-4">
           <div>
-            <div className="flex items-center gap-3">
-              <span className="h-3 w-3 rounded-full bg-emerald-400" />
-              <h1 className="text-lg font-bold tracking-tight md:text-xl">
-                Cook KDS
-              </h1>
-            </div>
+            <p className="text-xs font-medium uppercase tracking-[0.2em] text-slate-500">
+              Dark Cloud Kitchen OS
+            </p>
 
-            <p className="mt-1 text-xs text-neutral-500">
-              Kitchen K1 · Live order preparation
+            <h1 className="mt-1 text-2xl font-bold">
+              Cook KDS
+            </h1>
+
+            <p className="mt-1 text-sm text-slate-400">
+              Employee:{" "}
+              {employeeCode ||
+                "Authenticated"}
             </p>
           </div>
 
-          <div className="flex items-center gap-2">
-            <div className="rounded-lg border border-neutral-800 bg-neutral-900 px-3 py-2 text-center">
-              <div className="text-[10px] uppercase tracking-wider text-neutral-500">
-                Cooking
-              </div>
-              <div className="text-lg font-bold text-sky-300">
-                {
-                  orders.filter(
-                    (order) =>
-                      order.status === "PREPARING",
-                  ).length
-                }
-              </div>
-            </div>
+          <div className="text-right">
+            <p className="text-xs uppercase tracking-wider text-slate-500">
+              Ready
+            </p>
 
-            <div className="rounded-lg border border-neutral-800 bg-neutral-900 px-3 py-2 text-center">
-              <div className="text-[10px] uppercase tracking-wider text-neutral-500">
-                Ready
-              </div>
-              <div className="text-lg font-bold text-emerald-300">
-                {readyCount}
-              </div>
-            </div>
+            <p className="text-2xl font-bold">
+              {readyCount}
+            </p>
           </div>
         </div>
       </header>
 
-      {error && (
-        <div className="mx-auto max-w-7xl px-4 pt-4 md:px-6">
-          <div className="rounded-lg border border-red-800 bg-red-950/30 px-4 py-3 text-sm text-red-300">
+      <section className="mx-auto max-w-6xl px-4 py-5">
+        {error && (
+          <div
+            role="alert"
+            className="mb-5 rounded-xl border border-red-900 bg-red-950/40 px-4 py-3 text-sm text-red-300"
+          >
             {error}
           </div>
-        </div>
-      )}
-
-      <section className="mx-auto max-w-7xl px-4 py-5 md:px-6">
-        <div className="mb-4 flex items-center justify-between">
-          <div>
-            <h2 className="text-sm font-semibold uppercase tracking-wider text-neutral-300">
-              Active Kitchen Queue
-            </h2>
-            <p className="mt-1 text-xs text-neutral-500">
-              {loading
-                ? "Loading orders..."
-                : `${kitchenOrders.length} active order${
-                    kitchenOrders.length === 1
-                      ? ""
-                      : "s"
-                  }`}
-            </p>
-          </div>
-
-          <button
-            type="button"
-            onClick={() => void loadOrders()}
-            className="rounded-lg border border-neutral-700 bg-neutral-900 px-3 py-2 text-xs font-semibold text-neutral-300 hover:bg-neutral-800"
-          >
-            Refresh
-          </button>
-        </div>
-
-        {loading && (
-          <div className="rounded-xl border border-neutral-800 bg-neutral-900 p-8 text-center text-sm text-neutral-500">
-            Loading kitchen queue...
-          </div>
         )}
 
-        {!loading && kitchenOrders.length === 0 && (
-          <div className="rounded-xl border border-neutral-800 bg-neutral-900 p-10 text-center">
-            <div className="text-lg font-semibold text-neutral-300">
+        {loading ? (
+          <div className="rounded-2xl border border-slate-800 bg-slate-900 p-8 text-center text-slate-400">
+            Loading kitchen orders...
+          </div>
+        ) : activeOrders.length ===
+          0 ? (
+          <div className="rounded-2xl border border-slate-800 bg-slate-900 p-10 text-center">
+            <p className="text-xl font-semibold">
               Kitchen queue clear
-            </div>
-            <p className="mt-2 text-xs text-neutral-500">
-              New orders will appear automatically.
+            </p>
+
+            <p className="mt-2 text-sm text-slate-500">
+              New accepted orders will
+              appear automatically.
             </p>
           </div>
-        )}
+        ) : (
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+            {activeOrders.map(
+              (order) => {
+                const busy =
+                  actionOrderId ===
+                  order.id;
 
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
-          {kitchenOrders.map((order) => {
-            const isBusy = busyOrderId === order.id;
-            const isPending = order.status === "PENDING";
+                return (
+                  <article
+                    key={order.id}
+                    className="rounded-2xl border border-slate-800 bg-slate-900 p-5 shadow-lg"
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <p className="text-xs font-medium uppercase tracking-wider text-slate-500">
+                          {order.id}
+                        </p>
 
-            return (
-              <article
-                key={order.id}
-                className="overflow-hidden rounded-xl border border-neutral-800 bg-neutral-900"
-              >
-                <div className="border-b border-neutral-800 p-4">
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <div className="text-base font-bold">
-                        {order.id}
+                        <h2 className="mt-1 text-lg font-bold">
+                          {order.brandId}
+                        </h2>
+
+                        <p className="text-sm text-slate-400">
+                          {order.channel}
+                        </p>
                       </div>
 
-                      <div className="mt-1 text-xs text-neutral-500">
-                        {order.channel} · {order.brandId}
-                      </div>
+                      <span className="rounded-full border border-slate-700 bg-slate-950 px-3 py-1 text-xs font-medium text-slate-300">
+                        {getStatusLabel(
+                          order.status
+                        )}
+                      </span>
                     </div>
 
-                    <span
-                      className={`rounded-full border px-2.5 py-1 text-[10px] font-bold uppercase ${statusClass(
-                        order.status,
+                    <div className="mt-4 space-y-2">
+                      {order.items.map(
+                        (item) => (
+                          <div
+                            key={
+                              item.id
+                            }
+                            className="rounded-xl bg-slate-950 px-3 py-3"
+                          >
+                            <div className="flex items-center justify-between gap-3">
+                              <span className="font-medium">
+                                {item.name}
+                              </span>
+
+                              <span className="rounded-md bg-slate-800 px-2 py-1 text-sm font-bold">
+                                ×
+                                {
+                                  item.quantity
+                                }
+                              </span>
+                            </div>
+
+                            <p className="mt-1 text-xs text-slate-500">
+                              Station:{" "}
+                              {
+                                item.station
+                              }
+                            </p>
+
+                            {item.notes && (
+                              <p className="mt-2 text-sm text-slate-300">
+                                Note:{" "}
+                                {
+                                  item.notes
+                                }
+                              </p>
+                            )}
+                          </div>
+                        )
+                      )}
+                    </div>
+
+                    <div className="mt-4 flex items-center justify-between gap-3 text-xs text-slate-500">
+                      <span>
+                        Received{" "}
+                        {formatTime(
+                          order.receivedAt
+                        )}
+                      </span>
+
+                      <span>
+                        Kitchen{" "}
+                        {
+                          order.kitchenId
+                        }
+                      </span>
+                    </div>
+
+                    <div
+                      className={`mt-4 rounded-xl border px-3 py-2 text-sm ${getInventoryClass(
+                        order.inventoryDecision
                       )}`}
                     >
-                      {statusLabel(order.status)}
-                    </span>
-                  </div>
-                </div>
-
-                <div className="space-y-4 p-4">
-                  <div className="space-y-3">
-                    {order.items.map((item) => (
-                      <div
-                        key={item.id}
-                        className="rounded-lg border border-neutral-800 bg-neutral-950 p-3"
-                      >
-                        <div className="flex items-start justify-between gap-3">
-                          <div className="font-semibold text-white">
-                            {item.quantity} × {item.name}
-                          </div>
-
-                          <span className="text-[10px] uppercase text-neutral-600">
-                            {item.station}
-                          </span>
-                        </div>
-
-                        {item.notes && (
-                          <div className="mt-2 rounded-md border border-amber-800/50 bg-amber-950/20 px-2 py-2 text-xs text-amber-300">
-                            Note: {item.notes}
-                          </div>
+                      <div className="font-medium">
+                        {getInventoryLabel(
+                          order.inventoryDecision
                         )}
                       </div>
-                    ))}
-                  </div>
 
-                  {order.inventoryWarnings &&
-                    order.inventoryWarnings.length > 0 && (
-                      <div className="rounded-lg border border-amber-800 bg-amber-950/20 p-3">
-                        <div className="text-[10px] font-bold uppercase tracking-wider text-amber-400">
-                          Inventory Warning
-                        </div>
+                      {order.inventoryWarnings &&
+                        order
+                          .inventoryWarnings
+                          .length >
+                          0 && (
+                          <p className="mt-1 text-xs">
+                            Low:{" "}
+                            {order.inventoryWarnings.join(
+                              ", "
+                            )}
+                          </p>
+                        )}
 
-                        <div className="mt-1 text-xs text-amber-200">
-                          Stock is sufficient for this order,
-                          but one or more ingredients are at or
-                          below the reorder threshold.
-                        </div>
-                      </div>
-                    )}
+                      {order.inventoryUnavailable &&
+                        order
+                          .inventoryUnavailable
+                          .length >
+                          0 && (
+                          <p className="mt-1 text-xs">
+                            Unavailable:{" "}
+                            {order.inventoryUnavailable.join(
+                              ", "
+                            )}
+                          </p>
+                        )}
+                    </div>
 
-                  <div className="flex items-center justify-between text-[10px] uppercase tracking-wider text-neutral-600">
-                    <span>
-                      {order.source}
-                    </span>
+                    <div className="mt-5">
+                      {order.status ===
+                        "PENDING" && (
+                        <button
+                          type="button"
+                          disabled={busy}
+                          onClick={() =>
+                            void updateOrder(
+                              order.id,
+                              "PREPARING"
+                            )
+                          }
+                          className="min-h-14 w-full rounded-xl bg-white px-4 py-3 text-base font-bold text-slate-950 transition hover:bg-slate-200 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          {busy
+                            ? "Starting..."
+                            : "Start Cooking"}
+                        </button>
+                      )}
 
-                    <span>
-                      {order.kitchenId}
-                    </span>
-                  </div>
-
-                  {isPending ? (
-                    <button
-                      type="button"
-                      disabled={isBusy}
-                      onClick={() =>
-                        void updateOrder(
-                          order,
-                          "PREPARING",
-                        )
-                      }
-                      className="w-full rounded-lg bg-amber-400 px-4 py-3 text-sm font-bold uppercase tracking-wide text-neutral-950 hover:bg-amber-300 disabled:cursor-not-allowed disabled:opacity-50"
-                    >
-                      {isBusy
-                        ? "Starting..."
-                        : "Start Cooking"}
-                    </button>
-                  ) : (
-                    <button
-                      type="button"
-                      disabled={isBusy}
-                      onClick={() =>
-                        void updateOrder(
-                          order,
-                          "READY_FOR_PICKUP",
-                        )
-                      }
-                      className="w-full rounded-lg bg-emerald-400 px-4 py-3 text-sm font-bold uppercase tracking-wide text-neutral-950 hover:bg-emerald-300 disabled:cursor-not-allowed disabled:opacity-50"
-                    >
-                      {isBusy
-                        ? "Updating..."
-                        : "Mark Ready for Pickup"}
-                    </button>
-                  )}
-                </div>
-              </article>
-            );
-          })}
-        </div>
+                      {order.status ===
+                        "PREPARING" && (
+                        <button
+                          type="button"
+                          disabled={busy}
+                          onClick={() =>
+                            void updateOrder(
+                              order.id,
+                              "READY_FOR_PICKUP"
+                            )
+                          }
+                          className="min-h-14 w-full rounded-xl bg-emerald-500 px-4 py-3 text-base font-bold text-slate-950 transition hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          {busy
+                            ? "Updating..."
+                            : "Mark Ready"}
+                        </button>
+                      )}
+                    </div>
+                  </article>
+                );
+              }
+            )}
+          </div>
+        )}
       </section>
     </main>
   );
