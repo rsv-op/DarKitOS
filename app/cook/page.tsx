@@ -408,4 +408,72 @@ export default function CookPage() {
                           </p>
 
                           <p className="mt-1 text-sm text-red-200">
-                           
+                            This order cannot
+                            enter preparation
+                            until the required
+                            inventory is available.
+                          </p>
+
+                          <p className="mt-2 text-sm text-red-300">
+                            {order.inventoryUnavailable!.join(
+                              ", "
+                            )}
+                          </p>
+                        </div>
+                      )}
+
+                      <div className="grid gap-3 sm:grid-cols-2">
+                        {order.status ===
+                          "PENDING" && (
+                          <button
+                            type="button"
+                            disabled={
+                              isUpdating ||
+                              hasUnavailable
+                            }
+                            onClick={() =>
+                              void updateOrder(
+                                order.id,
+                                "PREPARING"
+                              )
+                            }
+                            className="min-h-16 rounded-xl bg-emerald-600 px-5 py-4 text-lg font-bold text-white disabled:cursor-not-allowed disabled:opacity-40 active:scale-[0.99]"
+                          >
+                            {isUpdating
+                              ? "UPDATING..."
+                              : "START PREPARING"}
+                          </button>
+                        )}
+
+                        {order.status ===
+                          "PREPARING" && (
+                          <button
+                            type="button"
+                            disabled={
+                              isUpdating
+                            }
+                            onClick={() =>
+                              void updateOrder(
+                                order.id,
+                                "READY_FOR_PICKUP"
+                              )
+                            }
+                            className="min-h-16 rounded-xl bg-blue-600 px-5 py-4 text-lg font-bold text-white disabled:cursor-not-allowed disabled:opacity-40 active:scale-[0.99]"
+                          >
+                            {isUpdating
+                              ? "UPDATING..."
+                              : "MARK READY"}
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  </section>
+                );
+              }
+            )}
+          </div>
+        )}
+      </div>
+    </main>
+  );
+}
