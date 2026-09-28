@@ -17,38 +17,24 @@ export interface StoreSnapshot {
 
 const globalState: KitchenState = {
   orders: [],
-  inventory: INVENTORY_DB.map(
-    (item) => ({ ...item })
-  ),
+  inventory: INVENTORY_DB,
 };
 
-function cloneOrder(
-  order: Order
-): Order {
+function cloneOrder(order: Order): Order {
   return {
     ...order,
-
-    items: order.items.map(
-      (item) => ({ ...item })
-    ),
-
-    events: order.events.map(
-      (event) => ({ ...event })
-    ),
-
-    inventoryWarnings:
-      order.inventoryWarnings
-        ? [
-            ...order.inventoryWarnings,
-          ]
-        : undefined,
-
-    inventoryUnavailable:
-      order.inventoryUnavailable
-        ? [
-            ...order.inventoryUnavailable,
-          ]
-        : undefined,
+    items: order.items.map((item) => ({
+      ...item,
+    })),
+    events: order.events.map((event) => ({
+      ...event,
+    })),
+    inventoryWarnings: order.inventoryWarnings
+      ? [...order.inventoryWarnings]
+      : undefined,
+    inventoryUnavailable: order.inventoryUnavailable
+      ? [...order.inventoryUnavailable]
+      : undefined,
   };
 }
 
@@ -64,21 +50,15 @@ function cloneState(
   state: KitchenState
 ): KitchenState {
   return {
-    orders: state.orders.map(
-      cloneOrder
+    orders: state.orders.map(cloneOrder),
+    inventory: state.inventory.map(
+      cloneInventoryItem
     ),
-
-    inventory:
-      state.inventory.map(
-        cloneInventoryItem
-      ),
   };
 }
 
 export function getOrders(): Order[] {
-  return globalState.orders.map(
-    cloneOrder
-  );
+  return globalState.orders.map(cloneOrder);
 }
 
 export function getInventory(): InventoryItem[] {
@@ -88,8 +68,7 @@ export function getInventory(): InventoryItem[] {
 }
 
 export function getStoreSnapshot(): StoreSnapshot {
-  const snapshot =
-    cloneState(globalState);
+  const snapshot = cloneState(globalState);
 
   return {
     orders: snapshot.orders,
@@ -97,47 +76,33 @@ export function getStoreSnapshot(): StoreSnapshot {
   };
 }
 
-export function addOrder(
-  order: Order
-): Order {
-  const storedOrder =
-    cloneOrder(order);
+export function addOrder(order: Order): Order {
+  const storedOrder = cloneOrder(order);
 
-  globalState.orders.push(
-    storedOrder
-  );
+  globalState.orders.push(storedOrder);
 
-  return cloneOrder(
-    storedOrder
-  );
+  return cloneOrder(storedOrder);
 }
 
 export function replaceOrders(
   orders: Order[]
 ): void {
-  globalState.orders =
-    orders.map(
-      cloneOrder
-    );
+  globalState.orders = orders.map(cloneOrder);
 }
 
 export function replaceInventory(
   inventory: InventoryItem[]
 ): void {
   globalState.inventory =
-    inventory.map(
-      cloneInventoryItem
-    );
+    inventory.map(cloneInventoryItem);
 }
 
 export function findOrder(
   orderId: string
 ): Order | undefined {
-  const order =
-    globalState.orders.find(
-      (item) =>
-        item.id === orderId
-    );
+  const order = globalState.orders.find(
+    (item) => item.id === orderId
+  );
 
   return order
     ? cloneOrder(order)
@@ -146,15 +111,11 @@ export function findOrder(
 
 export function updateOrder(
   orderId: string,
-  updater: (
-    order: Order
-  ) => Order
+  updater: (order: Order) => Order
 ): Order {
-  const index =
-    globalState.orders.findIndex(
-      (order) =>
-        order.id === orderId
-    );
+  const index = globalState.orders.findIndex(
+    (order) => order.id === orderId
+  );
 
   if (index === -1) {
     throw new Error(
@@ -163,21 +124,15 @@ export function updateOrder(
   }
 
   const currentOrder =
-    cloneOrder(
-      globalState.orders[index]
-    );
+    cloneOrder(globalState.orders[index]);
 
   const updatedOrder =
     updater(currentOrder);
 
   globalState.orders[index] =
-    cloneOrder(
-      updatedOrder
-    );
+    cloneOrder(updatedOrder);
 
-  return cloneOrder(
-    updatedOrder
-  );
+  return cloneOrder(updatedOrder);
 }
 
 export function updateInventory(
@@ -189,13 +144,9 @@ export function updateInventory(
     getInventory();
 
   const updatedInventory =
-    updater(
-      currentInventory
-    );
+    updater(currentInventory);
 
-  replaceInventory(
-    updatedInventory
-  );
+  replaceInventory(updatedInventory);
 
   return getInventory();
 }
@@ -206,18 +157,13 @@ export function transaction<T>(
   ) => T
 ): T {
   const backup =
-    cloneState(
-      globalState
-    );
+    cloneState(globalState);
 
   try {
-    return callback(
-      globalState
-    );
+    return callback(globalState);
   } catch (error) {
     globalState.orders =
       backup.orders;
-
     globalState.inventory =
       backup.inventory;
 
@@ -240,7 +186,6 @@ export function replaceState(
 
 export function resetStore(): void {
   globalState.orders = [];
-
   globalState.inventory =
     INVENTORY_DB.map(
       cloneInventoryItem
