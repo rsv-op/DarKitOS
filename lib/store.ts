@@ -1,18 +1,23 @@
-import type { InventoryItem, Order } from "@/lib/db";
-import { INVENTORY_DB } from "@/lib/db";
+import type {
+  InventoryItem,
+  Order,
+} from "@/lib/db";
+
+import {
+  INVENTORY_DB,
+} from "@/lib/db";
 
 /**
  * Storage boundary for Dark Cloud Kitchen OS.
  *
- * IMPORTANT:
- * This is intentionally an in-memory implementation for the MVP.
+ * MVP implementation is intentionally in-memory.
  *
- * Application code should interact with the exported repository
- * functions rather than directly accessing the underlying arrays.
+ * Application code must use this repository boundary rather
+ * than directly manipulating the underlying state.
  *
- * Later, this implementation can be replaced with PostgreSQL,
- * Supabase, Neon, etc. without redesigning Cook, Dispatch, Owner,
- * or the API contracts.
+ * The implementation can later be replaced with a relational
+ * persistence provider without changing Cook, Dispatch, Owner,
+ * or API consumers.
  */
 
 export type KitchenState = {
@@ -25,19 +30,83 @@ export type StoreSnapshot = {
   inventory: InventoryItem[];
 };
 
-type GlobalKitchenStore = typeof globalThis & {
-  __darkCloudKitchenStore?: KitchenState;
-};
-
-const globalStore = globalThis as GlobalKitchenStore;
-
-if (!globalStore.__darkCloudKitchenStore) {
-  globalStore.__darkCloudKitchenStore = {
-    orders: [],
-    inventory: INVENTORY_DB.map((item) => ({
-      ...item,
-    })),
+type GlobalKitchenStore =
+  typeof globalThis & {
+    __darkCloudKitchenStore?: KitchenState;
   };
+
+const globalStore =
+  globalThis as GlobalKitchenStore;
+
+function cloneOrder(
+  order: Order
+): Order {
+  return {
+    ...order,
+
+    items: order.items.map(
+      (item) => ({
+        ...item,
+      })
+    ),
+
+    events: order.events.map(
+      (event) => ({
+        ...event,
+      })
+    ),
+
+    inventoryWarnings:
+      order.inventoryWarnings
+        ? [
+            ...order.inventoryWarnings,
+          ]
+        : undefined,
+
+    inventoryUnavailable:
+      order.inventoryUnavailable
+        ? [
+            ...order.inventoryUnavailable,
+          ]
+        : undefined,
+  };
+}
+
+function cloneInventoryItem(
+  item: InventoryItem
+): InventoryItem {
+  return {
+    ...item,
+  };
+}
+
+function cloneState(
+  state: KitchenState
+): KitchenState {
+  return {
+    orders: state.orders.map(
+      cloneOrder
+    ),
+
+    inventory:
+      state.inventory.map(
+        cloneInventoryItem
+      ),
+  };
+}
+
+if (
+  !globalStore.__darkCloudKitchenStore
+) {
+  globalStore.__darkCloudKitchenStore =
+    {
+      orders: [],
+
+      inventory:
+        INVENTORY_DB.map(
+          cloneInventoryItem
+        ),
+    };
 }
 
 export const kitchenStore =
@@ -46,48 +115,36 @@ export const kitchenStore =
 /**
  * Returns the current orders.
  *
- * The returned array is the current in-memory collection.
- * API/service code should prefer repository functions instead
- * of mutating this array directly.
+ * A detached collection is returned so callers cannot
+ * accidentally mutate repository state without going
+ * through a repository operation.
  */
 export function getOrders(): Order[] {
-  return kitchenStore.orders;
+  return kitchenStore.orders.map(
+    cloneOrder
+  );
 }
 
 /**
  * Returns the current inventory.
+ *
+ * A detached collection is returned so callers cannot
+ * accidentally mutate repository state without going
+ * through a repository operation.
  */
 export function getInventory(): InventoryItem[] {
-  return kitchenStore.inventory;
+  return kitchenStore.inventory.map(
+    cloneInventoryItem
+  );
 }
 
 /**
- * Returns a detached snapshot of the current state.
- *
- * Useful for calculations where callers should not accidentally
- * mutate the live store while evaluating a change.
+ * Returns a detached snapshot of the complete state.
  */
 export function getStoreSnapshot(): StoreSnapshot {
-  return {
-    orders: kitchenStore.orders.map((order) => ({
-      ...order,
-      items: order.items.map((item) => ({
-        ...item,
-      })),
-      events: order.events.map((event) => ({
-        ...event,
-      })),
-      inventoryWarnings: order.inventoryWarnings
-        ? [...order.inventoryWarnings]
-        : undefined,
-      inventoryUnavailable: order.inventoryUnavailable
-        ? [...order.inventoryUnavailable]
-        : undefined,
-    })),
-    inventory: kitchenStore.inventory.map((item) => ({
-      ...item,
-    })),
-  };
+  return cloneState(
+    kitchenStore
+  );
 }
 
 /**
@@ -96,18 +153,22 @@ export function getStoreSnapshot(): StoreSnapshot {
  * Newest orders are placed first so operational screens
  * can consume the collection directly.
  */
-export function addOrder(order: Order): void {
-  kitchenStore.orders.unshift(order);
+export function addOrder(
+  order: Order
+): void {
+  kitchenStore.orders.unshift(
+    cloneOrder(order)
+  );
 }
 
 /**
  * Replaces the complete order collection.
- *
- * Kept behind the repository boundary for future database
- * implementations.
  */
-export function replaceOrders(orders: Order[]): void {
-  kitchenStore.orders = orders;
+export function replaceOrders(
+  orders: Order[]
+): void {
+  kitchenStore.orders =
+    orders.map(cloneOrder);
 }
 
 /**
@@ -116,75 +177,176 @@ export function replaceOrders(orders: Order[]): void {
 export function replaceInventory(
   inventory: InventoryItem[]
 ): void {
-  kitchenStore.inventory = inventory;
+  kitchenStore.inventory =
+    inventory.map(
+      cloneInventoryItem
+    );
 }
 
 /**
- * Finds one order by its canonical internal ID.
+ * Finds one order by canonical internal ID.
+ *
+ * Returns a detached order so the caller cannot mutate
+ * repository state directly.
  */
 export function findOrder(
   orderId: string
 ): Order | undefined {
-  return kitchenStore.orders.find(
-    (order) => order.id === orderId
-  );
+  const order =
+    kitchenStore.orders.find(
+      (candidate) =>
+        candidate.id === orderId
+    );
+
+  return order
+    ? cloneOrder(order)
+    : undefined;
 }
 
 /**
  * Updates an existing order.
  *
- * The store owns updatedAt so individual callers do not
- * need to remember to maintain it.
+ * The repository owns updatedAt so callers do not need
+ * to maintain it independently.
  */
 export function updateOrder(
   orderId: string,
   updates: Partial<Order>
 ): Order | undefined {
-  const order = findOrder(orderId);
+  const index =
+    kitchenStore.orders.findIndex(
+      (order) =>
+        order.id === orderId
+    );
 
-  if (!order) {
+  if (index === -1) {
     return undefined;
   }
 
-  Object.assign(order, {
-    ...updates,
-    updatedAt: new Date().toISOString(),
-  });
+  const existing =
+    kitchenStore.orders[index];
 
-  return order;
+  const updated: Order = {
+    ...existing,
+
+    ...updates,
+
+    items: updates.items
+      ? updates.items.map(
+          (item) => ({
+            ...item,
+          })
+        )
+      : existing.items.map(
+          (item) => ({
+            ...item,
+          })
+        ),
+
+    events: updates.events
+      ? updates.events.map(
+          (event) => ({
+            ...event,
+          })
+        )
+      : existing.events.map(
+          (event) => ({
+            ...event,
+          })
+        ),
+
+    inventoryWarnings:
+      updates.inventoryWarnings !==
+      undefined
+        ? [
+            ...updates.inventoryWarnings,
+          ]
+        : existing.inventoryWarnings
+          ? [
+              ...existing.inventoryWarnings,
+            ]
+          : undefined,
+
+    inventoryUnavailable:
+      updates.inventoryUnavailable !==
+      undefined
+        ? [
+            ...updates.inventoryUnavailable,
+          ]
+        : existing.inventoryUnavailable
+          ? [
+              ...existing.inventoryUnavailable,
+            ]
+          : undefined,
+
+    updatedAt:
+      new Date().toISOString(),
+  };
+
+  kitchenStore.orders[index] =
+    cloneOrder(updated);
+
+  return cloneOrder(updated);
 }
 
 /**
- * Atomically applies an in-memory state mutation.
+ * Applies an operation against the live repository state.
  *
- * This is not a database transaction. It is an MVP transaction
- * boundary that keeps order and inventory changes together.
+ * A detached snapshot is captured first.
  *
- * The important architectural point is that callers do not need
- * to know how persistence works underneath.
+ * If the operation throws, the repository is restored to
+ * the previous state. This provides rollback semantics for
+ * the MVP in-memory implementation.
  *
- * A future database implementation can replace this function
- * with a real database transaction.
+ * This is not a database transaction.
+ * A future persistent implementation can replace this
+ * function with a real database transaction while preserving
+ * the application-facing repository boundary.
  */
 export function transaction<T>(
   operation: (
     state: KitchenState
   ) => T
 ): T {
-  return operation(kitchenStore);
+  const previousState =
+    cloneState(
+      kitchenStore
+    );
+
+  try {
+    return operation(
+      kitchenStore
+    );
+  } catch (error) {
+    kitchenStore.orders =
+      previousState.orders;
+
+    kitchenStore.inventory =
+      previousState.inventory;
+
+    throw error;
+  }
 }
 
 /**
- * Replaces the entire state in one repository operation.
+ * Replaces the complete repository state.
  *
- * Useful for workflows that calculate a new inventory state
- * and corresponding order state before committing them.
+ * Input is cloned before becoming live state so external
+ * references cannot mutate the store.
  */
 export function replaceState(
   nextState: KitchenState
 ): void {
-  kitchenStore.orders = nextState.orders;
-  kitchenStore.inventory = nextState.inventory;
+  const clonedState =
+    cloneState(
+      nextState
+    );
+
+  kitchenStore.orders =
+    clonedState.orders;
+
+  kitchenStore.inventory =
+    clonedState.inventory;
 }
 
 /**
@@ -192,15 +354,14 @@ export function replaceState(
  *
  * Intended for controlled development/testing only.
  *
- * Production persistence should never expose a reset operation
- * through a public API.
+ * Production persistence should never expose a reset
+ * operation through a public API.
  */
 export function resetStore(): void {
   kitchenStore.orders = [];
 
-  kitchenStore.inventory = INVENTORY_DB.map(
-    (item) => ({
-      ...item,
-    })
-  );
+  kitchenStore.inventory =
+    INVENTORY_DB.map(
+      cloneInventoryItem
+    );
 }
