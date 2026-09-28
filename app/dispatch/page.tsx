@@ -1,697 +1,675 @@
-
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
 
-type OrderStatus =
-  | "PENDING"
-  | "PREPARING"
-  | "READY_FOR_PICKUP"
-  | "DRIVER_ASSIGNED"
-  | "PICKED_UP"
-  | "DISPATCHED"
-  | "CANCELLED";
+import type {
+  Order,
+} from "@/lib/db";
 
-type OrderChannel =
-  | "Swiggy"
-  | "Zomato"
-  | "DoorDash"
-  | "UberEats"
-  | "GrubHub"
-  | "Direct Web";
-
-type OrderItem = {
-  id: string;
-  menuItemId: string;
-  name: string;
-  quantity: number;
-  notes?: string;
-  station: string;
+type OrdersResponse = {
+  success: boolean;
+  orders?: Order[];
+  error?: string;
 };
 
-type OrderEvent = {
-  id: string;
-  type: string;
-  timestamp: string;
-  actor: string;
-  details?: string;
+type ActionResponse = {
+  success: boolean;
+  order?: Order;
+  error?: string;
 };
 
-type Order = {
-  id: string;
-  externalOrderId?: string;
-  brandId: string;
-  kitchenId: string;
-  channel: OrderChannel;
-  source: string;
-  status: OrderStatus;
-  items: OrderItem[];
-  customerName?: string;
-  driverName?: string;
-  courierEtaMins?: number;
-  createdAt: string;
-  updatedAt: string;
-  receivedAt?: string;
-  acceptedAt?: string;
-  prepStartedAt?: string;
-  prepCompletedAt?: string;
-  readyAt?: string;
-  driverAssignedAt?: string;
-  pickedUpAt?: string;
-  dispatchedAt?: string;
-  cancellationSource?: string;
-  cancellationReason?: string;
-  cancelledBy?: string;
-  inventoryDecision?: string;
-  inventoryWarnings?: string[];
-  inventoryUnavailable?: string[];
-  events: OrderEvent[];
-};
-
-const KITCHEN_ID = "K1";
-
-const DRIVER_NAMES = [
-  "Aman",
-  "Ravi",
-  "Vikas",
-  "Sandeep",
-  "Mohit",
-  "Rahul",
-];
-
-const ETA_OPTIONS = [10, 15, 20, 25, 30, 35, 40];
-
-function formatTime(timestamp?: string): string {
-  if (!timestamp) {
-    return "--";
+function getEmployeeCode(): string {
+  if (
+    typeof document === "undefined"
+  ) {
+    return "";
   }
 
-  return new Date(timestamp).toLocaleTimeString([], {
+  const cookie =
+    document.cookie
+      .split("; ")
+      .find((item) =>
+        item.startsWith(
+          "employee_code="
+        )
+      );
+
+  return cookie
+    ? decodeURIComponent(
+        cookie.split("=")[1]
+      )
+    : "";
+}
+
+function formatTime(
+  timestamp?: string
+): string {
+  if (!timestamp) {
+    return "Not recorded";
+  }
+
+  return new Date(
+    timestamp
+  ).toLocaleTimeString([], {
     hour: "2-digit",
     minute: "2-digit",
   });
 }
 
-function statusLabel(status: OrderStatus): string {
+function getStatusLabel(
+  status: Order["status"]
+): string {
   switch (status) {
     case "READY_FOR_PICKUP":
-      return "READY FOR PICKUP";
-    case "DRIVER_ASSIGNED":
-      return "DRIVER ASSIGNED";
-    case "PICKED_UP":
-      return "PICKED UP";
-    case "DISPATCHED":
-      return "ON THE WAY";
-    default:
-      return status.replaceAll("_", " ");
-  }
-}
+      return "Ready for pickup";
 
-function statusClasses(status: OrderStatus): string {
-  switch (status) {
-    case "READY_FOR_PICKUP":
-      return "border-amber-500/40 bg-amber-500/10 text-amber-300";
     case "DRIVER_ASSIGNED":
-      return "border-cyan-500/40 bg-cyan-500/10 text-cyan-300";
+      return "Driver assigned";
+
     case "PICKED_UP":
-      return "border-violet-500/40 bg-violet-500/10 text-violet-300";
+      return "Picked up";
+
     case "DISPATCHED":
-      return "border-emerald-500/40 bg-emerald-500/10 text-emerald-300";
+      return "Dispatched";
+
     case "CANCELLED":
-      return "border-rose-500/40 bg-rose-500/10 text-rose-300";
+      return "Cancelled";
+
     default:
-      return "border-neutral-700 bg-neutral-800 text-neutral-300";
+      return status;
   }
 }
 
 export default function DispatchPage() {
-  const [orders, setOrders] = useState<Order[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [busyOrderId, setBusyOrderId] = useState<string | null>(null);
-  const [error, setError] = useState("");
-  const [selectedDriver, setSelectedDriver] = useState<
+  const [
+    orders,
+    setOrders,
+  ] = useState<Order[]>([]);
+
+  const [
+    employeeCode,
+    setEmployeeCode,
+  ] = useState("");
+
+  const [
+    driverNames,
+    setDriverNames,
+  ] = useState<
     Record<string, string>
   >({});
-  const [selectedEta, setSelectedEta] = useState<
-    Record<string, number>
-  >({});
 
-  const fetchOrders = useCallback(async () => {
-    try {
-      const response = await fetch("/api/orders", {
-        cache: "no-store",
-      });
+  const [
+    loading,
+    setLoading,
+  ] = useState(true);
 
-      if (!response.ok) {
-        throw new Error("Unable to load orders.");
-      }
+  const [
+    error,
+    setError,
+  ] = useState("");
 
-      const data = await response.json();
+  const [
+    actionOrderId,
+    setActionOrderId,
+  ] = useState("");
 
-      setOrders(Array.isArray(data.orders) ? data.orders : []);
-      setError("");
-    } catch (err) {
-      console.error("Dispatch order sync failed:", err);
-      setError("Unable to sync live orders.");
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+  const loadOrders =
+    useCallback(
+      async () => {
+        try {
+          const response =
+            await fetch(
+              "/api/orders",
+              {
+                cache: "no-store",
+              }
+            );
+
+          const data =
+            (await response.json()) as OrdersResponse;
+
+          if (!response.ok) {
+            throw new Error(
+              data.error ||
+                "Unable to load orders"
+            );
+          }
+
+          setOrders(
+            data.orders ?? []
+          );
+
+          setError("");
+        } catch (loadError) {
+          setError(
+            loadError instanceof Error
+              ? loadError.message
+              : "Unable to load orders"
+          );
+        } finally {
+          setLoading(false);
+        }
+      },
+      []
+    );
 
   useEffect(() => {
-    fetchOrders();
+    setEmployeeCode(
+      getEmployeeCode()
+    );
 
-    const interval = window.setInterval(fetchOrders, 3000);
+    void loadOrders();
 
-    return () => {
-      window.clearInterval(interval);
-    };
-  }, [fetchOrders]);
-
-  const dispatchOrders = useMemo(() => {
-    return orders
-      .filter(
-        (order) =>
-          order.kitchenId === KITCHEN_ID &&
-          (
-            order.status === "READY_FOR_PICKUP" ||
-            order.status === "DRIVER_ASSIGNED" ||
-            order.status === "PICKED_UP" ||
-            order.status === "DISPATCHED"
-          )
-      )
-      .sort(
-        (a, b) =>
-          new Date(a.createdAt).getTime() -
-          new Date(b.createdAt).getTime()
+    const interval =
+      window.setInterval(
+        () => {
+          void loadOrders();
+        },
+        3000
       );
-  }, [orders]);
 
-  const readyCount = dispatchOrders.filter(
-    (order) => order.status === "READY_FOR_PICKUP"
-  ).length;
+    return () =>
+      window.clearInterval(
+        interval
+      );
+  }, [loadOrders]);
 
-  const assignedCount = dispatchOrders.filter(
-    (order) => order.status === "DRIVER_ASSIGNED"
-  ).length;
+  const dispatchOrders =
+    useMemo(
+      () =>
+        orders.filter(
+          (order) =>
+            order.status ===
+              "READY_FOR_PICKUP" ||
+            order.status ===
+              "DRIVER_ASSIGNED" ||
+            order.status ===
+              "PICKED_UP"
+        ),
+      [orders]
+    );
 
-  const pickedUpCount = dispatchOrders.filter(
-    (order) => order.status === "PICKED_UP"
-  ).length;
+  const readyCount =
+    dispatchOrders.filter(
+      (order) =>
+        order.status ===
+        "READY_FOR_PICKUP"
+    ).length;
 
-  const onWayCount = dispatchOrders.filter(
-    (order) => order.status === "DISPATCHED"
-  ).length;
+  const assignedCount =
+    dispatchOrders.filter(
+      (order) =>
+        order.status ===
+        "DRIVER_ASSIGNED"
+    ).length;
 
-  async function updateOrder(
-    order: Order,
-    action: "DRIVER_ASSIGNED" | "PICKED_UP" | "DISPATCHED"
+  async function assignDriver(
+    orderId: string
   ) {
-    setBusyOrderId(order.id);
+    const driverName =
+      driverNames[orderId]?.trim();
+
+    if (!driverName) {
+      setError(
+        "Enter a driver name before assigning the order."
+      );
+      return;
+    }
+
+    setActionOrderId(
+      orderId
+    );
     setError("");
 
     try {
-      let body: Record<string, unknown>;
+      const response =
+        await fetch(
+          "/api/orders",
+          {
+            method: "PATCH",
+            headers: {
+              "Content-Type":
+                "application/json",
+            },
+            body: JSON.stringify({
+              orderId,
+              action:
+                "DRIVER_ASSIGNED",
+              driverName,
+            }),
+          }
+        );
 
-      if (action === "DRIVER_ASSIGNED") {
-        const driver =
-          selectedDriver[order.id] || DRIVER_NAMES[0];
-
-        const eta =
-          selectedEta[order.id] ??
-          ETA_OPTIONS[2];
-
-        body = {
-          orderId: order.id,
-          action: "DRIVER_ASSIGNED",
-          driverName: driver,
-          courierEtaMins: eta,
-        };
-      } else if (action === "PICKED_UP") {
-        body = {
-          orderId: order.id,
-          action: "PICKED_UP",
-        };
-      } else {
-        body = {
-          orderId: order.id,
-          action: "DISPATCHED",
-        };
-      }
-
-      const response = await fetch("/api/orders", {
-        method: "PATCH",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(body),
-      });
-
-      const data = await response.json();
+      const data =
+        (await response.json()) as ActionResponse;
 
       if (!response.ok) {
         throw new Error(
-          data?.error || "Unable to update order."
+          data.error ||
+            "Unable to assign driver"
         );
       }
 
-      await fetchOrders();
-    } catch (err) {
-      console.error("Dispatch update failed:", err);
-
+      await loadOrders();
+    } catch (actionError) {
       setError(
-        err instanceof Error
-          ? err.message
-          : "Unable to update order."
+        actionError instanceof Error
+          ? actionError.message
+          : "Unable to assign driver"
       );
     } finally {
-      setBusyOrderId(null);
+      setActionOrderId("");
+    }
+  }
+
+  async function markPickedUp(
+    orderId: string
+  ) {
+    setActionOrderId(
+      orderId
+    );
+    setError("");
+
+    try {
+      const response =
+        await fetch(
+          "/api/orders",
+          {
+            method: "PATCH",
+            headers: {
+              "Content-Type":
+                "application/json",
+            },
+            body: JSON.stringify({
+              orderId,
+              action: "PICKED_UP",
+            }),
+          }
+        );
+
+      const data =
+        (await response.json()) as ActionResponse;
+
+      if (!response.ok) {
+        throw new Error(
+          data.error ||
+            "Unable to mark order as picked up"
+        );
+      }
+
+      await loadOrders();
+    } catch (actionError) {
+      setError(
+        actionError instanceof Error
+          ? actionError.message
+          : "Unable to mark order as picked up"
+      );
+    } finally {
+      setActionOrderId("");
+    }
+  }
+
+  async function markDispatched(
+    orderId: string
+  ) {
+    setActionOrderId(
+      orderId
+    );
+    setError("");
+
+    try {
+      const response =
+        await fetch(
+          "/api/orders",
+          {
+            method: "PATCH",
+            headers: {
+              "Content-Type":
+                "application/json",
+            },
+            body: JSON.stringify({
+              orderId,
+              status:
+                "DISPATCHED",
+            }),
+          }
+        );
+
+      const data =
+        (await response.json()) as ActionResponse;
+
+      if (!response.ok) {
+        throw new Error(
+          data.error ||
+            "Unable to dispatch order"
+        );
+      }
+
+      await loadOrders();
+    } catch (actionError) {
+      setError(
+        actionError instanceof Error
+          ? actionError.message
+          : "Unable to dispatch order"
+      );
+    } finally {
+      setActionOrderId("");
     }
   }
 
   return (
-    <main className="min-h-screen bg-neutral-950 text-neutral-100">
-      <div className="mx-auto max-w-7xl px-4 py-5 sm:px-6 lg:px-8">
-        <header className="mb-6 flex flex-col gap-4 border-b border-neutral-800 pb-5 sm:flex-row sm:items-center sm:justify-between">
+    <main className="min-h-screen bg-slate-950 text-white">
+      <header className="sticky top-0 z-10 border-b border-slate-800 bg-slate-950/95 px-4 py-4 backdrop-blur">
+        <div className="mx-auto flex max-w-6xl items-center justify-between gap-4">
           <div>
-            <div className="flex items-center gap-3">
-              <span className="h-3 w-3 animate-pulse rounded-full bg-emerald-500" />
-              <h1 className="text-2xl font-bold tracking-tight">
-                Dispatch Station
-              </h1>
-            </div>
+            <p className="text-xs font-medium uppercase tracking-[0.2em] text-slate-500">
+              Dark Cloud Kitchen OS
+            </p>
 
-            <p className="mt-1 text-xs text-neutral-400">
-              Kitchen {KITCHEN_ID} · Delivery Handover & Dispatch
+            <h1 className="mt-1 text-2xl font-bold">
+              Dispatch
+            </h1>
+
+            <p className="mt-1 text-sm text-slate-400">
+              Employee:{" "}
+              {employeeCode ||
+                "Authenticated"}
             </p>
           </div>
 
-          <div className="text-right">
-            <div className="text-xs uppercase tracking-wider text-neutral-500">
-              Live Orders
+          <div className="flex gap-5 text-right">
+            <div>
+              <p className="text-xs uppercase tracking-wider text-slate-500">
+                Ready
+              </p>
+
+              <p className="text-2xl font-bold">
+                {readyCount}
+              </p>
             </div>
-            <div className="font-mono text-2xl font-bold">
-              {dispatchOrders.length}
+
+            <div>
+              <p className="text-xs uppercase tracking-wider text-slate-500">
+                Assigned
+              </p>
+
+              <p className="text-2xl font-bold">
+                {assignedCount}
+              </p>
             </div>
           </div>
-        </header>
+        </div>
+      </header>
 
+      <section className="mx-auto max-w-6xl px-4 py-5">
         {error && (
-          <div className="mb-5 rounded-lg border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-sm text-rose-300">
+          <div
+            role="alert"
+            className="mb-5 rounded-xl border border-red-900 bg-red-950/40 px-4 py-3 text-sm text-red-300"
+          >
             {error}
           </div>
         )}
 
-        <section className="mb-6 grid grid-cols-2 gap-3 lg:grid-cols-4">
-          <div className="rounded-lg border border-neutral-800 bg-neutral-900/70 p-4">
-            <div className="text-xs uppercase tracking-wider text-neutral-500">
-              Ready
-            </div>
-            <div className="mt-1 font-mono text-2xl font-bold text-amber-300">
-              {readyCount}
-            </div>
-          </div>
-
-          <div className="rounded-lg border border-neutral-800 bg-neutral-900/70 p-4">
-            <div className="text-xs uppercase tracking-wider text-neutral-500">
-              Driver Assigned
-            </div>
-            <div className="mt-1 font-mono text-2xl font-bold text-cyan-300">
-              {assignedCount}
-            </div>
-          </div>
-
-          <div className="rounded-lg border border-neutral-800 bg-neutral-900/70 p-4">
-            <div className="text-xs uppercase tracking-wider text-neutral-500">
-              Picked Up
-            </div>
-            <div className="mt-1 font-mono text-2xl font-bold text-violet-300">
-              {pickedUpCount}
-            </div>
-          </div>
-
-          <div className="rounded-lg border border-neutral-800 bg-neutral-900/70 p-4">
-            <div className="text-xs uppercase tracking-wider text-neutral-500">
-              On The Way
-            </div>
-            <div className="mt-1 font-mono text-2xl font-bold text-emerald-300">
-              {onWayCount}
-            </div>
-          </div>
-        </section>
-
         {loading ? (
-          <div className="rounded-xl border border-neutral-800 bg-neutral-900/50 p-10 text-center text-sm text-neutral-400">
+          <div className="rounded-2xl border border-slate-800 bg-slate-900 p-8 text-center text-slate-400">
             Loading dispatch queue...
           </div>
-        ) : dispatchOrders.length === 0 ? (
-          <div className="rounded-xl border border-dashed border-neutral-800 bg-neutral-900/30 p-12 text-center">
-            <div className="text-lg font-semibold text-neutral-300">
-              No dispatch orders
-            </div>
-            <p className="mt-2 text-sm text-neutral-500">
-              Orders marked READY FOR PICKUP will appear here.
+        ) : dispatchOrders.length ===
+          0 ? (
+          <div className="rounded-2xl border border-slate-800 bg-slate-900 p-10 text-center">
+            <p className="text-xl font-semibold">
+              Dispatch queue clear
+            </p>
+
+            <p className="mt-2 text-sm text-slate-500">
+              Orders marked ready by
+              the kitchen will appear
+              here automatically.
             </p>
           </div>
         ) : (
-          <section className="space-y-4">
-            {dispatchOrders.map((order) => {
-              const isBusy = busyOrderId === order.id;
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+            {dispatchOrders.map(
+              (order) => {
+                const busy =
+                  actionOrderId ===
+                  order.id;
 
-              return (
-                <article
-                  key={order.id}
-                  className="rounded-xl border border-neutral-800 bg-neutral-900/70 p-4 shadow-xl shadow-black/10"
-                >
-                  <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-                    <div className="min-w-0 flex-1">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <span className="font-mono text-lg font-bold text-white">
+                return (
+                  <article
+                    key={order.id}
+                    className="rounded-2xl border border-slate-800 bg-slate-900 p-5 shadow-lg"
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <p className="text-xs font-medium uppercase tracking-wider text-slate-500">
                           {order.id}
-                        </span>
+                        </p>
 
-                        <span
-                          className={`rounded-full border px-2 py-1 text-[10px] font-semibold tracking-wider ${statusClasses(
-                            order.status
-                          )}`}
-                        >
-                          {statusLabel(order.status)}
-                        </span>
+                        <h2 className="mt-1 text-lg font-bold">
+                          {order.brandId}
+                        </h2>
 
-                        <span className="rounded-full border border-neutral-700 bg-neutral-800 px-2 py-1 text-[10px] uppercase tracking-wider text-neutral-400">
+                        <p className="text-sm text-slate-400">
                           {order.channel}
+                        </p>
+                      </div>
+
+                      <span className="rounded-full border border-slate-700 bg-slate-950 px-3 py-1 text-xs font-medium text-slate-300">
+                        {getStatusLabel(
+                          order.status
+                        )}
+                      </span>
+                    </div>
+
+                    <div className="mt-4 rounded-xl bg-slate-950 p-4">
+                      <div className="flex items-center justify-between text-sm">
+                        <span className="text-slate-500">
+                          Kitchen
+                        </span>
+
+                        <span className="font-medium">
+                          {
+                            order.kitchenId
+                          }
                         </span>
                       </div>
 
-                      <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
-                        <div>
-                          <div className="text-[10px] uppercase tracking-wider text-neutral-500">
-                            Aggregator Order ID
-                          </div>
-                          <div className="mt-1 font-mono text-sm text-cyan-300">
-                            {order.externalOrderId || "Not supplied"}
-                          </div>
-                        </div>
+                      <div className="mt-2 flex items-center justify-between text-sm">
+                        <span className="text-slate-500">
+                          Ready
+                        </span>
 
-                        <div>
-                          <div className="text-[10px] uppercase tracking-wider text-neutral-500">
-                            Brand
-                          </div>
-                          <div className="mt-1 text-sm text-neutral-200">
-                            {order.brandId}
-                          </div>
-                        </div>
-
-                        <div>
-                          <div className="text-[10px] uppercase tracking-wider text-neutral-500">
-                            Customer
-                          </div>
-                          <div className="mt-1 text-sm text-neutral-200">
-                            {order.customerName || "Customer"}
-                          </div>
-                        </div>
-
-                        <div>
-                          <div className="text-[10px] uppercase tracking-wider text-neutral-500">
-                            Ready At
-                          </div>
-                          <div className="mt-1 font-mono text-sm text-neutral-300">
-                            {formatTime(order.readyAt)}
-                          </div>
-                        </div>
+                        <span className="font-medium">
+                          {formatTime(
+                            order.readyAt
+                          )}
+                        </span>
                       </div>
 
-                      <div className="mt-4 rounded-lg border border-neutral-800 bg-neutral-950/60 p-3">
-                        <div className="mb-2 text-[10px] uppercase tracking-wider text-neutral-500">
-                          Order
+                      {order.externalOrderId && (
+                        <div className="mt-2 flex items-center justify-between text-sm">
+                          <span className="text-slate-500">
+                            External ID
+                          </span>
+
+                          <span className="max-w-[180px] truncate font-medium">
+                            {
+                              order.externalOrderId
+                            }
+                          </span>
                         </div>
+                      )}
 
-                        <div className="space-y-2">
-                          {order.items.map((item) => (
-                            <div
-                              key={item.id}
-                              className="flex items-start justify-between gap-4 text-sm"
-                            >
-                              <div className="text-neutral-200">
-                                <span className="mr-2 font-mono text-neutral-500">
-                                  {item.quantity}×
-                                </span>
+                      {order.driverName && (
+                        <div className="mt-2 flex items-center justify-between text-sm">
+                          <span className="text-slate-500">
+                            Driver
+                          </span>
+
+                          <span className="font-medium">
+                            {
+                              order.driverName
+                            }
+                          </span>
+                        </div>
+                      )}
+
+                      {order.courierEtaMins !==
+                        undefined && (
+                        <div className="mt-2 flex items-center justify-between text-sm">
+                          <span className="text-slate-500">
+                            Courier ETA
+                          </span>
+
+                          <span className="font-medium">
+                            {
+                              order.courierEtaMins
+                            }{" "}
+                            min
+                          </span>
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="mt-4 space-y-2">
+                      {order.items.map(
+                        (item) => (
+                          <div
+                            key={
+                              item.id
+                            }
+                            className="rounded-xl border border-slate-800 bg-slate-950 px-3 py-3"
+                          >
+                            <div className="flex items-center justify-between gap-3">
+                              <span className="font-medium">
                                 {item.name}
-                                {item.notes && (
-                                  <div className="mt-1 text-xs text-neutral-500">
-                                    Note: {item.notes}
-                                  </div>
-                                )}
-                              </div>
+                              </span>
 
-                              <span className="shrink-0 text-xs text-neutral-600">
-                                {item.station}
+                              <span className="rounded-md bg-slate-800 px-2 py-1 text-sm font-bold">
+                                ×
+                                {
+                                  item.quantity
+                                }
                               </span>
                             </div>
-                          ))}
-                        </div>
-                      </div>
+
+                            {item.notes && (
+                              <p className="mt-2 text-xs text-slate-400">
+                                Note:{" "}
+                                {
+                                  item.notes
+                                }
+                              </p>
+                            )}
+                          </div>
+                        )
+                      )}
                     </div>
 
-                    <div className="w-full lg:max-w-sm">
-                      {order.status === "READY_FOR_PICKUP" && (
-                        <div className="rounded-lg border border-amber-500/20 bg-amber-500/5 p-4">
-                          <div className="mb-3">
-                            <div className="text-sm font-semibold text-amber-200">
-                              Assign Delivery Partner
-                            </div>
-                            <div className="mt-1 text-xs text-neutral-500">
-                              Match the aggregator order with the driver.
-                            </div>
-                          </div>
-
-                          <div className="space-y-3">
-                            <div>
-                              <label
-                                htmlFor={`driver-${order.id}`}
-                                className="mb-1 block text-[10px] uppercase tracking-wider text-neutral-500"
-                              >
-                                Delivery Partner
-                              </label>
-
-                              <select
-                                id={`driver-${order.id}`}
-                                value={
-                                  selectedDriver[order.id] ||
-                                  DRIVER_NAMES[0]
-                                }
-                                onChange={(event) =>
-                                  setSelectedDriver((current) => ({
-                                    ...current,
-                                    [order.id]: event.target.value,
-                                  }))
-                                }
-                                className="w-full rounded-lg border border-neutral-700 bg-neutral-950 px-3 py-3 text-sm text-neutral-100 outline-none focus:border-cyan-500"
-                              >
-                                {DRIVER_NAMES.map((driver) => (
-                                  <option
-                                    key={driver}
-                                    value={driver}
-                                  >
-                                    {driver}
-                                  </option>
-                                ))}
-                              </select>
-                            </div>
-
-                            <div>
-                              <label
-                                htmlFor={`eta-${order.id}`}
-                                className="mb-1 block text-[10px] uppercase tracking-wider text-neutral-500"
-                              >
-                                Customer ETA
-                              </label>
-
-                              <select
-                                id={`eta-${order.id}`}
-                                value={
-                                  selectedEta[order.id] ??
-                                  ETA_OPTIONS[2]
-                                }
-                                onChange={(event) =>
-                                  setSelectedEta((current) => ({
-                                    ...current,
-                                    [order.id]: Number(
-                                      event.target.value
-                                    ),
-                                  }))
-                                }
-                                className="w-full rounded-lg border border-neutral-700 bg-neutral-950 px-3 py-3 text-sm text-neutral-100 outline-none focus:border-cyan-500"
-                              >
-                                {ETA_OPTIONS.map((minutes) => (
-                                  <option
-                                    key={minutes}
-                                    value={minutes}
-                                  >
-                                    {minutes} minutes
-                                  </option>
-                                ))}
-                              </select>
-                            </div>
-
-                            <button
-                              type="button"
-                              disabled={isBusy}
-                              onClick={() =>
-                                updateOrder(
-                                  order,
-                                  "DRIVER_ASSIGNED"
-                                )
-                              }
-                              className="w-full rounded-lg bg-cyan-600 px-4 py-3 text-sm font-bold text-white transition hover:bg-cyan-500 disabled:cursor-not-allowed disabled:opacity-50"
-                            >
-                              {isBusy
-                                ? "Assigning..."
-                                : "ASSIGN DRIVER"}
-                            </button>
-                          </div>
-                        </div>
-                      )}
-
-                      {order.status === "DRIVER_ASSIGNED" && (
-                        <div className="rounded-lg border border-cyan-500/20 bg-cyan-500/5 p-4">
-                          <div className="mb-3">
-                            <div className="text-sm font-semibold text-cyan-200">
-                              Driver Assigned
-                            </div>
-                            <div className="mt-1 text-xs text-neutral-500">
-                              Confirm when the delivery partner physically
-                              collects the order.
-                            </div>
-                          </div>
-
-                          <div className="mb-4 grid grid-cols-2 gap-3">
-                            <div className="rounded-lg border border-neutral-800 bg-neutral-950/60 p-3">
-                              <div className="text-[10px] uppercase tracking-wider text-neutral-500">
-                                Driver
-                              </div>
-                              <div className="mt-1 text-sm font-semibold text-neutral-200">
-                                {order.driverName || "Assigned"}
-                              </div>
-                            </div>
-
-                            <div className="rounded-lg border border-neutral-800 bg-neutral-950/60 p-3">
-                              <div className="text-[10px] uppercase tracking-wider text-neutral-500">
-                                Customer ETA
-                              </div>
-                              <div className="mt-1 font-mono text-sm font-semibold text-cyan-300">
-                                {order.courierEtaMins
-                                  ? `${order.courierEtaMins} min`
-                                  : "--"}
-                              </div>
-                            </div>
-                          </div>
+                    <div className="mt-5">
+                      {order.status ===
+                        "READY_FOR_PICKUP" && (
+                        <div className="space-y-3">
+                          <input
+                            type="text"
+                            value={
+                              driverNames[
+                                order.id
+                              ] ??
+                              ""
+                            }
+                            onChange={(
+                              event
+                            ) =>
+                              setDriverNames(
+                                (
+                                  current
+                                ) => ({
+                                  ...current,
+                                  [order.id]:
+                                    event
+                                      .target
+                                      .value,
+                                })
+                              )
+                            }
+                            placeholder="Driver name"
+                            className="min-h-12 w-full rounded-xl border border-slate-700 bg-slate-950 px-4 text-base text-white outline-none placeholder:text-slate-600 focus:border-slate-400"
+                          />
 
                           <button
                             type="button"
-                            disabled={isBusy}
-                            onClick={() =>
-                              updateOrder(order, "PICKED_UP")
+                            disabled={
+                              busy
                             }
-                            className="w-full rounded-lg bg-violet-600 px-4 py-3 text-sm font-bold text-white transition hover:bg-violet-500 disabled:cursor-not-allowed disabled:opacity-50"
+                            onClick={() =>
+                              void assignDriver(
+                                order.id
+                              )
+                            }
+                            className="min-h-14 w-full rounded-xl bg-white px-4 py-3 text-base font-bold text-slate-950 transition hover:bg-slate-200 disabled:cursor-not-allowed disabled:opacity-50"
                           >
-                            {isBusy
-                              ? "Updating..."
-                              : "CONFIRM PICKED UP"}
+                            {busy
+                              ? "Assigning..."
+                              : "Assign Driver"}
                           </button>
                         </div>
                       )}
 
-                      {order.status === "PICKED_UP" && (
-                        <div className="rounded-lg border border-violet-500/20 bg-violet-500/5 p-4">
-                          <div className="mb-3">
-                            <div className="text-sm font-semibold text-violet-200">
-                              Order Picked Up
-                            </div>
-                            <div className="mt-1 text-xs text-neutral-500">
-                              The delivery partner has collected the order.
-                            </div>
-                          </div>
-
-                          <div className="mb-4 grid grid-cols-2 gap-3">
-                            <div className="rounded-lg border border-neutral-800 bg-neutral-950/60 p-3">
-                              <div className="text-[10px] uppercase tracking-wider text-neutral-500">
-                                Driver
-                              </div>
-                              <div className="mt-1 text-sm font-semibold text-neutral-200">
-                                {order.driverName || "Assigned"}
-                              </div>
-                            </div>
-
-                            <div className="rounded-lg border border-neutral-800 bg-neutral-950/60 p-3">
-                              <div className="text-[10px] uppercase tracking-wider text-neutral-500">
-                                ETA
-                              </div>
-                              <div className="mt-1 font-mono text-sm font-semibold text-cyan-300">
-                                {order.courierEtaMins
-                                  ? `${order.courierEtaMins} min`
-                                  : "--"}
-                              </div>
-                            </div>
-                          </div>
-
-                          <button
-                            type="button"
-                            disabled={isBusy}
-                            onClick={() =>
-                              updateOrder(order, "DISPATCHED")
-                            }
-                            className="w-full rounded-lg bg-emerald-600 px-4 py-3 text-sm font-bold text-white transition hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-50"
-                          >
-                            {isBusy
-                              ? "Updating..."
-                              : "DISPATCH / ON THE WAY"}
-                          </button>
-                        </div>
+                      {order.status ===
+                        "DRIVER_ASSIGNED" && (
+                        <button
+                          type="button"
+                          disabled={
+                            busy
+                          }
+                          onClick={() =>
+                            void markPickedUp(
+                              order.id
+                            )
+                          }
+                          className="min-h-14 w-full rounded-xl bg-amber-400 px-4 py-3 text-base font-bold text-slate-950 transition hover:bg-amber-300 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          {busy
+                            ? "Updating..."
+                            : "Mark Picked Up"}
+                        </button>
                       )}
 
-                      {order.status === "DISPATCHED" && (
-                        <div className="rounded-lg border border-emerald-500/20 bg-emerald-500/5 p-4">
-                          <div className="text-sm font-semibold text-emerald-200">
-                            ON THE WAY
-                          </div>
-
-                          <div className="mt-3 grid grid-cols-2 gap-3">
-                            <div>
-                              <div className="text-[10px] uppercase tracking-wider text-neutral-500">
-                                Driver
-                              </div>
-                              <div className="mt-1 text-sm text-neutral-200">
-                                {order.driverName || "--"}
-                              </div>
-                            </div>
-
-                            <div>
-                              <div className="text-[10px] uppercase tracking-wider text-neutral-500">
-                                Customer ETA
-                              </div>
-                              <div className="mt-1 font-mono text-sm font-semibold text-emerald-300">
-                                {order.courierEtaMins
-                                  ? `${order.courierEtaMins} min`
-                                  : "--"}
-                              </div>
-                            </div>
-                          </div>
-
-                          <div className="mt-4 border-t border-neutral-800 pt-3 text-xs text-neutral-500">
-                            Dispatched at{" "}
-                            {formatTime(order.dispatchedAt)}
-                          </div>
-                        </div>
+                      {order.status ===
+                        "PICKED_UP" && (
+                        <button
+                          type="button"
+                          disabled={
+                            busy
+                          }
+                          onClick={() =>
+                            void markDispatched(
+                              order.id
+                            )
+                          }
+                          className="min-h-14 w-full rounded-xl bg-emerald-500 px-4 py-3 text-base font-bold text-slate-950 transition hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          {busy
+                            ? "Dispatching..."
+                            : "Dispatch Order"}
+                        </button>
                       )}
                     </div>
-                  </div>
-                </article>
-              );
-            })}
-          </section>
+                  </article>
+                );
+              }
+            )}
+          </div>
         )}
-      </div>
+      </section>
     </main>
   );
 }
