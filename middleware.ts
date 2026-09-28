@@ -47,19 +47,22 @@ function getRequiredPermission(
   pathname: string
 ): string | null {
   if (
-    pathname.startsWith("/owner")
+    pathname === "/owner" ||
+    pathname.startsWith("/owner/")
   ) {
     return "PERM-OWNER-VIEW";
   }
 
   if (
-    pathname.startsWith("/cook")
+    pathname === "/cook" ||
+    pathname.startsWith("/cook/")
   ) {
     return "PERM-COOK-ORDERS";
   }
 
   if (
-    pathname.startsWith("/dispatch")
+    pathname === "/dispatch" ||
+    pathname.startsWith("/dispatch/")
   ) {
     return "PERM-DISPATCH-ORDERS";
   }
@@ -86,7 +89,9 @@ export function middleware(
     request.nextUrl;
 
   if (
-    !isProtectedRoute(pathname)
+    !isProtectedRoute(
+      pathname
+    )
   ) {
     return NextResponse.next();
   }
@@ -138,9 +143,9 @@ export function middleware(
   }
 
   /*
-   * Owner operates across the
-   * complete platform and is not
-   * restricted to one kitchen.
+   * Owner has platform-wide
+   * visibility and does not require
+   * a kitchen assignment.
    */
   if (
     employee.role ===
@@ -152,10 +157,6 @@ export function middleware(
   /*
    * Kitchen-scoped employees must
    * have an assigned kitchen.
-   *
-   * The actual kitchen filtering
-   * remains the responsibility of
-   * the operational API/page layer.
    */
   if (
     !employee.kitchenId
@@ -176,15 +177,9 @@ export function middleware(
     NextResponse.next();
 
   /*
-   * Pass the authenticated
-   * employee identity downstream
-   * through request headers.
-   *
-   * This does not grant additional
-   * permissions. It exposes the
-   * already authenticated identity
-   * to server-side application
-   * layers.
+   * Expose authenticated identity
+   * to downstream server-side
+   * application layers.
    */
   response.headers.set(
     "x-employee-id",
@@ -201,14 +196,10 @@ export function middleware(
     employee.role
   );
 
-  if (
+  response.headers.set(
+    "x-kitchen-id",
     employee.kitchenId
-  ) {
-    response.headers.set(
-      "x-kitchen-id",
-      employee.kitchenId
-    );
-  }
+  );
 
   return response;
 }
