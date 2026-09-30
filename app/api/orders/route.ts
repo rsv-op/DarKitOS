@@ -21,48 +21,16 @@ import {
   updateOrder,
 } from "@/lib/store";
 
+import { getEmployeeFromCookie } from "@/lib/domain/auth-service";
+import { hasPermission } from "@/lib/domain/permission-service";
+
 export const dynamic = "force-dynamic";
 
 function getEmployee(
   request: NextRequest
 ): Employee | null {
-  const employeeCode =
-    request.cookies.get("employee_code")?.value;
-
-  if (!employeeCode) {
-    return null;
-  }
-
-  return (
-    EMPLOYEES_DB.find(
-      (employee) =>
-        employee.active &&
-        employee.employeeCode ===
-          employeeCode
-    ) ?? null
-  );
-}
-
-function hasPermission(
-  employee: Employee,
-  permissionCode: PermissionCode
-): boolean {
-  const permission =
-    PERMISSIONS_DB.find(
-      (item) =>
-        item.code === permissionCode
-    );
-
-  if (!permission) {
-    return false;
-  }
-
-  return ROLE_PERMISSIONS_DB.some(
-    (rolePermission) =>
-      rolePermission.role ===
-        employee.role &&
-      rolePermission.permissionId ===
-        permission.id
+  return getEmployeeFromCookie(
+    request.cookies.get("employee_code")?.value
   );
 }
 
@@ -377,14 +345,13 @@ export async function POST(
         inventory
       );
 
-    const inventoryEvents =
-      [
-        createEvent(
-          "INVENTORY_CHECKED",
-          employee.employeeCode,
-          `Inventory decision: ${evaluation.inventoryDecision}`
-        ),
-      ];
+    const inventoryEvents = [
+      createEvent(
+        "INVENTORY_CHECKED",
+        employee.employeeCode,
+        `Inventory decision: ${evaluation.inventoryDecision}`
+      ),
+    ];
 
     if (
       evaluation.lowStockItems
