@@ -1,9 +1,4 @@
 
-
-This is the feature-building orchestrator. It tells an AI coding agent how to take a requirement and carry it all the way from domain logic to UI, instead of producing another isolated page.
-
-Copy everything below:
-
 # DarKitOS Full-Stack Feature Implementation Protocol
 
 ## 1. Purpose
