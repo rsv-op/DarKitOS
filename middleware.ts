@@ -22,7 +22,7 @@ function getEmployeeFromRequest(
   if (!employeeCode) {
     return undefined;
   }
-
+console.log("Employee code:", employeeCode);
   return EMPLOYEES_DB.find(
     (employee) =>
       employee.active &&
