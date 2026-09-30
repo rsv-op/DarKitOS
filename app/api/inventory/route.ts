@@ -13,38 +13,14 @@ import {
   replaceInventory,
 } from "@/lib/store";
 
+import { getEmployeeFromCookie } from "@/lib/domain/auth-service";
+import { hasPermission } from "@/lib/domain/permission-service";
+
 function getEmployee(
   request: NextRequest
 ): Employee | null {
-  const employeeCode =
-    request.cookies.get("employee_code")?.value;
-
-  if (!employeeCode) {
-    return null;
-  }
-
-  return (
-    EMPLOYEES_DB.find(
-      (employee) =>
-        employee.active &&
-        employee.employeeCode === employeeCode
-    ) ?? null
-  );
-}
-
-function hasPermission(
-  employee: Employee,
-  permissionCode: PermissionCode
-): boolean {
-  const permissionId =
-    `PERM-${permissionCode
-      .replaceAll("_", "-")
-      .toUpperCase()}`;
-
-  return ROLE_PERMISSIONS_DB.some(
-    (permission) =>
-      permission.role === employee.role &&
-      permission.permissionId === permissionId
+  return getEmployeeFromCookie(
+    request.cookies.get("employee_code")?.value
   );
 }
 
