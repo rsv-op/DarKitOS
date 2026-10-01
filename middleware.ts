@@ -1,212 +1,137 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
+import type { NextRequest } from "next/server";
 
 import {
-  EMPLOYEES_DB,
-  ROLE_PERMISSIONS_DB,
-} from "@/lib/db";
+  roleFromEmployeeCode,
+  roleFromToken,
+} from "@/lib/auth";
 
-const PROTECTED_ROUTES = [
-  "/cook",
-  "/dispatch",
-  "/owner",
-] as const;
-
-function getEmployeeFromRequest(
-  request: NextRequest
+function getRole(
+  request: NextRequest,
 ) {
   const employeeCode =
     request.cookies.get(
-      "employee_code"
+      "employee_code",
     )?.value;
 
-  if (!employeeCode) {
-    return undefined;
-  }
-console.log("Employee code:", employeeCode);
-  return EMPLOYEES_DB.find(
-    (employee) =>
-      employee.active &&
-      employee.employeeCode ===
-        employeeCode
-  );
-}
+  const employeeRole =
+    roleFromEmployeeCode(employeeCode);
 
-function hasPermission(
-  role: (typeof EMPLOYEES_DB)[number]["role"],
-  permissionId: string
-): boolean {
-  return ROLE_PERMISSIONS_DB.some(
-    (mapping) =>
-      mapping.role === role &&
-      mapping.permissionId ===
-        permissionId
-  );
-}
-
-function getRequiredPermission(
-  pathname: string
-): string | null {
-  if (
-    pathname === "/owner" ||
-    pathname.startsWith("/owner/")
-  ) {
-    return "PERM-OWNER-VIEW";
+  if (employeeRole) {
+    return employeeRole;
   }
 
-  if (
-    pathname === "/cook" ||
-    pathname.startsWith("/cook/")
-  ) {
-    return "PERM-COOK-ORDERS";
-  }
+  const token =
+    request.cookies.get(
+      "dark_cloud_session",
+    )?.value;
 
-  if (
-    pathname === "/dispatch" ||
-    pathname.startsWith("/dispatch/")
-  ) {
-    return "PERM-DISPATCH-ORDERS";
-  }
-
-  return null;
+  return roleFromToken(token);
 }
 
-function isProtectedRoute(
-  pathname: string
-): boolean {
-  return PROTECTED_ROUTES.some(
-    (route) =>
-      pathname === route ||
-      pathname.startsWith(
-        `${route}/`
-      )
-  );
-}
-
-function redirectToLogin(
-  request: NextRequest
-): NextResponse {
-  const loginUrl =
-    new URL(
-      "/login",
-      request.url
-    );
-
-  loginUrl.searchParams.set(
-    "redirect",
-    request.nextUrl.pathname
-  );
-
-  return NextResponse.redirect(
-    loginUrl
+function unauthorized() {
+  return NextResponse.json(
+    {
+      success: false,
+      error: "Authentication required",
+    },
+    { status: 401 },
   );
 }
 
 export function middleware(
-  request: NextRequest
+  request: NextRequest,
 ) {
-  const { pathname } =
-    request.nextUrl;
+  const pathname =
+    request.nextUrl.pathname;
 
-  if (
-    pathname === "/login" ||
-    pathname.startsWith(
-      "/api/login"
-    )
-  ) {
+  const role = getRole(request);
+
+  /*
+   * API authentication
+   */
+  if (pathname.startsWith("/api/")) {
+    if (pathname === "/api/login") {
+      return NextResponse.next();
+    }
+
+    if (!role) {
+      return unauthorized();
+    }
+
     return NextResponse.next();
   }
 
-  if (
-    !isProtectedRoute(pathname)
-  ) {
+  /*
+   * Developer console
+   */
+  if (pathname.startsWith("/dev")) {
+    if (role !== "developer") {
+      return NextResponse.redirect(
+        new URL("/login", request.url),
+      );
+    }
+
     return NextResponse.next();
   }
 
-  const employee =
-    getEmployeeFromRequest(
-      request
-    );
+  /*
+   * Owner
+   */
+  if (pathname.startsWith("/owner")) {
+    if (
+      role !== "owner" &&
+      role !== "developer"
+    ) {
+      return NextResponse.redirect(
+        new URL("/login", request.url),
+      );
+    }
 
-  if (!employee) {
-    return redirectToLogin(
-      request
-    );
+    return NextResponse.next();
   }
 
-  const requiredPermission =
-    getRequiredPermission(
-      pathname
-    );
+  /*
+   * Cook
+   */
+  if (pathname.startsWith("/cook")) {
+    if (
+      role !== "cook" &&
+      role !== "developer"
+    ) {
+      return NextResponse.redirect(
+        new URL("/login", request.url),
+      );
+    }
 
-  if (
-    requiredPermission &&
-    !hasPermission(
-      employee.role,
-      requiredPermission
-    )
-  ) {
-    return new NextResponse(
-      "Forbidden",
-      {
-        status: 403,
-        headers: {
-          "Content-Type":
-            "text/plain; charset=utf-8",
-        },
-      }
-    );
+    return NextResponse.next();
   }
 
-  if (
-    employee.role !== "OWNER" &&
-    !employee.kitchenId
-  ) {
-    return new NextResponse(
-      "Kitchen assignment required",
-      {
-        status: 403,
-        headers: {
-          "Content-Type":
-            "text/plain; charset=utf-8",
-        },
-      }
-    );
+  /*
+   * Dispatch
+   */
+  if (pathname.startsWith("/dispatch")) {
+    if (
+      role !== "dispatch" &&
+      role !== "developer"
+    ) {
+      return NextResponse.redirect(
+        new URL("/login", request.url),
+      );
+    }
+
+    return NextResponse.next();
   }
 
-  const response =
-    NextResponse.next();
-
-  response.headers.set(
-    "x-employee-id",
-    employee.id
-  );
-
-  response.headers.set(
-    "x-employee-code",
-    employee.employeeCode
-  );
-
-  response.headers.set(
-    "x-employee-role",
-    employee.role
-  );
-
-  if (employee.kitchenId) {
-    response.headers.set(
-      "x-kitchen-id",
-      employee.kitchenId
-    );
-  }
-
-  return response;
+  return NextResponse.next();
 }
 
 export const config = {
   matcher: [
+    "/dev/:path*",
     "/cook/:path*",
     "/dispatch/:path*",
     "/owner/:path*",
-    "/login",
-    "/api/login",
+    "/api/:path*",
   ],
 };
