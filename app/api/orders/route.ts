@@ -1,16 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import {
-  EMPLOYEES_DB,
-  PERMISSIONS_DB,
-  ROLE_PERMISSIONS_DB,
   evaluateOrderInventory,
   processOrderDepletion,
   type Employee,
   type Order,
   type OrderEventType,
   type OrderStatus,
-  type PermissionCode,
 } from "@/lib/db";
 
 import {
@@ -25,6 +21,25 @@ import { getEmployeeFromCookie } from "@/lib/domain/auth-service";
 import { hasPermission } from "@/lib/domain/permission-service";
 
 export const dynamic = "force-dynamic";
+
+/**
+ * Development-only order injection identity.
+ *
+ * This is intentionally NOT added to EMPLOYEES_DB.
+ * It exists only so the developer order-injection
+ * console can use the same protected /api/orders
+ * endpoint without weakening normal employee auth.
+ */
+const DEVELOPMENT_CODE = "9999";
+
+function isDevelopmentSession(
+  request: NextRequest
+): boolean {
+  return (
+    request.cookies.get("employee_code")?.value.trim() ===
+    DEVELOPMENT_CODE
+  );
+}
 
 function getEmployee(
   request: NextRequest
@@ -42,10 +57,7 @@ function canAccessOrder(
     return true;
   }
 
-  return (
-    employee.kitchenId ===
-    order.kitchenId
-  );
+  return employee.kitchenId === order.kitchenId;
 }
 
 function canUseOrderAction(
@@ -93,12 +105,9 @@ function createEvent(
       .toString(36)
       .slice(2, 8)}`,
     type,
-    timestamp:
-      new Date().toISOString(),
+    timestamp: new Date().toISOString(),
     actor,
-    ...(details
-      ? { details }
-      : {}),
+    ...(details ? { details } : {}),
   };
 }
 
@@ -106,10 +115,7 @@ function isValidOrderTransition(
   currentStatus: OrderStatus,
   nextStatus: OrderStatus
 ): boolean {
-  if (
-    currentStatus ===
-    nextStatus
-  ) {
+  if (currentStatus === nextStatus) {
     return false;
   }
 
@@ -121,30 +127,48 @@ function isValidOrderTransition(
       "PREPARING",
       "CANCELLED",
     ],
+
     PREPARING: [
       "READY_FOR_PICKUP",
       "CANCELLED",
     ],
+
     READY_FOR_PICKUP: [
       "DRIVER_ASSIGNED",
       "CANCELLED",
     ],
+
     DRIVER_ASSIGNED: [
       "PICKED_UP",
       "CANCELLED",
     ],
+
     PICKED_UP: [
       "DISPATCHED",
     ],
+
     DISPATCHED: [],
+
     CANCELLED: [],
   };
 
-  return transitions[
-    currentStatus
-  ].includes(nextStatus);
+  return transitions[currentStatus].includes(
+    nextStatus
+  );
 }
 
+/**
+ * GET /api/orders
+ *
+ * Normal employees can only see orders
+ * belonging to their kitchen.
+ *
+ * Owner can see all orders.
+ *
+ * Developer session can see all orders because
+ * the developer console is explicitly a
+ * development-only operational tool.
+ */
 export async function GET(
   request: NextRequest
 ) {
@@ -152,22 +176,30 @@ export async function GET(
     const employee =
       getEmployee(request);
 
-    if (!employee) {
+    const developmentSession =
+      isDevelopmentSession(request);
+
+    if (!employee && !developmentSession) {
       return NextResponse.json(
         {
-          error:
-            "Unauthorized",
+          error: "Unauthorized",
         },
         { status: 401 }
       );
     }
 
-    const orders =
-      getOrders();
+    const orders = getOrders();
+
+    if (developmentSession) {
+      return NextResponse.json({
+        orders,
+      });
+    }
 
     const visibleOrders =
       orders.filter(
         (order) =>
+          employee &&
           canAccessOrder(
             employee,
             order
@@ -175,8 +207,7 @@ export async function GET(
       );
 
     return NextResponse.json({
-      orders:
-        visibleOrders,
+      orders: visibleOrders,
     });
   } catch (error) {
     console.error(
@@ -186,14 +217,23 @@ export async function GET(
 
     return NextResponse.json(
       {
-        error:
-          "Unable to load orders",
+        error: "Unable to load orders",
       },
       { status: 500 }
     );
   }
 }
 
+/**
+ * POST /api/orders
+ *
+ * Creates an order through the canonical
+ * order/inventory store boundary.
+ *
+ * Developer order injection is permitted only
+ * when the authenticated employee_code cookie
+ * is exactly the development code.
+ */
 export async function POST(
   request: NextRequest
 ) {
@@ -201,17 +241,36 @@ export async function POST(
     const employee =
       getEmployee(request);
 
-    if (!employee) {
+    const developmentSession =
+      isDevelopmentSession(request);
+
+    /**
+     * Normal authentication requirement.
+     *
+     * Developer access is deliberately handled
+     * separately and cannot be impersonated by
+     * simply omitting the employee cookie.
+     */
+    if (!employee && !developmentSession) {
       return NextResponse.json(
         {
-          error:
-            "Unauthorized",
+          error: "Unauthorized",
         },
         { status: 401 }
       );
     }
 
+    /**
+     * Normal employees must have operational
+     * permission to create orders.
+     *
+     * The development console is the only
+     * exception and is still protected by the
+     * explicit development session cookie.
+     */
     if (
+      !developmentSession &&
+      employee &&
       !hasPermission(
         employee,
         "KITCHEN_OPERATE"
@@ -223,8 +282,7 @@ export async function POST(
     ) {
       return NextResponse.json(
         {
-          error:
-            "Forbidden",
+          error: "Forbidden",
         },
         { status: 403 }
       );
@@ -235,8 +293,7 @@ export async function POST(
 
     if (
       !body ||
-      typeof body !==
-        "object"
+      typeof body !== "object"
     ) {
       return NextResponse.json(
         {
@@ -250,30 +307,34 @@ export async function POST(
     const now =
       new Date().toISOString();
 
-    const order =
-      {
-        ...body,
-        status: "PENDING",
-        createdAt:
-          body.createdAt ??
-          now,
-        updatedAt: now,
-        receivedAt:
-          body.receivedAt ??
-          now,
-        events: [
-          ...(Array.isArray(
-            body.events
-          )
-            ? body.events
-            : []),
-          createEvent(
-            "RECEIVED",
-            employee.employeeCode,
-            "Order received by the OS"
-          ),
-        ],
-      } as Order;
+    const actorCode =
+      developmentSession
+        ? DEVELOPMENT_CODE
+        : employee?.employeeCode ?? "";
+
+    const order = {
+      ...body,
+      status: "PENDING",
+      createdAt:
+        body.createdAt ?? now,
+      updatedAt: now,
+      receivedAt:
+        body.receivedAt ?? now,
+
+      events: [
+        ...(Array.isArray(body.events)
+          ? body.events
+          : []),
+
+        createEvent(
+          "RECEIVED",
+          actorCode,
+          developmentSession
+            ? "Development test order injected into the OS"
+            : "Order received by the OS"
+        ),
+      ],
+    } as Order;
 
     if (!order.id) {
       return NextResponse.json(
@@ -306,11 +367,8 @@ export async function POST(
     }
 
     if (
-      !Array.isArray(
-        order.items
-      ) ||
-      order.items.length ===
-        0
+      !Array.isArray(order.items) ||
+      order.items.length === 0
     ) {
       return NextResponse.json(
         {
@@ -321,11 +379,18 @@ export async function POST(
       );
     }
 
+    /**
+     * Normal employees are restricted to their
+     * assigned kitchen.
+     *
+     * Developer injection is intentionally
+     * allowed to select a test kitchen.
+     */
     if (
-      employee.role !==
-        "OWNER" &&
-      employee.kitchenId !==
-        order.kitchenId
+      !developmentSession &&
+      employee &&
+      employee.role !== "OWNER" &&
+      employee.kitchenId !== order.kitchenId
     ) {
       return NextResponse.json(
         {
@@ -336,80 +401,205 @@ export async function POST(
       );
     }
 
-    const inventory =
-      getInventory();
+    /**
+     * IMPORTANT:
+     *
+     * Order creation now evaluates inventory
+     * inside the same store transaction that
+     * accepts/depletes the order.
+     *
+     * This prevents the injection endpoint from
+     * merely reporting inventory while leaving
+     * stock unchanged.
+     */
+    const result = transaction(
+      (state) => {
+        const currentInventory =
+          state.inventory;
 
-    const evaluation =
-      evaluateOrderInventory(
-        order,
-        inventory
-      );
+        const evaluation =
+          evaluateOrderInventory(
+            order,
+            currentInventory
+          );
 
-    const inventoryEvents = [
-      createEvent(
-        "INVENTORY_CHECKED",
-        employee.employeeCode,
-        `Inventory decision: ${evaluation.inventoryDecision}`
-      ),
-    ];
+        /**
+         * Do not create an order when there is
+         * insufficient stock.
+         *
+         * This keeps injection subject to the
+         * same operational inventory rules as
+         * a real order.
+         */
+        if (
+          evaluation.inventoryDecision ===
+          "INSUFFICIENT_STOCK"
+        ) {
+          const inventoryEvents = [
+            createEvent(
+              "INVENTORY_CHECKED",
+              actorCode,
+              `Inventory decision: ${evaluation.inventoryDecision}`
+            ),
 
-    if (
-      evaluation.lowStockItems
-        .length > 0
-    ) {
-      inventoryEvents.push(
-        createEvent(
-          "INVENTORY_WARNING",
-          employee.employeeCode,
-          `Low stock: ${evaluation.lowStockItems.join(", ")}`
-        )
-      );
-    }
+            createEvent(
+              "INVENTORY_UNAVAILABLE",
+              actorCode,
+              `Insufficient stock: ${evaluation.insufficientStockItems.join(", ")}`
+            ),
+          ];
 
-    if (
-      evaluation
-        .insufficientStockItems
-        .length > 0
-    ) {
-      inventoryEvents.push(
-        createEvent(
-          "INVENTORY_UNAVAILABLE",
-          employee.employeeCode,
-          `Insufficient stock: ${evaluation.insufficientStockItems.join(", ")}`
-        )
-      );
-    }
+          const rejectedOrder = {
+            ...order,
 
-    const orderWithInventory =
-      {
-        ...order,
-        inventoryDecision:
-          evaluation.inventoryDecision,
-        inventoryWarnings:
-          evaluation.lowStockItems,
-        inventoryUnavailable:
-          evaluation.insufficientStockItems,
-        events: [
-          ...order.events,
-          ...inventoryEvents,
-        ],
-      };
+            inventoryDecision:
+              evaluation.inventoryDecision,
 
-    addOrder(
-      orderWithInventory
+            inventoryWarnings:
+              evaluation.lowStockItems,
+
+            inventoryUnavailable:
+              evaluation.insufficientStockItems,
+
+            events: [
+              ...order.events,
+              ...inventoryEvents,
+            ],
+          } as Order;
+
+          throw new Error(
+            `INSUFFICIENT_STOCK:${JSON.stringify(
+              rejectedOrder
+            )}`
+          );
+        }
+
+        /**
+         * Deplete inventory at order acceptance.
+         *
+         * processOrderDepletion returns the updated
+         * inventory without mutating the source
+         * outside this transaction.
+         */
+        const depletion =
+          processOrderDepletion(
+            order,
+            currentInventory
+          );
+
+        state.inventory =
+          depletion.updatedInventory;
+
+        const inventoryEvents = [
+          createEvent(
+            "INVENTORY_CHECKED",
+            actorCode,
+            `Inventory decision: ${depletion.inventoryDecision}`
+          ),
+
+          createEvent(
+            "ACCEPTED",
+            actorCode,
+            developmentSession
+              ? "Development test order accepted and inventory depleted"
+              : "Order accepted and inventory depleted"
+          ),
+
+          ...(depletion.lowStockAlerts
+            .length > 0
+            ? [
+                createEvent(
+                  "INVENTORY_WARNING",
+                  actorCode,
+                  `Low stock: ${depletion.lowStockAlerts.join(", ")}`
+                ),
+              ]
+            : []),
+        ];
+
+        /**
+         * The order remains PENDING after injection.
+         *
+         * The inventory has already been reserved/
+         * consumed by the acceptance transaction.
+         *
+         * This preserves the lifecycle:
+         *
+         * PENDING
+         *   -> PREPARING
+         *   -> READY_FOR_PICKUP
+         *   -> DRIVER_ASSIGNED
+         *   -> PICKED_UP
+         *   -> DISPATCHED
+         */
+        const acceptedOrder = {
+          ...order,
+
+          inventoryDecision:
+            depletion.inventoryDecision,
+
+          inventoryWarnings:
+            depletion.lowStockAlerts,
+
+          inventoryUnavailable:
+            depletion.insufficientStockItems,
+
+          acceptedAt:
+            order.acceptedAt ?? now,
+
+          events: [
+            ...order.events,
+            ...inventoryEvents,
+          ],
+        } as Order;
+
+        state.orders.push(
+          {
+            ...acceptedOrder,
+            items:
+              acceptedOrder.items.map(
+                (item) => ({
+                  ...item,
+                })
+              ),
+
+            events:
+              acceptedOrder.events.map(
+                (event) => ({
+                  ...event,
+                })
+              ),
+
+            inventoryWarnings:
+              acceptedOrder.inventoryWarnings
+                ? [
+                    ...acceptedOrder.inventoryWarnings,
+                  ]
+                : undefined,
+
+            inventoryUnavailable:
+              acceptedOrder.inventoryUnavailable
+                ? [
+                    ...acceptedOrder.inventoryUnavailable,
+                  ]
+                : undefined,
+          }
+        );
+
+        return {
+          order: acceptedOrder,
+          inventoryDecision:
+            depletion.inventoryDecision,
+          inventoryWarnings:
+            depletion.lowStockAlerts,
+          inventoryUnavailable:
+            depletion.insufficientStockItems,
+        };
+      }
     );
 
     return NextResponse.json(
-      {
-        order:
-          orderWithInventory,
-        inventoryDecision:
-          evaluation.inventoryDecision,
-        inventoryWarnings:
-          evaluation.lowStockItems,
-        inventoryUnavailable:
-          evaluation.insufficientStockItems,
-      },
+      result,
       { status: 201 }
     );
   } catch (error) {
@@ -417,6 +607,51 @@ export async function POST(
       "POST /api/orders failed:",
       error
     );
+
+    const message =
+      error instanceof Error
+        ? error.message
+        : "";
+
+    if (
+      message.startsWith(
+        "INSUFFICIENT_STOCK:"
+      )
+    ) {
+      try {
+        const rejectedOrder =
+          JSON.parse(
+            message.replace(
+              "INSUFFICIENT_STOCK:",
+              ""
+            )
+          ) as Order;
+
+        return NextResponse.json(
+          {
+            error:
+              "Order cannot be injected because required inventory is insufficient.",
+            inventoryDecision:
+              rejectedOrder.inventoryDecision,
+            inventoryUnavailable:
+              rejectedOrder.inventoryUnavailable ??
+              [],
+            inventoryWarnings:
+              rejectedOrder.inventoryWarnings ??
+              [],
+          },
+          { status: 409 }
+        );
+      } catch {
+        return NextResponse.json(
+          {
+            error:
+              "Order cannot be injected because required inventory is insufficient.",
+          },
+          { status: 409 }
+        );
+      }
+    }
 
     return NextResponse.json(
       {
@@ -428,6 +663,12 @@ export async function POST(
   }
 }
 
+/**
+ * PATCH /api/orders
+ *
+ * Handles normal operational lifecycle
+ * transitions.
+ */
 export async function PATCH(
   request: NextRequest
 ) {
@@ -438,8 +679,7 @@ export async function PATCH(
     if (!employee) {
       return NextResponse.json(
         {
-          error:
-            "Unauthorized",
+          error: "Unauthorized",
         },
         { status: 401 }
       );
@@ -449,24 +689,18 @@ export async function PATCH(
       await request.json();
 
     const orderId =
-      typeof body?.orderId ===
-      "string"
+      typeof body?.orderId === "string"
         ? body.orderId
-        : typeof body?.id ===
-            "string"
+        : typeof body?.id === "string"
           ? body.id
           : "";
 
     const action =
-      typeof body?.action ===
-      "string"
+      typeof body?.action === "string"
         ? (body.action as OrderStatus)
         : null;
 
-    if (
-      !orderId ||
-      !action
-    ) {
+    if (!orderId || !action) {
       return NextResponse.json(
         {
           error:
@@ -487,9 +721,7 @@ export async function PATCH(
       ];
 
     if (
-      !allowedActions.includes(
-        action
-      )
+      !allowedActions.includes(action)
     ) {
       return NextResponse.json(
         {
@@ -506,15 +738,13 @@ export async function PATCH(
     const existingOrder =
       existingOrders.find(
         (order) =>
-          order.id ===
-          orderId
+          order.id === orderId
       );
 
     if (!existingOrder) {
       return NextResponse.json(
         {
-          error:
-            "Order not found",
+          error: "Order not found",
         },
         { status: 404 }
       );
@@ -528,8 +758,7 @@ export async function PATCH(
     ) {
       return NextResponse.json(
         {
-          error:
-            "Forbidden",
+          error: "Forbidden",
         },
         { status: 403 }
       );
@@ -566,8 +795,7 @@ export async function PATCH(
     }
 
     if (
-      action ===
-        "CANCELLED" &&
+      action === "CANCELLED" &&
       (
         existingOrder.status ===
           "PICKED_UP" ||
@@ -588,8 +816,7 @@ export async function PATCH(
       new Date().toISOString();
 
     if (
-      action ===
-      "PREPARING"
+      action === "PREPARING"
     ) {
       const result =
         transaction(
@@ -597,13 +824,10 @@ export async function PATCH(
             const currentOrder =
               state.orders.find(
                 (order) =>
-                  order.id ===
-                  orderId
+                  order.id === orderId
               );
 
-            if (
-              !currentOrder
-            ) {
+            if (!currentOrder) {
               throw new Error(
                 `Order not found: ${orderId}`
               );
@@ -636,86 +860,96 @@ export async function PATCH(
             state.inventory =
               depletion.updatedInventory;
 
-            const nextOrder =
-              {
-                ...currentOrder,
-                status:
+            const nextOrder = {
+              ...currentOrder,
+
+              status: "PREPARING",
+
+              updatedAt: now,
+
+              acceptedAt:
+                currentOrder.acceptedAt ??
+                now,
+
+              prepStartedAt:
+                currentOrder.prepStartedAt ??
+                now,
+
+              inventoryDecision:
+                depletion.inventoryDecision,
+
+              inventoryWarnings:
+                depletion.lowStockAlerts,
+
+              inventoryUnavailable:
+                depletion.insufficientStockItems,
+
+              events: [
+                ...currentOrder.events,
+
+                createEvent(
+                  "INVENTORY_CHECKED",
+                  employee.employeeCode,
+                  `Inventory decision: ${depletion.inventoryDecision}`
+                ),
+
+                createEvent(
+                  "ACCEPTED",
+                  employee.employeeCode,
+                  "Order accepted for preparation"
+                ),
+
+                ...(depletion
+                  .lowStockAlerts
+                  .length > 0
+                  ? [
+                      createEvent(
+                        "INVENTORY_WARNING",
+                        employee.employeeCode,
+                        `Low stock: ${depletion.lowStockAlerts.join(", ")}`
+                      ),
+                    ]
+                  : []),
+
+                createEvent(
                   "PREPARING",
-                updatedAt: now,
-                acceptedAt:
-                  currentOrder.acceptedAt ??
-                  now,
-                prepStartedAt:
-                  currentOrder.prepStartedAt ??
-                  now,
-                inventoryDecision:
-                  depletion.inventoryDecision,
-                inventoryWarnings:
-                  depletion.lowStockAlerts,
-                inventoryUnavailable:
-                  depletion.insufficientStockItems,
-                events: [
-                  ...currentOrder.events,
-
-                  createEvent(
-                    "INVENTORY_CHECKED",
-                    employee.employeeCode,
-                    `Inventory decision: ${depletion.inventoryDecision}`
-                  ),
-
-                  createEvent(
-                    "ACCEPTED",
-                    employee.employeeCode,
-                    "Order accepted for preparation"
-                  ),
-
-                  ...(depletion.lowStockAlerts
-                    .length > 0
-                    ? [
-                        createEvent(
-                          "INVENTORY_WARNING",
-                          employee.employeeCode,
-                          `Low stock: ${depletion.lowStockAlerts.join(", ")}`
-                        ),
-                      ]
-                    : []),
-
-                  createEvent(
-                    "PREPARING",
-                    employee.employeeCode
-                  ),
-                ],
-              } as Order;
+                  employee.employeeCode
+                ),
+              ],
+            } as Order;
 
             const orderIndex =
               state.orders.findIndex(
                 (order) =>
-                  order.id ===
-                  orderId
+                  order.id === orderId
               );
 
             state.orders[
               orderIndex
             ] = {
               ...nextOrder,
+
               items:
                 nextOrder.items.map(
                   (item) => ({
                     ...item,
                   })
                 ),
+
               events:
                 nextOrder.events.map(
                   (event) => ({
                     ...event,
                   })
                 ),
+
               inventoryWarnings:
                 nextOrder.inventoryWarnings
                   ? [
                       ...nextOrder.inventoryWarnings,
                     ]
                   : undefined,
+
               inventoryUnavailable:
                 nextOrder.inventoryUnavailable
                   ? [
@@ -737,19 +971,22 @@ export async function PATCH(
       updateOrder(
         orderId,
         (currentOrder) => {
-          const nextOrder =
-            {
-              ...currentOrder,
-              status: action,
-              updatedAt: now,
-              events: [
-                ...currentOrder.events,
-                createEvent(
-                  action as OrderEventType,
-                  employee.employeeCode
-                ),
-              ],
-            } as Order;
+          const nextOrder = {
+            ...currentOrder,
+
+            status: action,
+
+            updatedAt: now,
+
+            events: [
+              ...currentOrder.events,
+
+              createEvent(
+                action as OrderEventType,
+                employee.employeeCode
+              ),
+            ],
+          } as Order;
 
           if (
             action ===
@@ -790,8 +1027,7 @@ export async function PATCH(
           }
 
           if (
-            action ===
-            "PICKED_UP"
+            action === "PICKED_UP"
           ) {
             nextOrder.pickedUpAt =
               currentOrder.pickedUpAt ??
@@ -799,8 +1035,7 @@ export async function PATCH(
           }
 
           if (
-            action ===
-            "DISPATCHED"
+            action === "DISPATCHED"
           ) {
             nextOrder.dispatchedAt =
               currentOrder.dispatchedAt ??
@@ -808,8 +1043,7 @@ export async function PATCH(
           }
 
           if (
-            action ===
-            "CANCELLED"
+            action === "CANCELLED"
           ) {
             nextOrder.cancellationSource =
               body.cancellationSource ??
@@ -830,8 +1064,7 @@ export async function PATCH(
       );
 
     return NextResponse.json({
-      order:
-        updatedOrder,
+      order: updatedOrder,
     });
   } catch (error) {
     console.error(
@@ -853,6 +1086,7 @@ export async function PATCH(
         {
           error:
             "Order cannot enter preparation because required inventory is insufficient.",
+
           inventoryUnavailable:
             message
               .replace(
