@@ -1,9 +1,6 @@
 "use client";
 
-import {
-  useMemo,
-  useState,
-} from "react";
+import { useMemo, useState } from "react";
 
 import {
   BRANDS_DB,
@@ -14,11 +11,9 @@ import {
   type OrderChannel,
 } from "@/lib/db";
 
-interface OrderSimulationPanelProps {
-  onInject?: (
-    newOrder: Order
-  ) => void;
-}
+type Props = {
+  onInject?: (order: Order) => void;
+};
 
 const CHANNELS: OrderChannel[] = [
   "Swiggy",
@@ -29,29 +24,41 @@ const CHANNELS: OrderChannel[] = [
   "Direct Web",
 ];
 
-function createId(
-  prefix: string
-): string {
-  return `${prefix}-${Date.now()}-${Math.floor(
-    Math.random() * 10000
-  )}`;
-}
+const CHANNEL_SOURCE_MAP: Record<
+  OrderChannel,
+  Order["source"]
+> = {
+  Swiggy: "SWIGGY",
+  Zomato: "ZOMATO",
+  DoorDash: "DOORDASH",
+  UberEats: "UBEREATS",
+  GrubHub: "GRUBHUB",
+  "Direct Web": "DIRECT_WEB",
+};
 
 export default function OrderSimulationPanel({
   onInject,
-}: OrderSimulationPanelProps) {
+}: Props) {
+  const kitchen =
+    KITCHENS_DB.find(
+      (item) => item.id === "K1",
+    ) ?? KITCHENS_DB[0];
+
   const [selectedBrand, setSelectedBrand] =
     useState<DbaBrand>(
-      "BurgerForge"
+      BRANDS_DB[0].id,
     );
 
   const [selectedChannel, setSelectedChannel] =
-    useState<OrderChannel>(
-      "Swiggy"
-    );
+    useState<OrderChannel>("Swiggy");
 
   const [selectedMenuItemId, setSelectedMenuItemId] =
-    useState("MENU-BF-01");
+    useState(
+      MENU_CATALOG.find(
+        (item) =>
+          item.brandId === BRANDS_DB[0].id,
+      )?.id ?? "",
+    );
 
   const [quantity, setQuantity] =
     useState(1);
@@ -59,30 +66,16 @@ export default function OrderSimulationPanel({
   const [customNotes, setCustomNotes] =
     useState("");
 
-  const [isSubmitting, setIsSubmitting] =
-    useState(false);
-
   const [message, setMessage] =
     useState("");
 
   const [messageType, setMessageType] =
     useState<
-      "success" |
-      "warning" |
-      "error" |
-      ""
-    >("");
+      "success" | "warning" | "error"
+    >("success");
 
-  /*
-   * The current seeded simulator
-   * operates from K1. This preserves
-   * the existing project's manual
-   * testing behavior rather than
-   * inventing a new kitchen-routing
-   * rule.
-   */
-  const kitchen =
-    KITCHENS_DB[0];
+  const [isSubmitting, setIsSubmitting] =
+    useState(false);
 
   const availableMenuItems =
     useMemo(
@@ -90,115 +83,92 @@ export default function OrderSimulationPanel({
         MENU_CATALOG.filter(
           (item) =>
             item.brandId ===
-            selectedBrand
+            selectedBrand,
         ),
-      [selectedBrand]
+      [selectedBrand],
     );
 
   const selectedMenuItem =
-    useMemo(
-      () =>
-        MENU_CATALOG.find(
-          (item) =>
-            item.id ===
-            selectedMenuItemId
-        ),
-      [selectedMenuItemId]
+    MENU_CATALOG.find(
+      (item) =>
+        item.id ===
+        selectedMenuItemId,
     );
 
   function handleBrandChange(
-    brand: DbaBrand
+    brand: DbaBrand,
   ) {
     setSelectedBrand(brand);
 
-    const firstItem =
+    const firstMenuItem =
       MENU_CATALOG.find(
         (item) =>
-          item.brandId ===
-          brand
+          item.brandId === brand,
       );
 
     setSelectedMenuItemId(
-      firstItem?.id ?? ""
+      firstMenuItem?.id ?? "",
     );
   }
 
-  function handleQuantityChange(
-    value: string
-  ) {
-    const parsed =
-      Number.parseInt(
-        value,
-        10
-      );
-
-    if (
-      !Number.isFinite(
-        parsed
-      ) ||
-      parsed < 1
-    ) {
-      setQuantity(1);
-      return;
-    }
-
-    setQuantity(parsed);
-  }
-
   async function handleSubmit() {
-    if (
-      !selectedMenuItem ||
-      quantity < 1 ||
-      isSubmitting
-    ) {
+    if (!selectedMenuItem) {
+      setMessage(
+        "Select a menu item first.",
+      );
+      setMessageType("error");
       return;
     }
 
     setIsSubmitting(true);
     setMessage("");
-    setMessageType("");
 
     const now =
       new Date().toISOString();
 
+    const orderId =
+      `DEV-${Date.now()}`;
+
+    const eventId =
+      `${orderId}-EVENT-001`;
+
     const newOrder: Order = {
-      id: createId("ORD"),
+      id: orderId,
 
-      brandId:
-        selectedBrand,
+      externalOrderId:
+        `DEV-EXT-${Date.now()}`,
 
-      kitchenId:
-        kitchen.id,
+      brandId: selectedBrand,
 
-      channel:
-        selectedChannel,
+      kitchenId: kitchen.id,
+
+      channel: selectedChannel,
 
       source:
-        "MANUAL",
+        CHANNEL_SOURCE_MAP[
+          selectedChannel
+        ],
 
-      status:
-        "PENDING",
+      status: "PENDING",
 
       items: [
         {
-          id: createId("ITEM"),
-
+          id: `${orderId}-ITEM-001`,
           menuItemId:
             selectedMenuItem.id,
-
           name:
             selectedMenuItem.name,
-
           quantity,
-
           notes:
             customNotes.trim() ||
             undefined,
-
           station:
             selectedMenuItem.station,
         },
       ],
+
+      customerName:
+        "Development Test Customer",
 
       createdAt: now,
       updatedAt: now,
@@ -206,12 +176,12 @@ export default function OrderSimulationPanel({
 
       events: [
         {
-          id: createId("EVT"),
+          id: eventId,
           type: "RECEIVED",
           timestamp: now,
-          actor: "SYSTEM",
+          actor: "DEVELOPER",
           details:
-            "Manual test order received.",
+            "Manual development test order injected.",
         },
       ],
     };
@@ -222,92 +192,68 @@ export default function OrderSimulationPanel({
           "/api/orders",
           {
             method: "POST",
+
             headers: {
               "Content-Type":
                 "application/json",
             },
+
             body: JSON.stringify(
-              newOrder
+              newOrder,
             ),
-          }
+          },
         );
 
       const data =
-        (await response.json()) as {
-          order?: Order;
-          error?: string;
-          inventoryDecision?: string;
-          inventoryWarnings?: string[];
-          inventoryUnavailable?: string[];
-        };
+        await response.json();
 
       if (!response.ok) {
         const unavailable =
           Array.isArray(
-            data.inventoryUnavailable
-          )
-            ? data.inventoryUnavailable
-            : [];
+            data?.inventoryUnavailable,
+          ) &&
+          data.inventoryUnavailable
+            .length > 0;
 
         setMessage(
-          unavailable.length > 0
-            ? `Order not accepted: insufficient inventory for ${unavailable.join(", ")}`
-            : data.error ??
-                "Failed to inject test order."
+          unavailable
+            ? `Order rejected: insufficient inventory for ${data.inventoryUnavailable.join(", ")}`
+            : data?.error ||
+                "Failed to inject test order.",
         );
 
         setMessageType(
-          unavailable.length > 0
+          unavailable
             ? "warning"
-            : "error"
+            : "error",
         );
 
         return;
       }
 
-      if (!data.order) {
-        setMessage(
-          "The Orders API returned no stored order."
-        );
+      const storedOrder =
+        data?.order as Order;
 
-        setMessageType(
-          "error"
-        );
-
-        return;
-      }
-
-      onInject?.(
-        data.order
-      );
+      onInject?.(storedOrder);
 
       if (
-        data.inventoryDecision ===
+        data?.inventoryDecision ===
         "LOW_STOCK"
       ) {
-        const warningItems =
-          Array.isArray(
-            data.inventoryWarnings
-          )
-            ? data.inventoryWarnings
-            : [];
-
         setMessage(
-          warningItems.length > 0
-            ? `Order accepted with low-stock warning: ${warningItems.join(", ")}`
-            : "Order accepted with low-stock warning."
+          `Order ${storedOrder.id} accepted with a low-stock warning.`,
         );
 
         setMessageType(
-          "warning"
+          "warning",
         );
       } else {
         setMessage(
-          `Order ${data.order.id} accepted successfully.`
+          `Order ${storedOrder.id} accepted successfully.`,
         );
 
         setMessageType(
-          "success"
+          "success",
         );
       }
 
@@ -315,17 +261,15 @@ export default function OrderSimulationPanel({
       setCustomNotes("");
     } catch (error) {
       console.error(
-        "Manual order injection failed:",
-        error
+        "Order injection failed:",
+        error,
       );
 
       setMessage(
-        "Unable to reach the Orders API."
+        "Unable to reach the Orders API.",
       );
 
-      setMessageType(
-        "error"
-      );
+      setMessageType("error");
     } finally {
       setIsSubmitting(false);
     }
@@ -333,45 +277,44 @@ export default function OrderSimulationPanel({
 
   return (
     <section className="rounded-xl border border-neutral-800 bg-neutral-950 p-5 text-neutral-100">
+
       <div className="mb-5">
         <div className="flex flex-wrap items-center justify-between gap-3">
+
           <div>
             <h2 className="text-sm font-semibold uppercase tracking-wider">
-              Manual Order Simulator
+              Order Injection
             </h2>
 
             <p className="mt-1 text-xs text-neutral-500">
-              Development test source ·{" "}
-              {kitchen.code}
+              Development source •{" "}
+              {kitchen.name}
             </p>
           </div>
 
-          <span className="rounded-full border border-cyan-800/60 bg-cyan-950/30 px-3 py-1 text-[10px] font-mono uppercase text-cyan-300">
-            Manual Test Source
+          <span className="rounded-full border border-amber-800/60 bg-amber-950/30 px-3 py-1 font-mono text-[10px] uppercase text-amber-300">
+            Developer Tool
           </span>
+
         </div>
       </div>
 
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+
         <label className="block">
           <span className="mb-1 block text-xs text-neutral-400">
             Brand
           </span>
 
           <select
-            value={
-              selectedBrand
-            }
+            value={selectedBrand}
             onChange={(event) =>
               handleBrandChange(
                 event.target
-                  .value as DbaBrand
+                  .value as DbaBrand,
               )
             }
-            disabled={
-              isSubmitting
-            }
-            className="w-full rounded-lg border border-neutral-700 bg-neutral-900 px-3 py-3 text-sm outline-none disabled:opacity-50"
+            className="w-full rounded-lg border border-neutral-700 bg-neutral-900 px-3 py-3 text-sm outline-none focus:border-sky-500"
           >
             {BRANDS_DB.map(
               (brand) => (
@@ -381,7 +324,7 @@ export default function OrderSimulationPanel({
                 >
                   {brand.name}
                 </option>
-              )
+              ),
             )}
           </select>
         </label>
@@ -392,19 +335,14 @@ export default function OrderSimulationPanel({
           </span>
 
           <select
-            value={
-              selectedChannel
-            }
+            value={selectedChannel}
             onChange={(event) =>
               setSelectedChannel(
                 event.target
-                  .value as OrderChannel
+                  .value as OrderChannel,
               )
             }
-            disabled={
-              isSubmitting
-            }
-            className="w-full rounded-lg border border-neutral-700 bg-neutral-900 px-3 py-3 text-sm outline-none disabled:opacity-50"
+            className="w-full rounded-lg border border-neutral-700 bg-neutral-900 px-3 py-3 text-sm outline-none focus:border-sky-500"
           >
             {CHANNELS.map(
               (channel) => (
@@ -414,7 +352,7 @@ export default function OrderSimulationPanel({
                 >
                   {channel}
                 </option>
-              )
+              ),
             )}
           </select>
         </label>
@@ -430,15 +368,10 @@ export default function OrderSimulationPanel({
             }
             onChange={(event) =>
               setSelectedMenuItemId(
-                event.target.value
+                event.target.value,
               )
             }
-            disabled={
-              isSubmitting ||
-              availableMenuItems.length ===
-                0
-            }
-            className="w-full rounded-lg border border-neutral-700 bg-neutral-900 px-3 py-3 text-sm outline-none disabled:opacity-50"
+            className="w-full rounded-lg border border-neutral-700 bg-neutral-900 px-3 py-3 text-sm outline-none focus:border-sky-500"
           >
             {availableMenuItems.map(
               (item) => (
@@ -446,14 +379,13 @@ export default function OrderSimulationPanel({
                   key={item.id}
                   value={item.id}
                 >
-                  {item.name} · ₹
+                  {item.name} · $
                   {item.price.toFixed(
-                    2
+                    2,
                   )}{" "}
-                  ·{" "}
-                  {item.station}
+                  · {item.station}
                 </option>
-              )
+              ),
             )}
           </select>
         </label>
@@ -466,17 +398,20 @@ export default function OrderSimulationPanel({
           <input
             type="number"
             min={1}
-            step={1}
             value={quantity}
             onChange={(event) =>
-              handleQuantityChange(
-                event.target.value
+              setQuantity(
+                Math.max(
+                  1,
+                  Number.parseInt(
+                    event.target
+                      .value || "1",
+                    10,
+                  ),
+                ),
               )
             }
-            disabled={
-              isSubmitting
-            }
-            className="w-full rounded-lg border border-neutral-700 bg-neutral-900 px-3 py-3 text-sm outline-none disabled:opacity-50"
+            className="w-full rounded-lg border border-neutral-700 bg-neutral-900 px-3 py-3 text-sm outline-none focus:border-sky-500"
           />
         </label>
 
@@ -486,11 +421,8 @@ export default function OrderSimulationPanel({
           </span>
 
           <input
-            value={
-              kitchen.name
-            }
+            value={kitchen.name}
             disabled
-            readOnly
             className="w-full rounded-lg border border-neutral-800 bg-neutral-900/60 px-3 py-3 text-sm text-neutral-500"
           />
         </label>
@@ -501,35 +433,24 @@ export default function OrderSimulationPanel({
           </span>
 
           <textarea
-            value={
-              customNotes
-            }
+            value={customNotes}
             onChange={(event) =>
               setCustomNotes(
-                event.target.value
+                event.target.value,
               )
             }
             rows={3}
-            maxLength={500}
-            disabled={
-              isSubmitting
-            }
             placeholder="Optional preparation notes..."
-            className="w-full resize-none rounded-lg border border-neutral-700 bg-neutral-900 px-3 py-3 text-sm outline-none disabled:opacity-50"
+            className="w-full resize-none rounded-lg border border-neutral-700 bg-neutral-900 px-3 py-3 text-sm outline-none focus:border-sky-500"
           />
-
-          <span className="mt-1 block text-right text-[10px] text-neutral-600">
-            {customNotes.length}/500
-          </span>
         </label>
+
       </div>
 
       {message && (
         <div
-          role="status"
           className={`mt-4 rounded-lg border px-3 py-3 text-xs ${
-            messageType ===
-            "success"
+            messageType === "success"
               ? "border-emerald-800 bg-emerald-950/30 text-emerald-300"
               : messageType ===
                   "warning"
@@ -543,20 +464,18 @@ export default function OrderSimulationPanel({
 
       <button
         type="button"
-        onClick={() =>
-          void handleSubmit()
-        }
+        onClick={handleSubmit}
         disabled={
           !selectedMenuItem ||
-          isSubmitting ||
-          quantity < 1
+          isSubmitting
         }
-        className="mt-5 w-full rounded-lg bg-neutral-100 px-4 py-3 text-sm font-semibold text-neutral-950 transition hover:bg-white disabled:cursor-not-allowed disabled:opacity-50"
+        className="mt-5 w-full rounded-lg bg-sky-500 px-4 py-3 text-sm font-semibold text-gray-950 transition hover:bg-sky-400 disabled:cursor-not-allowed disabled:opacity-50"
       >
         {isSubmitting
-          ? "Submitting Test Order..."
+          ? "Injecting Order..."
           : "Inject Test Order"}
       </button>
+
     </section>
   );
 }
