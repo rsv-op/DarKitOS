@@ -1,61 +1,52 @@
-import { NextRequest, NextResponse } from "next/server";
+import {
+  NextRequest,
+  NextResponse,
+} from "next/server";
 
 import {
-  EMPLOYEES_DB,
-  type Employee,
-} from "@/lib/db";
+  findEmployeeByCode,
+  isDeveloperCode,
+  roleFromEmployeeCode,
+  tokenForRole,
+  type AuthRole,
+} from "@/lib/auth";
 
 function getDefaultRoute(
-  employee: Employee
+  role: AuthRole,
 ): string {
-  if (employee.role === "OWNER") {
-    return "/owner";
+  switch (role) {
+    case "developer":
+      return "/dev";
+
+    case "owner":
+      return "/owner";
+
+    case "cook":
+      return "/cook";
+
+    case "dispatch":
+      return "/dispatch";
+
+    default:
+      return "/login";
   }
-
-  if (
-    employee.role === "MANAGER" ||
-    employee.role === "LINE_COOK"
-  ) {
-    return "/cook";
-  }
-
-  if (employee.role === "DISPATCH") {
-    return "/dispatch";
-  }
-
-  return "/login";
-}
-
-function canAccessRoute(
-  employee: Employee,
-  pathname: string
-): boolean {
-  if (pathname.startsWith("/owner")) {
-    return employee.role === "OWNER";
-  }
-
-  if (
-    pathname.startsWith("/cook") ||
-    pathname.startsWith("/dispatch")
-  ) {
-    return Boolean(employee.kitchenId);
-  }
-
-  return true;
 }
 
 export async function POST(
-  request: NextRequest
+  request: NextRequest,
 ) {
   try {
     const body = await request.json();
 
-    if (!body || typeof body !== "object") {
+    if (
+      !body ||
+      typeof body !== "object"
+    ) {
       return NextResponse.json(
         {
           error: "Invalid login payload",
         },
-        { status: 400 }
+        { status: 400 },
       );
     }
 
@@ -67,60 +58,61 @@ export async function POST(
     if (!employeeCode) {
       return NextResponse.json(
         {
-          error: "Employee code is required",
+          error:
+            "Employee code is required",
         },
-        { status: 400 }
+        { status: 400 },
       );
     }
 
-    const employee =
-      EMPLOYEES_DB.find(
-        (item) =>
-          item.active &&
-          item.employeeCode.toLowerCase() ===
-            employeeCode.toLowerCase()
-      );
+    const role =
+      roleFromEmployeeCode(employeeCode);
 
-    if (!employee) {
+    if (!role) {
       return NextResponse.json(
         {
           error: "Invalid employee code",
         },
-        { status: 401 }
+        { status: 401 },
       );
     }
 
-    const requestedRoute =
-      typeof body.redirect === "string"
-        ? body.redirect
-        : "";
+    const developer =
+      isDeveloperCode(employeeCode);
+
+    const employee =
+      findEmployeeByCode(employeeCode);
 
     const destination =
-      requestedRoute &&
-      canAccessRoute(
-        employee,
-        requestedRoute
-      )
-        ? requestedRoute
-        : getDefaultRoute(employee);
+      getDefaultRoute(role);
 
     const response =
       NextResponse.json({
-        employee: {
-          id: employee.id,
-          employeeCode:
-            employee.employeeCode,
-          name: employee.name,
-          role: employee.role,
-          kitchenId:
-            employee.kitchenId,
-        },
+        employee: employee
+          ? {
+              id: employee.id,
+              employeeCode:
+                employee.employeeCode,
+              name: employee.name,
+              role: employee.role,
+              kitchenId:
+                employee.kitchenId,
+            }
+          : {
+              id: "DEV-ACCESS",
+              employeeCode: "DEVELOPER",
+              name: "Development Access",
+              role: "DEVELOPER",
+            },
+
+        role,
+        developer,
         redirectTo: destination,
       });
 
     response.cookies.set(
       "employee_code",
-      employee.employeeCode,
+      employeeCode,
       {
         httpOnly: true,
         sameSite: "lax",
@@ -128,21 +120,35 @@ export async function POST(
         secure:
           process.env.NODE_ENV ===
           "production",
-      }
+      },
+    );
+
+    response.cookies.set(
+      "dark_cloud_session",
+      tokenForRole(role),
+      {
+        httpOnly: true,
+        sameSite: "lax",
+        path: "/",
+        secure:
+          process.env.NODE_ENV ===
+          "production",
+      },
     );
 
     return response;
   } catch (error) {
     console.error(
       "POST /api/login failed:",
-      error
+      error,
     );
 
     return NextResponse.json(
       {
-        error: "Unable to process login",
+        error:
+          "Unable to process login",
       },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }
