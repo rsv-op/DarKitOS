@@ -1,126 +1,88 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
+import { verifyToken } from "./lib/auth";
 
-import {
-  roleFromEmployeeCode,
-  roleFromToken,
-} from "@/lib/auth";
+const PUBLIC_ROUTES = [
+  "/login",
+  "/api/auth/login",
+];
 
-function getRole(
-  request: NextRequest,
+const STATIC_ASSETS = [
+  "/_next",
+  "/assets",
+  "/favicon.ico",
+];
+
+export async function middleware(
+  request: NextRequest
 ) {
-  const employeeCode =
-    request.cookies.get(
-      "employee_code",
-    )?.value;
+  const { pathname } = request.nextUrl;
 
-  const employeeRole =
-    roleFromEmployeeCode(employeeCode);
-
-  if (employeeRole) {
-    return employeeRole;
-  }
-
-  const token =
-    request.cookies.get(
-      "dark_cloud_session",
-    )?.value;
-
-  return roleFromToken(token);
-}
-
-function unauthorized() {
-  return NextResponse.json(
-    {
-      success: false,
-      error: "Authentication required",
-    },
-    { status: 401 },
-  );
-}
-
-export function middleware(
-  request: NextRequest,
-) {
-  const pathname =
-    request.nextUrl.pathname;
-
-  const role = getRole(request);
-
-  /*
-   * API authentication
-   */
-  if (pathname.startsWith("/api/")) {
-    if (pathname === "/api/login") {
-      return NextResponse.next();
-    }
-
-    if (!role) {
-      return unauthorized();
-    }
-
+  // Bypass static files and public routes
+  if (
+    STATIC_ASSETS.some((path) =>
+      pathname.startsWith(path)
+    ) ||
+    PUBLIC_ROUTES.some(
+      (route) => pathname === route
+    )
+  ) {
     return NextResponse.next();
   }
 
-  /*
-   * Developer console
-   */
-  if (pathname.startsWith("/dev")) {
-    if (role !== "developer") {
-      return NextResponse.redirect(
-        new URL("/login", request.url),
-      );
-    }
+  const token = request.cookies.get(
+    "dark_cloud_session"
+  )?.value;
 
-    return NextResponse.next();
+  if (!token) {
+    const loginUrl = new URL(
+      "/login",
+      request.url
+    );
+    loginUrl.searchParams.set(
+      "redirect",
+      pathname
+    );
+    return NextResponse.redirect(loginUrl);
   }
 
-  /*
-   * Owner
-   */
-  if (pathname.startsWith("/owner")) {
-    if (
-      role !== "owner" &&
-      role !== "developer"
-    ) {
-      return NextResponse.redirect(
-        new URL("/login", request.url),
-      );
-    }
+  // Edge JWT verification to prevent spoofed cookies
+  const session = await verifyToken(token);
 
-    return NextResponse.next();
+  if (!session) {
+    const response = NextResponse.redirect(
+      new URL(
+        "/login?error=session_expired",
+        request.url
+      )
+    );
+    response.cookies.delete(
+      "dark_cloud_session"
+    );
+    return response;
   }
 
-  /*
-   * Cook
-   */
-  if (pathname.startsWith("/cook")) {
-    if (
-      role !== "cook" &&
-      role !== "developer"
-    ) {
-      return NextResponse.redirect(
-        new URL("/login", request.url),
-      );
+  // Root router: send authenticated users to their canonical station
+  if (pathname === "/") {
+    switch (session.role) {
+      case "OWNER":
+      case "MANAGER":
+        return NextResponse.redirect(
+          new URL("/dashboard", request.url)
+        );
+      case "LINE_COOK":
+        return NextResponse.redirect(
+          new URL("/kds", request.url)
+        );
+      case "DISPATCH":
+        return NextResponse.redirect(
+          new URL("/dispatch", request.url)
+        );
+      default:
+        return NextResponse.redirect(
+          new URL("/login", request.url)
+        );
     }
-
-    return NextResponse.next();
-  }
-
-  /*
-   * Dispatch
-   */
-  if (pathname.startsWith("/dispatch")) {
-    if (
-      role !== "dispatch" &&
-      role !== "developer"
-    ) {
-      return NextResponse.redirect(
-        new URL("/login", request.url),
-      );
-    }
-
-    return NextResponse.next();
   }
 
   return NextResponse.next();
@@ -128,10 +90,6 @@ export function middleware(
 
 export const config = {
   matcher: [
-    "/dev/:path*",
-    "/cook/:path*",
-    "/dispatch/:path*",
-    "/owner/:path*",
-    "/api/:path*",
+    "/((?!_next/static|_next/image|favicon.ico).*)",
   ],
 };
