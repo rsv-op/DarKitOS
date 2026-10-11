@@ -6,942 +6,1211 @@ import {
   useMemo,
   useState,
 } from "react";
-
 import Link from "next/link";
-
+import AppShell from "@/components/AppShell";
+import DesktopWindowManager from "@/components/DesktopWindowManager";
 import {
   BRANDS_DB,
   KITCHENS_DB,
+  type CancellationRecord,
   type InventoryItem,
+  type OperationalActivity,
   type Order,
+  type RevenueLeakageVector,
+  type VirtualFileAsset,
 } from "@/lib/db";
 
-type OrdersResponse = {
+interface SystemResponse {
   orders?: Order[];
-  error?: string;
-};
-
-type InventoryResponse = {
   inventory?: InventoryItem[];
+  cancellations?: CancellationRecord[];
+  activities?: OperationalActivity[];
+  leakageVectors?: RevenueLeakageVector[];
+  files?: VirtualFileAsset[];
   error?: string;
-};
+}
 
-type Scope =
-  | "ALL"
-  | string;
-
-function formatTime(
-  value?: string
-): string {
-  if (!value) {
-    return "--";
-  }
-
-  const date =
-    new Date(value);
-
-  if (
-    Number.isNaN(
-      date.getTime()
-    )
-  ) {
-    return "--";
-  }
-
-  return date.toLocaleTimeString(
-    [],
-    {
-      hour: "2-digit",
-      minute: "2-digit",
-    }
-  );
+function formatTime(value?: string): string {
+  if (!value) return "--";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "--";
+  return date.toLocaleTimeString([], {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 }
 
 function formatDuration(
   start?: string,
-  end?: string
+  end?: string,
 ): string {
-  if (!start || !end) {
-    return "--";
-  }
-
-  const startTime =
-    new Date(start).getTime();
-
-  const endTime =
-    new Date(end).getTime();
-
+  if (!start || !end) return "--";
+  const s = new Date(start).getTime();
+  const e = new Date(end).getTime();
   if (
-    Number.isNaN(startTime) ||
-    Number.isNaN(endTime) ||
-    endTime < startTime
-  ) {
+    Number.isNaN(s) ||
+    Number.isNaN(e) ||
+    e < s
+  )
     return "--";
-  }
-
-  const minutes =
-    (endTime - startTime) /
-    60000;
-
-  return `${minutes.toFixed(1)} min`;
+  return `${((e - s) / 60000).toFixed(1)}m`;
 }
 
-function getStatusLabel(
-  status: Order["status"]
-): string {
-  return status.replaceAll(
-    "_",
-    " "
-  );
-}
+const STATUS_BADGE: Record<
+  Order["status"],
+  string
+> = {
+  PENDING:
+    "border-amber-500/40 bg-amber-500/10 text-amber-300",
+  PREPARING:
+    "border-sky-500/40 bg-sky-500/10 text-sky-300",
+  READY_FOR_PICKUP:
+    "border-emerald-500/40 bg-emerald-500/10 text-emerald-300",
+  DRIVER_ASSIGNED:
+    "border-purple-500/40 bg-purple-500/10 text-purple-300",
+  PICKED_UP:
+    "border-indigo-500/40 bg-indigo-500/10 text-indigo-300",
+  DISPATCHED:
+    "border-teal-500/40 bg-teal-500/10 text-teal-300",
+  CANCELLED:
+    "border-red-500/40 bg-red-500/10 text-red-300",
+};
 
 export default function OwnerPage() {
-  const [orders, setOrders] =
-    useState<Order[]>([]);
-
-  const [inventory, setInventory] =
-    useState<InventoryItem[]>([]);
+  const [orders, setOrders] = useState<Order[]>(
+    [],
+  );
+  const [inventory, setInventory] = useState<
+    InventoryItem[]
+  >([]);
+  const [cancellations, setCancellations] =
+    useState<CancellationRecord[]>([]);
+  const [activities, setActivities] = useState<
+    OperationalActivity[]
+  >([]);
+  const [leakageVectors, setLeakageVectors] =
+    useState<RevenueLeakageVector[]>([]);
+  const [files, setFiles] = useState<
+    VirtualFileAsset[]
+  >([]);
 
   const [kitchenScope, setKitchenScope] =
-    useState<Scope>("ALL");
-
+    useState<string>("ALL");
   const [brandScope, setBrandScope] =
-    useState<Scope>("ALL");
+    useState<string>("ALL");
+  const [viewMode, setViewMode] = useState<
+    "FLUIDIC" | "DESKTOP_OS"
+  >("FLUIDIC");
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
 
-  const [loading, setLoading] =
-    useState(true);
+  const loadData = useCallback(async () => {
+    try {
+      const res = await fetch("/api/system", {
+        cache: "no-store",
+      });
+      const data =
+        (await res.json()) as SystemResponse;
 
-  const [error, setError] =
-    useState("");
+      if (!res.ok) {
+        throw new Error(
+          data.error ||
+            "Unable to load canonical system state.",
+        );
+      }
 
-  const loadData =
-    useCallback(
-      async () => {
-        try {
-          const [
-            ordersResponse,
-            inventoryResponse,
-          ] = await Promise.all([
-            fetch(
-              "/api/orders",
-              {
-                cache: "no-store",
-              }
-            ),
-            fetch(
-              "/api/inventory",
-              {
-                cache: "no-store",
-              }
-            ),
-          ]);
-
-          const ordersData =
-            (await ordersResponse.json()) as OrdersResponse;
-
-          const inventoryData =
-            (await inventoryResponse.json()) as InventoryResponse;
-
-          if (
-            !ordersResponse.ok
-          ) {
-            throw new Error(
-              ordersData.error ??
-                "Unable to load orders."
-            );
-          }
-
-          if (
-            !inventoryResponse.ok
-          ) {
-            throw new Error(
-              inventoryData.error ??
-                "Unable to load inventory."
-            );
-          }
-
-          setOrders(
-            Array.isArray(
-              ordersData.orders
-            )
-              ? ordersData.orders
-              : []
-          );
-
-          setInventory(
-            Array.isArray(
-              inventoryData.inventory
-            )
-              ? inventoryData.inventory
-              : []
-          );
-
-          setError("");
-        } catch (loadError) {
-          console.error(
-            "Owner command center load failed:",
-            loadError
-          );
-
-          setError(
-            loadError instanceof Error
-              ? loadError.message
-              : "Unable to load owner data."
-          );
-        } finally {
-          setLoading(false);
-        }
-      },
-      []
-    );
+      setOrders(
+        Array.isArray(data.orders)
+          ? data.orders
+          : [],
+      );
+      setInventory(
+        Array.isArray(data.inventory)
+          ? data.inventory
+          : [],
+      );
+      setCancellations(
+        Array.isArray(data.cancellations)
+          ? data.cancellations
+          : [],
+      );
+      setActivities(
+        Array.isArray(data.activities)
+          ? data.activities
+          : [],
+      );
+      setLeakageVectors(
+        Array.isArray(data.leakageVectors)
+          ? data.leakageVectors
+          : [],
+      );
+      setFiles(
+        Array.isArray(data.files)
+          ? data.files
+          : [],
+      );
+      setError("");
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Unable to load command center data.",
+      );
+    } finally {
+      setLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
     void loadData();
-
-    const interval =
-      window.setInterval(
-        () => {
-          void loadData();
-        },
-        10000
-      );
-
-    return () =>
-      window.clearInterval(
-        interval
-      );
+    const timer = window.setInterval(() => {
+      void loadData();
+    }, 6000);
+    return () => window.clearInterval(timer);
   }, [loadData]);
 
-  const filteredOrders =
-    useMemo(() => {
-      return orders.filter(
-        (order) => {
-          const kitchenMatches =
-            kitchenScope ===
-              "ALL" ||
-            order.kitchenId ===
-              kitchenScope;
-
-          const brandMatches =
-            brandScope ===
-              "ALL" ||
-            order.brandId ===
-              brandScope;
-
-          return (
-            kitchenMatches &&
-            brandMatches
-          );
-        }
+  async function handleQuickTransition(
+    orderId: string,
+    status: Order["status"],
+  ) {
+    try {
+      const res = await fetch("/api/orders", {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          orderId,
+          action: status,
+        }),
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(
+          err.error || "Transition failed",
+        );
+      }
+      await loadData();
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Action failed",
       );
-    }, [
-      orders,
-      kitchenScope,
-      brandScope,
-    ]);
+    }
+  }
 
-  const analytics =
-    useMemo(() => {
-      const activeOrders =
-        filteredOrders.filter(
-          (order) =>
-            order.status ===
-              "PENDING" ||
-            order.status ===
-              "PREPARING" ||
-            order.status ===
-              "READY_FOR_PICKUP" ||
-            order.status ===
-              "DRIVER_ASSIGNED" ||
-            order.status ===
-              "PICKED_UP"
+  async function handleStoreAction(
+    action: "RESET_STORE" | "CLEAR_ORDERS",
+  ) {
+    await fetch("/api/system", {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ action }),
+    });
+    await loadData();
+  }
+
+  const filteredOrders = useMemo(() => {
+    return orders.filter((order) => {
+      const kMatch =
+        kitchenScope === "ALL" ||
+        order.kitchenId === kitchenScope;
+      const bMatch =
+        brandScope === "ALL" ||
+        order.brandId === brandScope;
+      return kMatch && bMatch;
+    });
+  }, [orders, kitchenScope, brandScope]);
+
+  const analytics = useMemo(() => {
+    const activeOrders = filteredOrders.filter(
+      (o) =>
+        o.status === "PENDING" ||
+        o.status === "PREPARING" ||
+        o.status === "READY_FOR_PICKUP" ||
+        o.status === "DRIVER_ASSIGNED" ||
+        o.status === "PICKED_UP",
+    );
+    const pendingOrders = filteredOrders.filter(
+      (o) => o.status === "PENDING",
+    );
+    const preparingOrders =
+      filteredOrders.filter(
+        (o) => o.status === "PREPARING",
+      );
+    const readyOrders = filteredOrders.filter(
+      (o) => o.status === "READY_FOR_PICKUP",
+    );
+    const inTransitOrders =
+      filteredOrders.filter(
+        (o) =>
+          o.status === "DRIVER_ASSIGNED" ||
+          o.status === "PICKED_UP",
+      );
+    const completedOrders =
+      filteredOrders.filter(
+        (o) => o.status === "DISPATCHED",
+      );
+    const cancelledOrders =
+      filteredOrders.filter(
+        (o) => o.status === "CANCELLED",
+      );
+
+    const nonCancelled = filteredOrders.filter(
+      (o) => o.status !== "CANCELLED",
+    );
+    const grossRevenue = nonCancelled.reduce(
+      (sum, o) => sum + (o.totalAmount ?? 0),
+      0,
+    );
+    const aov =
+      nonCancelled.length > 0
+        ? grossRevenue / nonCancelled.length
+        : 0;
+
+    const totalLoss = filteredOrders.reduce(
+      (sum, o) => sum + (o.lossAmount ?? 0),
+      0,
+    );
+    const totalClaims = filteredOrders.reduce(
+      (sum, o) => sum + (o.claimAmount ?? 0),
+      0,
+    );
+
+    const prepDurations = filteredOrders
+      .map((o) =>
+        o.prepStartedAt && o.prepCompletedAt
+          ? (new Date(
+              o.prepCompletedAt,
+            ).getTime() -
+              new Date(
+                o.prepStartedAt,
+              ).getTime()) /
+            60000
+          : null,
+      )
+      .filter(
+        (v): v is number =>
+          v !== null &&
+          Number.isFinite(v) &&
+          v >= 0,
+      );
+
+    const averagePrepMinutes =
+      prepDurations.length > 0
+        ? prepDurations.reduce(
+            (a, b) => a + b,
+            0,
+          ) / prepDurations.length
+        : null;
+
+    const brandStats = BRANDS_DB.map((b) => {
+      const list = filteredOrders.filter(
+        (o) => o.brandId === b.id,
+      );
+      const rev = list
+        .filter((o) => o.status !== "CANCELLED")
+        .reduce(
+          (s, o) => s + (o.totalAmount ?? 0),
+          0,
         );
-
-      const completedOrders =
-        filteredOrders.filter(
-          (order) =>
-            order.status ===
-            "DISPATCHED"
-        );
-
-      const cancelledOrders =
-        filteredOrders.filter(
-          (order) =>
-            order.status ===
-            "CANCELLED"
-        );
-
-      const preparingOrders =
-        filteredOrders.filter(
-          (order) =>
-            order.status ===
-            "PREPARING"
-        );
-
-      const readyOrders =
-        filteredOrders.filter(
-          (order) =>
-            order.status ===
-            "READY_FOR_PICKUP"
-        );
-
-      const prepDurations =
-        filteredOrders
-          .map((order) =>
-            order.prepStartedAt &&
-            order.prepCompletedAt
-              ? (
-                  new Date(
-                    order.prepCompletedAt
-                  ).getTime() -
-                  new Date(
-                    order.prepStartedAt
-                  ).getTime()
-                ) /
-                60000
-              : null
-          )
-          .filter(
-            (
-              value
-            ): value is number =>
-              value !== null &&
-              Number.isFinite(value) &&
-              value >= 0
-          );
-
-      const averagePrepMinutes =
-        prepDurations.length > 0
-          ? prepDurations.reduce(
-              (
-                total,
-                value
-              ) =>
-                total + value,
-              0
-            ) /
-            prepDurations.length
-          : null;
-
-      const brandCounts =
-        filteredOrders.reduce(
-          (
-            result,
-            order
-          ) => {
-            result[order.brandId] =
-              (result[
-                order.brandId
-              ] ?? 0) + 1;
-
-            return result;
-          },
-          {} as Record<
-            string,
-            number
-          >
-        );
-
-      const kitchenCounts =
-        filteredOrders.reduce(
-          (
-            result,
-            order
-          ) => {
-            result[
-              order.kitchenId
-            ] =
-              (result[
-                order.kitchenId
-              ] ?? 0) + 1;
-
-            return result;
-          },
-          {} as Record<
-            string,
-            number
-          >
-        );
-
-      const channelCounts =
-        filteredOrders.reduce(
-          (
-            result,
-            order
-          ) => {
-            const channel =
-              order.channel;
-
-            result[channel] =
-              (result[channel] ??
-                0) + 1;
-
-            return result;
-          },
-          {} as Record<
-            string,
-            number
-          >
-        );
-
       return {
-        totalOrders:
-          filteredOrders.length,
-        activeOrders:
-          activeOrders.length,
-        completedOrders:
-          completedOrders.length,
-        cancelledOrders:
-          cancelledOrders.length,
-        preparingOrders:
-          preparingOrders.length,
-        readyOrders:
-          readyOrders.length,
-        averagePrepMinutes,
-        brandCounts,
-        kitchenCounts,
-        channelCounts,
+        ...b,
+        count: list.length,
+        revenue: rev,
       };
-    }, [filteredOrders]);
+    });
 
-  const lowStockItems =
-    useMemo(
-      () =>
-        inventory.filter(
-          (item) =>
-            item.currentStock <=
-            item.reorderThreshold
-        ),
-      [inventory]
-    );
-
-  const unavailableWarnings =
-    useMemo(
-      () =>
-        filteredOrders.filter(
-          (order) =>
-            Boolean(
-              order.inventoryUnavailable
-                ?.length
-            )
-        ),
-      [filteredOrders]
-    );
-
-  const stockWarnings =
-    useMemo(
-      () =>
-        filteredOrders.filter(
-          (order) =>
-            Boolean(
-              order.inventoryWarnings
-                ?.length
-            )
-        ),
-      [filteredOrders]
-    );
-
-  const recentOrders =
-    useMemo(
-      () =>
-        [...filteredOrders]
-          .sort(
-            (a, b) => {
-              const aTime =
-                new Date(
-                  a.updatedAt
-                ).getTime();
-
-              const bTime =
-                new Date(
-                  b.updatedAt
-                ).getTime();
-
-              return (
-                bTime - aTime
-              );
-            }
+    const kitchenStats = KITCHENS_DB.map(
+      (k) => {
+        const list = filteredOrders.filter(
+          (o) => o.kitchenId === k.id,
+        );
+        const rev = list
+          .filter(
+            (o) => o.status !== "CANCELLED",
           )
-          .slice(0, 12),
-      [filteredOrders]
+          .reduce(
+            (s, o) => s + (o.totalAmount ?? 0),
+            0,
+          );
+        return {
+          ...k,
+          count: list.length,
+          revenue: rev,
+        };
+      },
     );
+
+    const channelMap: Record<
+      string,
+      { count: number; revenue: number }
+    > = {};
+    for (const o of filteredOrders) {
+      if (!channelMap[o.channel]) {
+        channelMap[o.channel] = {
+          count: 0,
+          revenue: 0,
+        };
+      }
+      channelMap[o.channel].count += 1;
+      if (o.status !== "CANCELLED") {
+        channelMap[o.channel].revenue +=
+          o.totalAmount ?? 0;
+      }
+    }
+
+    return {
+      totalOrders: filteredOrders.length,
+      activeOrders: activeOrders.length,
+      pendingOrders: pendingOrders.length,
+      preparingOrders: preparingOrders.length,
+      readyOrders: readyOrders.length,
+      inTransitOrders: inTransitOrders.length,
+      completedOrders: completedOrders.length,
+      cancelledOrders: cancelledOrders.length,
+      grossRevenue,
+      aov,
+      totalLoss,
+      totalClaims,
+      averagePrepMinutes,
+      brandStats,
+      kitchenStats,
+      channelMap,
+    };
+  }, [filteredOrders]);
+
+  const lowStockItems = useMemo(
+    () =>
+      inventory.filter(
+        (item) =>
+          item.currentStock <=
+          item.reorderThreshold,
+      ),
+    [inventory],
+  );
+
+  const totalPotentialRev = useMemo(
+    () =>
+      leakageVectors.reduce(
+        (s, v) => s + v.potentialRevenue,
+        0,
+      ),
+    [leakageVectors],
+  );
+  const totalCollectedRev = useMemo(
+    () =>
+      leakageVectors.reduce(
+        (s, v) => s + v.actualCollected,
+        0,
+      ),
+    [leakageVectors],
+  );
+  const leakagePct =
+    totalPotentialRev > 0
+      ? ((totalPotentialRev -
+          totalCollectedRev) /
+          totalPotentialRev) *
+        100
+      : 0;
 
   return (
-    <main className="min-h-screen bg-slate-100 px-4 py-5 sm:px-6">
-      <div className="mx-auto max-w-7xl">
-        <header className="mb-6">
-          <div className="flex flex-wrap items-start justify-between gap-4">
-            <div>
-              <p className="text-sm font-semibold uppercase tracking-wide text-slate-500">
-                Dark Cloud Kitchen OS
-              </p>
-
-              <h1 className="text-3xl font-black text-slate-900">
-                Owner Command Center
-              </h1>
-
-              <p className="mt-1 text-sm text-slate-500">
-                Live operational visibility across kitchens, brands, orders and inventory.
-              </p>
-            </div>
-
-            <div className="flex gap-2">
-              <Link
-                href="/cook"
-                className="rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm font-semibold text-slate-700"
-              >
-                Cook
-              </Link>
-
-              <Link
-                href="/dispatch"
-                className="rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm font-semibold text-slate-700"
-              >
-                Dispatch
-              </Link>
-
-              <button
-                type="button"
-                onClick={() =>
-                  void loadData()
-                }
-                className="rounded-xl bg-slate-900 px-4 py-3 text-sm font-semibold text-white"
-              >
-                Refresh
-              </button>
-            </div>
-          </div>
-        </header>
-
-        <section className="mb-6 grid gap-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:grid-cols-2">
-          <label className="text-sm font-semibold text-slate-700">
-            Kitchen
-            <select
-              value={
-                kitchenScope
+    <AppShell
+      title="Owner Command Center & Core Desktop"
+      subtitle="Observational command center across Cloud7 infrastructure, VerticalForge diagnostics, and DarKIT OS stations."
+      actions={
+        <>
+          <div className="flex rounded-xl border border-slate-800 bg-slate-900 p-1">
+            <button
+              type="button"
+              onClick={() =>
+                setViewMode("FLUIDIC")
               }
-              onChange={(event) =>
-                setKitchenScope(
-                  event.target.value
-                )
-              }
-              className="mt-2 w-full rounded-xl border border-slate-300 bg-white px-3 py-3 font-normal"
+              className={`rounded-lg px-3 py-1.5 font-mono text-xs font-bold transition ${
+                viewMode === "FLUIDIC"
+                  ? "bg-sky-500 text-slate-950"
+                  : "text-slate-400 hover:text-white"
+              }`}
             >
-              <option value="ALL">
-                All kitchens
-              </option>
-
-              {KITCHENS_DB.map(
-                (kitchen) => (
-                  <option
-                    key={kitchen.id}
-                    value={
-                      kitchen.id
-                    }
-                  >
-                    {kitchen.name}
-                  </option>
-                )
-              )}
-            </select>
-          </label>
-
-          <label className="text-sm font-semibold text-slate-700">
-            Brand
-            <select
-              value={
-                brandScope
+              ◈ Fluidic Dashboard
+            </button>
+            <button
+              type="button"
+              onClick={() =>
+                setViewMode("DESKTOP_OS")
               }
-              onChange={(event) =>
-                setBrandScope(
-                  event.target.value
-                )
-              }
-              className="mt-2 w-full rounded-xl border border-slate-300 bg-white px-3 py-3 font-normal"
+              className={`rounded-lg px-3 py-1.5 font-mono text-xs font-bold transition ${
+                viewMode === "DESKTOP_OS"
+                  ? "bg-emerald-500 text-slate-950"
+                  : "text-slate-400 hover:text-white"
+              }`}
             >
-              <option value="ALL">
-                All brands
-              </option>
-
-              {BRANDS_DB.map(
-                (brand) => (
-                  <option
-                    key={brand.id}
-                    value={
-                      brand.id
-                    }
-                  >
-                    {brand.name}
-                  </option>
-                )
-              )}
-            </select>
-          </label>
-        </section>
-
-        {error && (
-          <div className="mb-6 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-700">
-            {error}
+              ⊞ Desktop Window Manager
+            </button>
           </div>
-        )}
 
-        <section className="mb-6 grid grid-cols-2 gap-3 lg:grid-cols-6">
-          <MetricCard
-            label="Total Orders"
-            value={
-              analytics.totalOrders
+          <Link
+            href="/order-injection"
+            className="rounded-xl bg-sky-500 px-3.5 py-2 font-mono text-xs font-bold text-slate-950 transition hover:bg-sky-400"
+          >
+            + Inject Order
+          </Link>
+
+          <button
+            type="button"
+            onClick={() =>
+              void handleStoreAction(
+                "RESET_STORE",
+              )
             }
-          />
+            className="rounded-xl border border-slate-700 bg-slate-900 px-3 py-2 font-mono text-xs font-semibold text-slate-300 hover:border-sky-500/40 hover:text-white"
+          >
+            Reset Seed
+          </button>
 
-          <MetricCard
-            label="Active"
-            value={
-              analytics.activeOrders
+          <button
+            type="button"
+            onClick={() =>
+              void handleStoreAction(
+                "CLEAR_ORDERS",
+              )
             }
-          />
+            className="rounded-xl border border-slate-800 bg-slate-900 px-3 py-2 font-mono text-xs font-semibold text-slate-400 hover:border-amber-500/40 hover:text-amber-300"
+            title="Clear all orders to inspect honest empty states"
+          >
+            Empty State Test
+          </button>
 
-          <MetricCard
-            label="Preparing"
-            value={
-              analytics.preparingOrders
-            }
-          />
+          <button
+            type="button"
+            onClick={() => void loadData()}
+            className="rounded-xl border border-slate-700 bg-slate-800 px-3.5 py-2 font-mono text-xs font-bold text-white hover:bg-slate-700"
+          >
+            ↻ Refresh
+          </button>
+        </>
+      }
+    >
+      {error && (
+        <div className="mb-6 rounded-2xl border border-red-500/40 bg-red-500/10 px-4 py-3 font-mono text-xs text-red-300">
+          ⚠ {error}
+        </div>
+      )}
 
-          <MetricCard
-            label="Ready"
-            value={
-              analytics.readyOrders
-            }
-          />
-
-          <MetricCard
-            label="Dispatched"
-            value={
-              analytics.completedOrders
-            }
-          />
-
-          <MetricCard
-            label="Cancelled"
-            value={
-              analytics.cancelledOrders
-            }
-          />
-        </section>
-
-        <section className="mb-6 grid gap-5 lg:grid-cols-3">
-          <Panel title="Preparation Performance">
-            <div className="flex items-end justify-between">
-              <div>
-                <p className="text-xs uppercase text-slate-500">
-                  Average prep time
-                </p>
-
-                <p className="mt-1 text-3xl font-black text-slate-900">
-                  {analytics.averagePrepMinutes !==
-                  null
-                    ? `${analytics.averagePrepMinutes.toFixed(1)} min`
-                    : "--"}
-                </p>
-              </div>
-
-              <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600">
-                Calculated
+      {viewMode === "DESKTOP_OS" ? (
+        <DesktopWindowManager
+          orders={filteredOrders}
+          inventory={inventory}
+          files={files}
+          onQuickTransition={
+            handleQuickTransition
+          }
+        />
+      ) : (
+        <div className="space-y-6">
+          {/* Scope Filters & Station Shortcuts */}
+          <section className="grid gap-4 rounded-2xl border border-slate-800/90 bg-slate-900/60 p-4 sm:grid-cols-2 lg:grid-cols-4">
+            <label className="block">
+              <span className="font-mono text-[11px] font-bold uppercase tracking-wider text-slate-400">
+                Physical Kitchen Scope
               </span>
-            </div>
-          </Panel>
-
-          <Panel title="Inventory Watch">
-            <p className="text-3xl font-black text-slate-900">
-              {lowStockItems.length}
-            </p>
-
-            <p className="mt-1 text-sm text-slate-500">
-              Inventory items at or below reorder threshold.
-            </p>
-
-            <p className="mt-3 text-xs font-semibold uppercase text-slate-400">
-              Source: live inventory
-            </p>
-          </Panel>
-
-          <Panel title="Order Risk">
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <p className="text-xs uppercase text-slate-500">
-                  Low stock warnings
-                </p>
-
-                <p className="mt-1 text-2xl font-black text-amber-600">
-                  {stockWarnings.length}
-                </p>
-              </div>
-
-              <div>
-                <p className="text-xs uppercase text-slate-500">
-                  Unavailable
-                </p>
-
-                <p className="mt-1 text-2xl font-black text-red-600">
-                  {unavailableWarnings.length}
-                </p>
-              </div>
-            </div>
-          </Panel>
-        </section>
-
-        <section className="mb-6 grid gap-5 lg:grid-cols-3">
-          <Panel title="Brand Performance">
-            <div className="space-y-3">
-              {Object.entries(
-                analytics.brandCounts
-              ).map(
-                ([brand, count]) => (
-                  <div
-                    key={brand}
-                    className="flex items-center justify-between rounded-xl bg-slate-50 px-3 py-3"
-                  >
-                    <span className="font-medium text-slate-700">
-                      {brand}
-                    </span>
-
-                    <span className="font-black text-slate-900">
-                      {count}
-                    </span>
-                  </div>
-                )
-              )}
-
-              {Object.keys(
-                analytics.brandCounts
-              ).length === 0 && (
-                <EmptyState />
-              )}
-            </div>
-          </Panel>
-
-          <Panel title="Kitchen Performance">
-            <div className="space-y-3">
-              {Object.entries(
-                analytics.kitchenCounts
-              ).map(
-                ([kitchen, count]) => (
-                  <div
-                    key={kitchen}
-                    className="flex items-center justify-between rounded-xl bg-slate-50 px-3 py-3"
-                  >
-                    <span className="font-medium text-slate-700">
-                      {kitchen}
-                    </span>
-
-                    <span className="font-black text-slate-900">
-                      {count}
-                    </span>
-                  </div>
-                )
-              )}
-
-              {Object.keys(
-                analytics.kitchenCounts
-              ).length === 0 && (
-                <EmptyState />
-              )}
-            </div>
-          </Panel>
-
-          <Panel title="Channel Performance">
-            <div className="space-y-3">
-              {Object.entries(
-                analytics.channelCounts
-              ).map(
-                ([channel, count]) => (
-                  <div
-                    key={channel}
-                    className="flex items-center justify-between rounded-xl bg-slate-50 px-3 py-3"
-                  >
-                    <span className="font-medium text-slate-700">
-                      {channel}
-                    </span>
-
-                    <span className="font-black text-slate-900">
-                      {count}
-                    </span>
-                  </div>
-                )
-              )}
-
-              {Object.keys(
-                analytics.channelCounts
-              ).length === 0 && (
-                <EmptyState />
-              )}
-            </div>
-          </Panel>
-        </section>
-
-        <section className="mb-6 grid gap-5 lg:grid-cols-2">
-          <Panel title="Inventory Alerts">
-            {lowStockItems.length ===
-              0 ? (
-              <EmptyState text="No low-stock inventory items." />
-            ) : (
-              <div className="space-y-3">
-                {lowStockItems.map(
-                  (item) => (
-                    <div
-                      key={item.id}
-                      className="rounded-xl border border-amber-200 bg-amber-50 p-3"
-                    >
-                      <div className="flex items-center justify-between gap-3">
-                        <span className="font-semibold text-slate-900">
-                          {item.name}
-                        </span>
-
-                        <span className="text-sm font-bold text-amber-700">
-                          {item.currentStock}{" "}
-                          {item.unit}
-                        </span>
-                      </div>
-
-                      <p className="mt-1 text-xs text-slate-500">
-                        Reorder threshold:{" "}
-                        {
-                          item.reorderThreshold
-                        }{" "}
-                        {item.unit}
-                      </p>
-                    </div>
+              <select
+                value={kitchenScope}
+                onChange={(e) =>
+                  setKitchenScope(
+                    e.target.value,
                   )
-                )}
-              </div>
-            )}
-          </Panel>
+                }
+                className="mt-1.5 w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm text-white outline-none focus:border-sky-400"
+              >
+                <option value="ALL">
+                  All Physical Kitchens (K1–K4)
+                </option>
+                {KITCHENS_DB.map((k) => (
+                  <option
+                    key={k.id}
+                    value={k.id}
+                  >
+                    {k.id} • {k.name}
+                  </option>
+                ))}
+              </select>
+            </label>
 
-          <Panel title="Recent Operational Activity">
-            {loading &&
-            recentOrders.length ===
-              0 ? (
-              <p className="text-sm text-slate-500">
-                Loading live activity...
+            <label className="block">
+              <span className="font-mono text-[11px] font-bold uppercase tracking-wider text-slate-400">
+                Virtual Brand Scope
+              </span>
+              <select
+                value={brandScope}
+                onChange={(e) =>
+                  setBrandScope(e.target.value)
+                }
+                className="mt-1.5 w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm text-white outline-none focus:border-sky-400"
+              >
+                <option value="ALL">
+                  All Virtual Brands (4 DBAs)
+                </option>
+                {BRANDS_DB.map((b) => (
+                  <option
+                    key={b.id}
+                    value={b.id}
+                  >
+                    {b.name} ({b.code})
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <div className="sm:col-span-2 flex flex-col justify-end">
+              <span className="font-mono text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-1.5">
+                Quick Station Launchers
+              </span>
+              <div className="grid grid-cols-4 gap-2">
+                <Link
+                  href="/live-orders"
+                  className="rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-center font-mono text-xs font-bold text-slate-200 hover:border-sky-500/50 hover:text-sky-300"
+                >
+                  Live Orders
+                </Link>
+                <Link
+                  href="/kds"
+                  className="rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-center font-mono text-xs font-bold text-sky-300 hover:border-sky-500/50"
+                >
+                  Cook KDS
+                </Link>
+                <Link
+                  href="/dispatch"
+                  className="rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-center font-mono text-xs font-bold text-emerald-300 hover:border-emerald-500/50"
+                >
+                  Dispatch
+                </Link>
+                <Link
+                  href="/inventory"
+                  className="rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-center font-mono text-xs font-bold text-amber-300 hover:border-amber-500/50"
+                >
+                  Inventory
+                </Link>
+              </div>
+            </div>
+          </section>
+
+          {/* 8 Real-Time KPI Cards */}
+          <section className="grid grid-cols-2 gap-3 sm:grid-cols-4 xl:grid-cols-8">
+            <KpiCard
+              label="Total Orders"
+              value={String(
+                analytics.totalOrders,
+              )}
+              sub="Canonical Store"
+              tone="slate"
+            />
+            <KpiCard
+              label="Gross Sales"
+              value={`$${analytics.grossRevenue.toFixed(2)}`}
+              sub={`AOV $${analytics.aov.toFixed(2)}`}
+              tone="emerald"
+            />
+            <KpiCard
+              label="Active Queue"
+              value={String(
+                analytics.activeOrders,
+              )}
+              sub={`${analytics.pendingOrders} Pending`}
+              tone="sky"
+            />
+            <KpiCard
+              label="Preparing"
+              value={String(
+                analytics.preparingOrders,
+              )}
+              sub="On KDS Station"
+              tone="amber"
+            />
+            <KpiCard
+              label="Ready Pass"
+              value={String(
+                analytics.readyOrders,
+              )}
+              sub={`${analytics.inTransitOrders} With Courier`}
+              tone="emerald"
+            />
+            <KpiCard
+              label="Dispatched"
+              value={String(
+                analytics.completedOrders,
+              )}
+              sub="Completed Lifecycle"
+              tone="teal"
+            />
+            <KpiCard
+              label="Cancelled"
+              value={String(
+                analytics.cancelledOrders,
+              )}
+              sub={`Loss $${analytics.totalLoss.toFixed(2)}`}
+              tone="red"
+            />
+            <KpiCard
+              label="Avg Prep Time"
+              value={
+                analytics.averagePrepMinutes !==
+                null
+                  ? `${analytics.averagePrepMinutes.toFixed(1)}m`
+                  : "--"
+              }
+              sub="Target SLA <= 12m"
+              tone="purple"
+            />
+          </section>
+
+          {/* Operational Pipeline Progress Bar */}
+          <section className="rounded-2xl border border-slate-800/90 bg-slate-900/60 p-5">
+            <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
+              <div>
+                <h2 className="text-sm font-bold uppercase tracking-wider text-white">
+                  Canonical Order State Machine Distribution
+                </h2>
+                <p className="text-xs text-slate-400">
+                  Live distribution across immutable transitions: PENDING → PREPARING → READY_FOR_PICKUP → DRIVER_ASSIGNED → PICKED_UP → DISPATCHED
+                </p>
+              </div>
+              <Link
+                href="/live-orders"
+                className="font-mono text-xs font-bold text-sky-400 hover:underline"
+              >
+                Inspect All Orders →
+              </Link>
+            </div>
+
+            <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-4 lg:grid-cols-7">
+              {(
+                [
+                  {
+                    status: "PENDING",
+                    label: "Pending",
+                    href: "/kds",
+                  },
+                  {
+                    status: "PREPARING",
+                    label: "Preparing",
+                    href: "/kds",
+                  },
+                  {
+                    status: "READY_FOR_PICKUP",
+                    label: "Ready",
+                    href: "/dispatch",
+                  },
+                  {
+                    status: "DRIVER_ASSIGNED",
+                    label: "Driver Assigned",
+                    href: "/dispatch",
+                  },
+                  {
+                    status: "PICKED_UP",
+                    label: "Picked Up",
+                    href: "/dispatch",
+                  },
+                  {
+                    status: "DISPATCHED",
+                    label: "Dispatched",
+                    href: "/live-orders",
+                  },
+                  {
+                    status: "CANCELLED",
+                    label: "Cancelled",
+                    href: "/analytics",
+                  },
+                ] as const
+              ).map((st) => {
+                const count =
+                  filteredOrders.filter(
+                    (o) =>
+                      o.status === st.status,
+                  ).length;
+                return (
+                  <Link
+                    key={st.status}
+                    href={st.href}
+                    className={`rounded-xl border p-3 transition hover:scale-[1.02] ${STATUS_BADGE[st.status]}`}
+                  >
+                    <p className="font-mono text-[10px] font-bold uppercase">
+                      {st.label}
+                    </p>
+                    <p className="mt-1 text-2xl font-black">
+                      {count}
+                    </p>
+                  </Link>
+                );
+              })}
+            </div>
+          </section>
+
+          {/* 3 Diagnostic Highlights: VerticalForge Leakage, Inventory Watch, Cancellation Ledger */}
+          <section className="grid gap-5 lg:grid-cols-3">
+            <div className="rounded-2xl border border-purple-500/30 bg-slate-900/70 p-5">
+              <div className="flex items-center justify-between">
+                <span className="font-mono text-xs font-bold uppercase text-purple-400">
+                  VerticalForge • Quote-to-Cash
+                </span>
+                <Link
+                  href="/analytics"
+                  className="font-mono text-xs text-purple-300 hover:underline"
+                >
+                  Full Audit →
+                </Link>
+              </div>
+              <p className="mt-2 text-3xl font-black text-white">
+                {leakagePct.toFixed(2)}%{" "}
+                <span className="text-sm font-normal text-slate-400">
+                  Revenue Leakage
+                </span>
               </p>
-            ) : recentOrders.length ===
-              0 ? (
-              <EmptyState text="No operational activity available." />
-            ) : (
-              <div className="space-y-3">
-                {recentOrders.map(
-                  (order) => (
-                    <div
-                      key={order.id}
-                      className="rounded-xl border border-slate-200 p-3"
+              <p className="mt-1 text-xs text-slate-400">
+                Formula: (Potential $
+                {totalPotentialRev.toLocaleString()}{" "}
+                − Collected $
+                {totalCollectedRev.toLocaleString()}
+                ) ÷ Potential
+              </p>
+              <div className="mt-3 flex flex-wrap gap-1.5">
+                {leakageVectors
+                  .slice(0, 3)
+                  .map((v) => (
+                    <span
+                      key={v.id}
+                      className="rounded-lg border border-slate-800 bg-slate-950 px-2 py-1 font-mono text-[10px] text-slate-300"
                     >
-                      <div className="flex items-start justify-between gap-3">
-                        <div>
-                          <p className="font-bold text-slate-900">
-                            {order.id}
-                          </p>
+                      {v.vector}: -$
+                      {v.leakedAmount}
+                    </span>
+                  ))}
+              </div>
+            </div>
 
-                          <p className="text-xs text-slate-500">
-                            {order.brandId} ·{" "}
-                            {order.kitchenId}
-                          </p>
-                        </div>
+            <div className="rounded-2xl border border-amber-500/30 bg-slate-900/70 p-5">
+              <div className="flex items-center justify-between">
+                <span className="font-mono text-xs font-bold uppercase text-amber-400">
+                  Stock Control • Reorder Watch
+                </span>
+                <Link
+                  href="/inventory"
+                  className="font-mono text-xs text-amber-300 hover:underline"
+                >
+                  Restock →
+                </Link>
+              </div>
+              <p className="mt-2 text-3xl font-black text-white">
+                {lowStockItems.length}{" "}
+                <span className="text-sm font-normal text-slate-400">
+                  Low-Stock SKUs
+                </span>
+              </p>
+              <p className="mt-1 text-xs text-slate-400">
+                Items at or below canonical{" "}
+                <code>reorderThreshold</code>
+              </p>
+              <div className="mt-3 flex flex-wrap gap-1.5">
+                {lowStockItems.length === 0 ? (
+                  <span className="text-xs text-emerald-400">
+                    All inventory SKUs healthy.
+                  </span>
+                ) : (
+                  lowStockItems.map((i) => (
+                    <span
+                      key={i.id}
+                      className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-2 py-1 font-mono text-[10px] text-amber-300"
+                    >
+                      {i.name}:{" "}
+                      {i.currentStock} {i.unit}
+                    </span>
+                  ))
+                )}
+              </div>
+            </div>
 
-                        <span className="rounded-full bg-slate-100 px-2 py-1 text-xs font-semibold text-slate-600">
-                          {getStatusLabel(
-                            order.status
-                          )}
-                        </span>
+            <div className="rounded-2xl border border-red-500/30 bg-slate-900/70 p-5">
+              <div className="flex items-center justify-between">
+                <span className="font-mono text-xs font-bold uppercase text-red-400">
+                  Stage-Aware Cancellation Impact
+                </span>
+                <Link
+                  href="/live-orders"
+                  className="font-mono text-xs text-red-300 hover:underline"
+                >
+                  Manage →
+                </Link>
+              </div>
+              <div className="mt-2 grid grid-cols-2 gap-3">
+                <div>
+                  <p className="text-xs text-slate-400">
+                    Food & Labor Loss
+                  </p>
+                  <p className="text-2xl font-black text-red-400">
+                    $
+                    {analytics.totalLoss.toFixed(
+                      2,
+                    )}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-xs text-slate-400">
+                    Aggregator Claims
+                  </p>
+                  <p className="text-2xl font-black text-amber-300">
+                    $
+                    {analytics.totalClaims.toFixed(
+                      2,
+                    )}
+                  </p>
+                </div>
+              </div>
+              <p className="mt-2 text-xs text-slate-400">
+                {cancellations.length} recorded
+                cancellation event(s) in canonical
+                ledger.
+              </p>
+            </div>
+          </section>
+
+          {/* Brand, Kitchen & Channel Performance Matrices */}
+          <section className="grid gap-5 lg:grid-cols-3">
+            <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-5">
+              <div className="mb-4 flex items-center justify-between">
+                <h2 className="text-base font-bold text-white">
+                  Brand Performance
+                </h2>
+                <Link
+                  href="/brands"
+                  className="font-mono text-xs text-sky-400 hover:underline"
+                >
+                  Matrix →
+                </Link>
+              </div>
+              <div className="space-y-2.5">
+                {analytics.brandStats.map(
+                  (b) => (
+                    <div
+                      key={b.id}
+                      className="flex items-center justify-between rounded-xl border border-slate-800/80 bg-slate-950 px-3.5 py-2.5"
+                    >
+                      <div>
+                        <p className="font-semibold text-white">
+                          {b.name}
+                        </p>
+                        <p className="font-mono text-[10px] text-slate-400">
+                          {b.cuisine}
+                        </p>
                       </div>
+                      <div className="text-right">
+                        <p className="font-mono text-sm font-bold text-emerald-400">
+                          $
+                          {b.revenue.toFixed(2)}
+                        </p>
+                        <p className="font-mono text-[10px] text-slate-400">
+                          {b.count} orders
+                        </p>
+                      </div>
+                    </div>
+                  ),
+                )}
+              </div>
+            </div>
 
-                      <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-slate-500">
-                        <span>
-                          Received:{" "}
-                          {formatTime(
-                            order.receivedAt
-                          )}
+            <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-5">
+              <div className="mb-4 flex items-center justify-between">
+                <h2 className="text-base font-bold text-white">
+                  Kitchen Performance
+                </h2>
+                <Link
+                  href="/kitchens"
+                  className="font-mono text-xs text-sky-400 hover:underline"
+                >
+                  Facilities →
+                </Link>
+              </div>
+              <div className="space-y-2.5">
+                {analytics.kitchenStats.map(
+                  (k) => (
+                    <div
+                      key={k.id}
+                      className="flex items-center justify-between rounded-xl border border-slate-800/80 bg-slate-950 px-3.5 py-2.5"
+                    >
+                      <div>
+                        <p className="font-semibold text-white">
+                          {k.id} • {k.name}
+                        </p>
+                        <p className="font-mono text-[10px] text-slate-400">
+                          {k.location}
+                        </p>
+                      </div>
+                      <div className="text-right">
+                        <p className="font-mono text-sm font-bold text-sky-400">
+                          $
+                          {k.revenue.toFixed(2)}
+                        </p>
+                        <p className="font-mono text-[10px] text-slate-400">
+                          {k.count} orders
+                        </p>
+                      </div>
+                    </div>
+                  ),
+                )}
+              </div>
+            </div>
+
+            <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-5">
+              <div className="mb-4 flex items-center justify-between">
+                <h2 className="text-base font-bold text-white">
+                  Channel Performance
+                </h2>
+                <Link
+                  href="/order-injection"
+                  className="font-mono text-xs text-sky-400 hover:underline"
+                >
+                  Webhooks →
+                </Link>
+              </div>
+              {Object.keys(
+                analytics.channelMap,
+              ).length === 0 ? (
+                <p className="rounded-xl bg-slate-950 p-6 text-center text-xs text-slate-500">
+                  No channel order data available
+                  yet.
+                </p>
+              ) : (
+                <div className="space-y-2.5">
+                  {Object.entries(
+                    analytics.channelMap,
+                  ).map(([channel, stat]) => (
+                    <div
+                      key={channel}
+                      className="flex items-center justify-between rounded-xl border border-slate-800/80 bg-slate-950 px-3.5 py-2.5"
+                    >
+                      <span className="font-semibold text-slate-200">
+                        {channel}
+                      </span>
+                      <div className="text-right font-mono">
+                        <span className="text-sm font-bold text-white">
+                          {stat.count}
                         </span>
-
-                        <span>
-                          Ready:{" "}
-                          {formatTime(
-                            order.readyAt
+                        <span className="ml-2 text-xs text-emerald-400">
+                          ($
+                          {stat.revenue.toFixed(
+                            2,
                           )}
-                        </span>
-
-                        <span>
-                          Prep:{" "}
-                          {formatDuration(
-                            order.prepStartedAt,
-                            order.prepCompletedAt
-                          )}
-                        </span>
-
-                        <span>
-                          Updated:{" "}
-                          {formatTime(
-                            order.updatedAt
-                          )}
+                          )
                         </span>
                       </div>
                     </div>
-                  )
-                )}
+                  ))}
+                </div>
+              )}
+            </div>
+          </section>
+
+          {/* Bottom Split: Live Operational Activity Stream & Recent Orders */}
+          <section className="grid gap-5 lg:grid-cols-2">
+            <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-5">
+              <div className="mb-4 flex items-center justify-between">
+                <h2 className="text-base font-bold text-white">
+                  Live Operational Activity Stream
+                </h2>
+                <span className="font-mono text-[10px] text-slate-400">
+                  Real-time Audit Trail
+                </span>
               </div>
-            )}
-          </Panel>
-        </section>
-      </div>
-    </main>
+
+              {loading &&
+              activities.length === 0 ? (
+                <p className="text-xs text-slate-400">
+                  Loading operational activity...
+                </p>
+              ) : activities.length === 0 ? (
+                <p className="rounded-xl bg-slate-950 p-6 text-center text-xs text-slate-500">
+                  No operational activity available.
+                </p>
+              ) : (
+                <div className="max-h-96 space-y-2.5 overflow-y-auto pr-1">
+                  {activities
+                    .slice(0, 12)
+                    .map((act) => (
+                      <div
+                        key={act.id}
+                        className="rounded-xl border border-slate-800/90 bg-slate-950 p-3"
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <span className="font-semibold text-xs text-white">
+                            {act.title}
+                          </span>
+                          <span className="font-mono text-[10px] text-slate-500 shrink-0">
+                            {formatTime(
+                              act.timestamp,
+                            )}
+                          </span>
+                        </div>
+                        <p className="mt-1 text-xs text-slate-400">
+                          {act.details}
+                        </p>
+                        <div className="mt-2 flex items-center gap-2 font-mono text-[10px] text-slate-500">
+                          <span>
+                            Actor: {act.actor}
+                          </span>
+                          {act.kitchenId && (
+                            <span>
+                              • Kitchen:{" "}
+                              {act.kitchenId}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                </div>
+              )}
+            </div>
+
+            <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-5">
+              <div className="mb-4 flex items-center justify-between">
+                <h2 className="text-base font-bold text-white">
+                  Recent Canonical Orders
+                </h2>
+                <Link
+                  href="/live-orders"
+                  className="font-mono text-xs text-sky-400 hover:underline"
+                >
+                  Open Monitor →
+                </Link>
+              </div>
+
+              {loading &&
+              filteredOrders.length === 0 ? (
+                <p className="text-xs text-slate-400">
+                  Loading orders...
+                </p>
+              ) : filteredOrders.length === 0 ? (
+                <p className="rounded-xl bg-slate-950 p-6 text-center text-xs text-slate-500">
+                  No active orders in current scope.
+                </p>
+              ) : (
+                <div className="max-h-96 space-y-2.5 overflow-y-auto pr-1">
+                  {filteredOrders
+                    .slice(0, 10)
+                    .map((order) => (
+                      <div
+                        key={order.id}
+                        className="rounded-xl border border-slate-800/90 bg-slate-950 p-3"
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <div>
+                            <span className="font-mono text-sm font-bold text-white">
+                              {order.id}
+                            </span>
+                            <span className="ml-2 text-xs text-slate-400">
+                              {order.brandId} •{" "}
+                              {order.kitchenId} •{" "}
+                              {order.channel}
+                            </span>
+                          </div>
+                          <span
+                            className={`rounded-full border px-2.5 py-0.5 font-mono text-[10px] font-bold ${STATUS_BADGE[order.status]}`}
+                          >
+                            {order.status.replaceAll(
+                              "_",
+                              " ",
+                            )}
+                          </span>
+                        </div>
+                        <p className="mt-1.5 text-xs text-slate-300">
+                          {order.items
+                            .map(
+                              (i) =>
+                                `${i.quantity}× ${i.name}`,
+                            )
+                            .join(", ")}
+                        </p>
+                        <div className="mt-2 flex flex-wrap items-center justify-between gap-2 font-mono text-[10px] text-slate-500">
+                          <span>
+                            Received:{" "}
+                            {formatTime(
+                              order.receivedAt ||
+                                order.createdAt,
+                            )}
+                          </span>
+                          <span>
+                            Prep:{" "}
+                            {formatDuration(
+                              order.prepStartedAt,
+                              order.prepCompletedAt,
+                            )}
+                          </span>
+                          <span className="text-emerald-400 font-bold">
+                            $
+                            {(
+                              order.totalAmount ??
+                              0
+                            ).toFixed(2)}
+                          </span>
+                        </div>
+                      </div>
+                    ))}
+                </div>
+              )}
+            </div>
+          </section>
+        </div>
+      )}
+    </AppShell>
   );
 }
 
-function MetricCard({
+function KpiCard({
   label,
   value,
+  sub,
+  tone,
 }: {
   label: string;
-  value: number;
+  value: string;
+  sub: string;
+  tone:
+    | "slate"
+    | "emerald"
+    | "sky"
+    | "amber"
+    | "teal"
+    | "red"
+    | "purple";
 }) {
+  const toneStyles: Record<string, string> = {
+    slate:
+      "border-slate-800 bg-slate-900/70 text-white",
+    emerald:
+      "border-emerald-500/30 bg-emerald-500/5 text-emerald-300",
+    sky: "border-sky-500/30 bg-sky-500/5 text-sky-300",
+    amber:
+      "border-amber-500/30 bg-amber-500/5 text-amber-300",
+    teal: "border-teal-500/30 bg-teal-500/5 text-teal-300",
+    red: "border-red-500/30 bg-red-500/5 text-red-300",
+    purple:
+      "border-purple-500/30 bg-purple-500/5 text-purple-300",
+  };
+
   return (
-    <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-      <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+    <div
+      className={`rounded-2xl border p-3.5 ${toneStyles[tone]}`}
+    >
+      <p className="font-mono text-[10px] font-bold uppercase tracking-wider text-slate-400">
         {label}
       </p>
-
-      <p className="mt-2 text-2xl font-black text-slate-900">
+      <p className="mt-1.5 text-2xl font-black">
         {value}
       </p>
+      <p className="mt-1 font-mono text-[10px] text-slate-400">
+        {sub}
+      </p>
     </div>
-  );
-}
-
-function Panel({
-  title,
-  children,
-}: {
-  title: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-      <h2 className="mb-4 text-lg font-black text-slate-900">
-        {title}
-      </h2>
-
-      {children}
-    </section>
-  );
-}
-
-function EmptyState({
-  text = "No data available.",
-}: {
-  text?: string;
-}) {
-  return (
-    <p className="rounded-xl bg-slate-50 px-4 py-5 text-center text-sm text-slate-500">
-      {text}
-    </p>
   );
 }

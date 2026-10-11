@@ -1,168 +1,157 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSession } from "@/lib/auth";
-import {
-  getOrders,
-  updateOrder,
-  getInventory,
-  replaceInventory,
-} from "@/lib/store";
-
-const VALID_TRANSITIONS = {
-  PENDING: ["PREPARING", "CANCELLED"],
-  PREPARING: ["READY_FOR_PICKUP", "CANCELLED"],
-  READY_FOR_PICKUP: ["DRIVER_ASSIGNED", "CANCELLED"],
-  DRIVER_ASSIGNED: ["PICKED_UP"],
-  PICKED_UP: ["DISPATCHED"],
-  DISPATCHED: [],
-  CANCELLED: [],
-} as const;
-
-function appendEvent(order: any, type: string, actor: string, details?: string) {
-  return [
-    ...order.events,
-    {
-      id: `evt-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-      type,
-      actor,
-      timestamp: new Date().toISOString(),
-      ...(details ? { details } : {}),
-    },
-  ];
-}
-
-function getRequiredIngredients(order: any) {
-  // This should reflect the canonical recipe mapping from your menu items.
-  // Example:
-  // For each menu item in order.items:
-  //   resolve the item recipe
-  //   multiply ingredient qty by quantity
-  // return [{ ingredientId, quantity }]
-  return [
-    { ingredientId: "ing-bun", quantity: 2 },
-    { ingredientId: "ing-patty", quantity: 1 },
-  ];
-}
+import type {
+  CancellationSource,
+  OrderStatus,
+} from "@/lib/db";
+import { getAuthenticatedEmployee } from "@/lib/domain/auth-service";
+import { hasPermission } from "@/lib/domain/permission-service";
+import { transitionCanonicalOrder } from "@/lib/store";
 
 export async function PATCH(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: { id: string } },
 ) {
-  const session = await getSession();
+  try {
+    const employee =
+      await getAuthenticatedEmployee(request);
 
-  if (!session) {
-    return NextResponse.json(
-      { error: "Unauthorized" },
-      { status: 401 }
-    );
-  }
-
-  const body = await request.json();
-  const nextStatus = body?.status;
-
-  if (!nextStatus || typeof nextStatus !== "string") {
-    return NextResponse.json(
-      { error: "status is required" },
-      { status: 400 }
-    );
-  }
-
-  const orders = getOrders();
-  const order = orders.find((entry) => entry.id === params.id);
-
-  if (!order) {
-    return NextResponse.json(
-      { error: "Order not found" },
-      { status: 404 }
-    );
-  }
-
-  const allowedTransitions =
-    VALID_TRANSITIONS[
-      order.status as keyof typeof VALID_TRANSITIONS
-    ];
-
-  if (!allowedTransitions?.includes(nextStatus)) {
-    return NextResponse.json(
-      {
-        error: `Invalid transition: ${order.status} -> ${nextStatus}`,
-      },
-      { status: 409 }
-    );
-  }
-
-  // Inventory gate: prep requires sufficient stock
-  if (nextStatus === "PREPARING") {
-    const inventory = getInventory();
-    const required = getRequiredIngredients(order);
-
-    const insufficient = required.filter(({ ingredientId, quantity }) => {
-      const item = inventory.find((entry) => entry.id === ingredientId);
-      return !item || item.currentStock < quantity;
-    });
-
-    if (insufficient.length > 0) {
+    if (!employee) {
       return NextResponse.json(
-        {
-          error: "Insufficient inventory for preparation",
-          insufficient,
-        },
-        { status: 409 }
+        { error: "Unauthorized" },
+        { status: 401 },
       );
     }
 
-    const updatedInventory = inventory.map((entry) => {
-      const match = required.find((req) => req.ingredientId === entry.id);
-      if (!match) return entry;
+    const body = await request.json();
+    const nextStatus = String(
+      body?.status || body?.action || "",
+    ).trim() as OrderStatus;
 
-      return {
-        ...entry,
-        currentStock: entry.currentStock - match.quantity,
-      };
+    if (!nextStatus) {
+      return NextResponse.json(
+        { error: "status is required" },
+        { status: 400 },
+      );
+    }
+
+    if (
+      nextStatus === "PREPARING" ||
+      nextStatus === "READY_FOR_PICKUP"
+    ) {
+      if (
+        !hasPermission(
+          employee,
+          "COOK_ORDERS",
+        ) &&
+        !hasPermission(
+          employee,
+          "OWNER_VIEW",
+        )
+      ) {
+        return NextResponse.json(
+          {
+            error:
+              "Forbidden: Requires COOK_ORDERS permission",
+          },
+          { status: 403 },
+        );
+      }
+    } else if (
+      nextStatus === "DRIVER_ASSIGNED" ||
+      nextStatus === "PICKED_UP" ||
+      nextStatus === "DISPATCHED"
+    ) {
+      if (
+        !hasPermission(
+          employee,
+          "DISPATCH_ORDERS",
+        ) &&
+        !hasPermission(
+          employee,
+          "OWNER_VIEW",
+        )
+      ) {
+        return NextResponse.json(
+          {
+            error:
+              "Forbidden: Requires DISPATCH_ORDERS permission",
+          },
+          { status: 403 },
+        );
+      }
+    } else if (nextStatus === "CANCELLED") {
+      if (
+        !hasPermission(
+          employee,
+          "ORDER_CANCEL",
+        ) &&
+        !hasPermission(
+          employee,
+          "OWNER_VIEW",
+        )
+      ) {
+        return NextResponse.json(
+          {
+            error:
+              "Forbidden: Requires ORDER_CANCEL permission",
+          },
+          { status: 403 },
+        );
+      }
+    }
+
+    const actorLabel = `${employee.employeeCode} (${employee.name})`;
+
+    const result = transitionCanonicalOrder({
+      orderId: params.id,
+      nextStatus,
+      actor: actorLabel,
+      driverName: body?.driverName,
+      courierEtaMins:
+        typeof body?.courierEtaMins === "number"
+          ? body.courierEtaMins
+          : undefined,
+      cancellationSource:
+        body?.cancellationSource as
+          | CancellationSource
+          | undefined,
+      cancellationReason:
+        body?.cancellationReason,
+      restoreInventoryOnPrePrepCancel:
+        body?.restoreInventoryOnPrePrepCancel,
     });
 
-    replaceInventory(updatedInventory);
+    return NextResponse.json({
+      success: true,
+      order: result.order,
+      idempotentReplay:
+        result.idempotentReplay,
+      depletedItems: result.depletedItems,
+      lowStockAlerts: result.lowStockAlerts,
+      cancellationRecord:
+        result.cancellationRecord,
+    });
+  } catch (error) {
+    const message =
+      error instanceof Error
+        ? error.message
+        : "Unable to update order status";
+    const status = message.includes(
+      "Order not found",
+    )
+      ? 404
+      : message.includes(
+            "Invalid status transition",
+          ) ||
+          message.includes(
+            "Insufficient inventory",
+          )
+        ? 409
+        : 400;
+
+    return NextResponse.json(
+      { error: message },
+      { status },
+    );
   }
-
-  const updatedOrder = updateOrder(params.id, (currentOrder) => {
-    const timestamp = new Date().toISOString();
-
-    const nextOrder = {
-      ...currentOrder,
-      status: nextStatus,
-      updatedAt: timestamp,
-      events: appendEvent(
-        currentOrder,
-        nextStatus,
-        session.userId,
-        `status change: ${currentOrder.status} -> ${nextStatus}`
-      ),
-    };
-
-    if (nextStatus === "READY_FOR_PICKUP") {
-      nextOrder.readyAt = currentOrder.readyAt ?? timestamp;
-    }
-
-    if (nextStatus === "DRIVER_ASSIGNED") {
-      nextOrder.driverAssignedAt = currentOrder.driverAssignedAt ?? timestamp;
-    }
-
-    if (nextStatus === "PICKED_UP") {
-      nextOrder.pickedUpAt = currentOrder.pickedUpAt ?? timestamp;
-    }
-
-    if (nextStatus === "DISPATCHED") {
-      nextOrder.dispatchedAt = currentOrder.dispatchedAt ?? timestamp;
-    }
-
-    if (nextStatus === "CANCELLED") {
-      nextOrder.cancelledBy = session.userId;
-    }
-
-    return nextOrder;
-  });
-
-  return NextResponse.json({
-    success: true,
-    order: updatedOrder,
-  });
 }

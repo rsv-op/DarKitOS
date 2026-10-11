@@ -1,14 +1,27 @@
 "use client";
 
-import { useMemo, useState } from "react";
-
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
+import Link from "next/link";
 import {
   BRANDS_DB,
+  BRAND_KITCHENS_DB,
+  INVENTORY_DB,
   KITCHENS_DB,
   MENU_CATALOG,
+  type BrandKitchenConfig,
   type DbaBrand,
+  type InventoryItem,
+  type KitchenConfig,
+  type MenuItem,
   type Order,
   type OrderChannel,
+  type OutboxEvent,
+  type WebhookIdempotencyEntry,
 } from "@/lib/db";
 
 type Props = {
@@ -24,97 +37,271 @@ const CHANNELS: OrderChannel[] = [
   "Direct Web",
 ];
 
-const CHANNEL_SOURCE_MAP: Record<
-  OrderChannel,
-  Order["source"]
-> = {
-  Swiggy: "SWIGGY",
-  Zomato: "ZOMATO",
-  DoorDash: "DOORDASH",
-  UberEats: "UBEREATS",
-  GrubHub: "GRUBHUB",
-  "Direct Web": "DIRECT_WEB",
-};
+const BACKOFF_SCHEDULE = [
+  {
+    attempt: "Attempt 1",
+    delay: "Immediate",
+    scenario:
+      "Initial execution of the webhook or internal event.",
+  },
+  {
+    attempt: "Attempt 2",
+    delay: "+10 seconds",
+    scenario:
+      "Mitigation of brief network blips or microservice restarts.",
+  },
+  {
+    attempt: "Attempt 3",
+    delay: "+1 minute",
+    scenario:
+      "Mitigation of temporary DNS routing or load balancer reconfigurations.",
+  },
+  {
+    attempt: "Attempt 4",
+    delay: "+5 minutes",
+    scenario:
+      "Recovery from brief database locks or downstream API rate limits.",
+  },
+  {
+    attempt: "Attempt 5",
+    delay: "+30 minutes",
+    scenario:
+      "Recovery from sustained downstream outages or minor deployments.",
+  },
+  {
+    attempt: "Attempt 6",
+    delay: "+2 hours",
+    scenario:
+      "Final automated attempt before transitioning to Dead Letter Queue (DLQ).",
+  },
+];
 
 export default function OrderSimulationPanel({
   onInject,
 }: Props) {
-  const kitchen =
-    KITCHENS_DB.find(
-      (item) => item.id === "K1",
-    ) ?? KITCHENS_DB[0];
+  const [brandKitchens, setBrandKitchens] =
+    useState<BrandKitchenConfig[]>(
+      BRAND_KITCHENS_DB,
+    );
+  const [kitchens, setKitchens] = useState<
+    KitchenConfig[]
+  >(KITCHENS_DB);
+  const [menuCatalog, setMenuCatalog] =
+    useState<MenuItem[]>(MENU_CATALOG);
+  const [inventory, setInventory] = useState<
+    InventoryItem[]
+  >(INVENTORY_DB);
+  const [webhookEvents, setWebhookEvents] =
+    useState<WebhookIdempotencyEntry[]>([]);
+  const [outboxEvents, setOutboxEvents] =
+    useState<OutboxEvent[]>([]);
 
   const [selectedBrand, setSelectedBrand] =
-    useState<DbaBrand>(
-      BRANDS_DB[0].id,
-    );
-
+    useState<DbaBrand>(BRANDS_DB[0].id);
+  const [selectedKitchenId, setSelectedKitchenId] =
+    useState<string>("K1");
   const [selectedChannel, setSelectedChannel] =
     useState<OrderChannel>("Swiggy");
-
-  const [selectedMenuItemId, setSelectedMenuItemId] =
-    useState(
-      MENU_CATALOG.find(
-        (item) =>
-          item.brandId === BRANDS_DB[0].id,
-      )?.id ?? "",
-    );
-
-  const [quantity, setQuantity] =
-    useState(1);
-
+  const [priority, setPriority] = useState<
+    "NORMAL" | "RUSH" | "VIP"
+  >("NORMAL");
+  const [customerName, setCustomerName] =
+    useState("Vikramaditya Singh");
   const [customNotes, setCustomNotes] =
     useState("");
+  const [idempotencyKey, setIdempotencyKey] =
+    useState(
+      () => `idem-swg-${Date.now().toString().slice(-6)}`,
+    );
 
-  const [message, setMessage] =
-    useState("");
+  // Cart quantities keyed by menuItemId
+  const [cart, setCart] = useState<
+    Record<string, number>
+  >({
+    "MENU-BF-01": 1,
+  });
 
+  const [message, setMessage] = useState("");
   const [messageType, setMessageType] =
     useState<
-      "success" | "warning" | "error"
+      "success" | "warning" | "error" | "info"
     >("success");
-
   const [isSubmitting, setIsSubmitting] =
     useState(false);
 
-  const availableMenuItems =
-    useMemo(
-      () =>
-        MENU_CATALOG.filter(
-          (item) =>
-            item.brandId ===
-            selectedBrand,
-        ),
-      [selectedBrand],
+  const loadSystemSnapshot =
+    useCallback(async () => {
+      try {
+        const res = await fetch("/api/system", {
+          cache: "no-store",
+        });
+        if (!res.ok) return;
+        const data = await res.json();
+        if (Array.isArray(data.brandKitchens))
+          setBrandKitchens(data.brandKitchens);
+        if (Array.isArray(data.kitchens))
+          setKitchens(data.kitchens);
+        if (Array.isArray(data.menuCatalog))
+          setMenuCatalog(data.menuCatalog);
+        if (Array.isArray(data.inventory))
+          setInventory(data.inventory);
+        if (Array.isArray(data.webhookEvents))
+          setWebhookEvents(data.webhookEvents);
+        if (Array.isArray(data.outboxEvents))
+          setOutboxEvents(data.outboxEvents);
+      } catch {
+        // fallback to defaults
+      }
+    }, []);
+
+  useEffect(() => {
+    void loadSystemSnapshot();
+  }, [loadSystemSnapshot]);
+
+  // Valid kitchens for selected brand from canonical BrandKitchen matrix
+  const authorizedKitchenIds = useMemo(() => {
+    return new Set(
+      brandKitchens
+        .filter(
+          (bk) =>
+            bk.brandId === selectedBrand &&
+            bk.active,
+        )
+        .map((bk) => bk.kitchenId),
     );
+  }, [brandKitchens, selectedBrand]);
 
-  const selectedMenuItem =
-    MENU_CATALOG.find(
-      (item) =>
-        item.id ===
-        selectedMenuItemId,
-    );
-
-  function handleBrandChange(
-    brand: DbaBrand,
-  ) {
-    setSelectedBrand(brand);
-
-    const firstMenuItem =
-      MENU_CATALOG.find(
+  const availableMenuItems = useMemo(
+    () =>
+      menuCatalog.filter(
         (item) =>
-          item.brandId === brand,
-      );
+          item.brandId === selectedBrand &&
+          item.active !== false,
+      ),
+    [menuCatalog, selectedBrand],
+  );
 
-    setSelectedMenuItemId(
-      firstMenuItem?.id ?? "",
+  function handleBrandChange(brand: DbaBrand) {
+    setSelectedBrand(brand);
+    const validKitchen = kitchens.find((k) =>
+      brandKitchens.some(
+        (bk) =>
+          bk.brandId === brand &&
+          bk.kitchenId === k.id &&
+          bk.active &&
+          k.active,
+      ),
+    );
+    if (validKitchen) {
+      setSelectedKitchenId(validKitchen.id);
+    }
+
+    const firstItem = menuCatalog.find(
+      (item) => item.brandId === brand,
+    );
+    setCart(
+      firstItem ? { [firstItem.id]: 1 } : {},
+    );
+    setIdempotencyKey(
+      `idem-${brand.slice(0, 2).toLowerCase()}-${Date.now().toString().slice(-6)}`,
     );
   }
 
-  async function handleSubmit() {
-    if (!selectedMenuItem) {
+  function updateItemQty(
+    menuItemId: string,
+    delta: number,
+  ) {
+    setCart((prev) => {
+      const current = prev[menuItemId] || 0;
+      const next = Math.max(
+        0,
+        current + delta,
+      );
+      const copy = { ...prev };
+      if (next === 0) {
+        delete copy[menuItemId];
+      } else {
+        copy[menuItemId] = next;
+      }
+      return copy;
+    });
+  }
+
+  const cartItems = useMemo(() => {
+    return availableMenuItems
+      .filter((m) => (cart[m.id] || 0) > 0)
+      .map((m) => ({
+        menuItem: m,
+        quantity: cart[m.id],
+      }));
+  }, [availableMenuItems, cart]);
+
+  const orderTotal = useMemo(() => {
+    return cartItems.reduce(
+      (sum, entry) =>
+        sum +
+        entry.menuItem.price * entry.quantity,
+      0,
+    );
+  }, [cartItems]);
+
+  // Live recipe ingredient requirement preview
+  const ingredientPreview = useMemo(() => {
+    const reqMap = new Map<string, number>();
+    for (const entry of cartItems) {
+      for (const ing of entry.menuItem.recipe) {
+        const cur =
+          reqMap.get(ing.inventoryItemId) || 0;
+        reqMap.set(
+          ing.inventoryItemId,
+          Number(
+            (
+              cur +
+              ing.quantityRequired *
+                entry.quantity
+            ).toFixed(4),
+          ),
+        );
+      }
+    }
+    return Array.from(reqMap.entries()).map(
+      ([invId, requiredQty]) => {
+        const inv = inventory.find(
+          (i) => i.id === invId,
+        );
+        const currentStock =
+          inv?.currentStock ?? 0;
+        const threshold =
+          inv?.reorderThreshold ?? 0;
+        const remaining =
+          currentStock - requiredQty;
+        const status =
+          currentStock < requiredQty
+            ? "INSUFFICIENT"
+            : remaining <= threshold
+              ? "LOW_STOCK"
+              : "AVAILABLE";
+        return {
+          id: invId,
+          name: inv?.name || invId,
+          unit: inv?.unit || "units",
+          requiredQty,
+          currentStock,
+          remaining: Number(
+            remaining.toFixed(2),
+          ),
+          status,
+        };
+      },
+    );
+  }, [cartItems, inventory]);
+
+  async function submitOrder(
+    reuseKey = false,
+  ) {
+    if (cartItems.length === 0) {
       setMessage(
-        "Select a menu item first.",
+        "Select at least one menu item with quantity >= 1.",
       );
       setMessageType("error");
       return;
@@ -123,152 +310,101 @@ export default function OrderSimulationPanel({
     setIsSubmitting(true);
     setMessage("");
 
-    const now =
-      new Date().toISOString();
-
-    const orderId =
-      `DEV-${Date.now()}`;
-
-    const eventId =
-      `${orderId}-EVENT-001`;
-
-    const newOrder: Order = {
-      id: orderId,
-
-      externalOrderId:
-        `DEV-EXT-${Date.now()}`,
-
-      brandId: selectedBrand,
-
-      kitchenId: kitchen.id,
-
-      channel: selectedChannel,
-
-      source:
-        CHANNEL_SOURCE_MAP[
-          selectedChannel
-        ],
-
-      status: "PENDING",
-
-      items: [
-        {
-          id: `${orderId}-ITEM-001`,
-          menuItemId:
-            selectedMenuItem.id,
-          name:
-            selectedMenuItem.name,
-          quantity,
-          notes:
-            customNotes.trim() ||
-            undefined,
-          station:
-            selectedMenuItem.station,
-        },
-      ],
-
-      customerName:
-        "Development Test Customer",
-
-      createdAt: now,
-      updatedAt: now,
-      receivedAt: now,
-
-      events: [
-        {
-          id: eventId,
-          type: "RECEIVED",
-          timestamp: now,
-          actor: "DEVELOPER",
-          details:
-            "Manual development test order injected.",
-        },
-      ],
-    };
+    const activeKey = reuseKey
+      ? idempotencyKey
+      : idempotencyKey.trim() ||
+        `idem-${Date.now()}`;
 
     try {
-      const response =
-        await fetch(
-          "/api/orders",
-          {
-            method: "POST",
-
-            headers: {
-              "Content-Type":
-                "application/json",
-            },
-
-            body: JSON.stringify(
-              newOrder,
-            ),
+      const response = await fetch(
+        "/api/orders",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type":
+              "application/json",
           },
-        );
+          body: JSON.stringify({
+            brandId: selectedBrand,
+            kitchenId: selectedKitchenId,
+            channel: selectedChannel,
+            priority,
+            customerName:
+              customerName.trim() ||
+              "Aggregator Guest",
+            notes:
+              customNotes.trim() || undefined,
+            idempotencyKey: activeKey,
+            items: cartItems.map((entry) => ({
+              menuItemId: entry.menuItem.id,
+              name: entry.menuItem.name,
+              quantity: entry.quantity,
+              notes:
+                customNotes.trim() || undefined,
+            })),
+          }),
+        },
+      );
 
-      const data =
-        await response.json();
+      const data = await response.json();
 
       if (!response.ok) {
-        const unavailable =
-          Array.isArray(
-            data?.inventoryUnavailable,
-          ) &&
-          data.inventoryUnavailable
-            .length > 0;
-
         setMessage(
-          unavailable
-            ? `Order rejected: insufficient inventory for ${data.inventoryUnavailable.join(", ")}`
-            : data?.error ||
-                "Failed to inject test order.",
+          data?.error ||
+            "Order injection rejected by server validation.",
         );
-
-        setMessageType(
-          unavailable
-            ? "warning"
-            : "error",
-        );
-
+        setMessageType("error");
         return;
       }
 
       const storedOrder =
         data?.order as Order;
-
       onInject?.(storedOrder);
+      await loadSystemSnapshot();
 
-      if (
+      if (data?.idempotentReplay) {
+        setMessage(
+          `Idempotency Guard Triggered: Duplicate webhook key "${activeKey}" intercepted via ON CONFLICT DO NOTHING. Returned existing Order ${storedOrder.id} without double creation!`,
+        );
+        setMessageType("info");
+      } else if (
         data?.inventoryDecision ===
-        "LOW_STOCK"
+        "INSUFFICIENT_STOCK"
       ) {
         setMessage(
-          `Order ${storedOrder.id} accepted with a low-stock warning.`,
+          `Order ${storedOrder.id} created with INSUFFICIENT STOCK flag for: ${(data.inventoryUnavailable || []).join(", ")}. KDS prep will block until restocked.`,
         );
-
-        setMessageType(
-          "warning",
+        setMessageType("warning");
+        setIdempotencyKey(
+          `idem-${selectedChannel.slice(0, 3).toLowerCase()}-${Date.now().toString().slice(-6)}`,
+        );
+      } else if (
+        data?.inventoryDecision === "LOW_STOCK"
+      ) {
+        setMessage(
+          `Order ${storedOrder.id} injected into ${selectedKitchenId} with LOW STOCK warning for: ${(data.inventoryWarnings || []).join(", ")}.`,
+        );
+        setMessageType("warning");
+        setIdempotencyKey(
+          `idem-${selectedChannel.slice(0, 3).toLowerCase()}-${Date.now().toString().slice(-6)}`,
         );
       } else {
         setMessage(
-          `Order ${storedOrder.id} accepted successfully.`,
+          `Order ${storedOrder.id} ($${(storedOrder.totalAmount ?? orderTotal).toFixed(2)}) injected into canonical store → now live on KDS & Global Order Monitor!`,
         );
-
-        setMessageType(
-          "success",
+        setMessageType("success");
+        setIdempotencyKey(
+          `idem-${selectedChannel.slice(0, 3).toLowerCase()}-${Date.now().toString().slice(-6)}`,
         );
       }
-
-      setQuantity(1);
-      setCustomNotes("");
-    } catch (error) {
+    } catch (err) {
       console.error(
         "Order injection failed:",
-        error,
+        err,
       );
-
       setMessage(
         "Unable to reach the Orders API.",
       );
-
       setMessageType("error");
     } finally {
       setIsSubmitting(false);
@@ -276,206 +412,552 @@ export default function OrderSimulationPanel({
   }
 
   return (
-    <section className="rounded-xl border border-neutral-800 bg-neutral-950 p-5 text-neutral-100">
-
-      <div className="mb-5">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-
-          <div>
-            <h2 className="text-sm font-semibold uppercase tracking-wider">
-              Order Injection
-            </h2>
-
-            <p className="mt-1 text-xs text-neutral-500">
-              Development source •{" "}
-              {kitchen.name}
-            </p>
+    <div className="space-y-6">
+      <div className="grid gap-6 lg:grid-cols-[1.2fr_0.8fr]">
+        {/* Left: Order Injection & BrandKitchen Cascading Builder */}
+        <section className="rounded-2xl border border-slate-800 bg-slate-900/70 p-6 text-slate-100 shadow-xl">
+          <div className="mb-5 flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 pb-4">
+            <div>
+              <span className="font-mono text-xs font-bold uppercase tracking-wider text-sky-400">
+                Canonical Order Injection Pipeline
+              </span>
+              <h2 className="mt-1 text-xl font-black text-white">
+                Create & Inject Multi-Brand Order
+              </h2>
+              <p className="text-xs text-slate-400">
+                Enforces server-side{" "}
+                <code>BrandKitchen</code>{" "}
+                validation, recipe resolution, and
+                atomic idempotency.
+              </p>
+            </div>
+            <span className="rounded-full border border-emerald-500/40 bg-emerald-500/10 px-3 py-1 font-mono text-[10px] font-bold uppercase text-emerald-300">
+              Exactly-Once API
+            </span>
           </div>
 
-          <span className="rounded-full border border-amber-800/60 bg-amber-950/30 px-3 py-1 font-mono text-[10px] uppercase text-amber-300">
-            Developer Tool
-          </span>
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            {/* 1. Virtual Brand */}
+            <label className="block">
+              <span className="mb-1.5 block font-mono text-xs font-bold uppercase text-slate-300">
+                1. Virtual Brand (DBA)
+              </span>
+              <select
+                value={selectedBrand}
+                onChange={(e) =>
+                  handleBrandChange(
+                    e.target.value as DbaBrand,
+                  )
+                }
+                className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3.5 py-3 text-sm text-white outline-none focus:border-sky-400"
+              >
+                {BRANDS_DB.map((brand) => (
+                  <option
+                    key={brand.id}
+                    value={brand.id}
+                  >
+                    {brand.name} ({brand.code}) —{" "}
+                    {brand.cuisine}
+                  </option>
+                ))}
+              </select>
+            </label>
 
+            {/* 2. Cascading Physical Kitchen */}
+            <label className="block">
+              <span className="mb-1.5 block font-mono text-xs font-bold uppercase text-slate-300">
+                2. Physical Kitchen (BrandKitchen)
+              </span>
+              <select
+                value={selectedKitchenId}
+                onChange={(e) =>
+                  setSelectedKitchenId(
+                    e.target.value,
+                  )
+                }
+                className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3.5 py-3 text-sm text-white outline-none focus:border-sky-400"
+              >
+                {kitchens.map((k) => {
+                  const authorized =
+                    authorizedKitchenIds.has(
+                      k.id,
+                    ) && k.active;
+                  return (
+                    <option
+                      key={k.id}
+                      value={k.id}
+                    >
+                      {authorized ? "✓ " : "✕ "}
+                      {k.id} • {k.name}{" "}
+                      {authorized
+                        ? "(Authorized)"
+                        : "(Unauthorized in BrandKitchen)"}
+                    </option>
+                  );
+                })}
+              </select>
+            </label>
+
+            {/* 3. Order Channel */}
+            <label className="block">
+              <span className="mb-1.5 block font-mono text-xs font-bold uppercase text-slate-300">
+                3. Aggregator / Channel
+              </span>
+              <select
+                value={selectedChannel}
+                onChange={(e) =>
+                  setSelectedChannel(
+                    e.target
+                      .value as OrderChannel,
+                  )
+                }
+                className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3.5 py-3 text-sm text-white outline-none focus:border-sky-400"
+              >
+                {CHANNELS.map((channel) => (
+                  <option
+                    key={channel}
+                    value={channel}
+                  >
+                    {channel}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            {/* 4. Priority & Customer */}
+            <div className="grid grid-cols-2 gap-2">
+              <label className="block">
+                <span className="mb-1.5 block font-mono text-xs font-bold uppercase text-slate-300">
+                  Priority
+                </span>
+                <select
+                  value={priority}
+                  onChange={(e) =>
+                    setPriority(
+                      e.target.value as
+                        | "NORMAL"
+                        | "RUSH"
+                        | "VIP",
+                    )
+                  }
+                  className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-3 text-sm text-white outline-none focus:border-sky-400"
+                >
+                  <option value="NORMAL">
+                    NORMAL
+                  </option>
+                  <option value="RUSH">
+                    RUSH
+                  </option>
+                  <option value="VIP">
+                    VIP
+                  </option>
+                </select>
+              </label>
+
+              <label className="block">
+                <span className="mb-1.5 block font-mono text-xs font-bold uppercase text-slate-300">
+                  Customer
+                </span>
+                <input
+                  type="text"
+                  value={customerName}
+                  onChange={(e) =>
+                    setCustomerName(
+                      e.target.value,
+                    )
+                  }
+                  className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-3 text-sm text-white outline-none focus:border-sky-400"
+                />
+              </label>
+            </div>
+          </div>
+
+          {/* 5. Brand-Owned Menu Catalog Selection */}
+          <div className="mt-5">
+            <div className="mb-2 flex items-center justify-between">
+              <span className="font-mono text-xs font-bold uppercase text-slate-300">
+                4. Select Menu Items ({selectedBrand} Catalog)
+              </span>
+              <span className="font-mono text-xs text-emerald-400">
+                Order Total: ${orderTotal.toFixed(2)}
+              </span>
+            </div>
+
+            <div className="space-y-2.5">
+              {availableMenuItems.map((item) => {
+                const qty = cart[item.id] || 0;
+                return (
+                  <div
+                    key={item.id}
+                    className={`flex flex-wrap items-center justify-between gap-3 rounded-xl border p-3.5 transition ${
+                      qty > 0
+                        ? "border-sky-500/50 bg-sky-500/10"
+                        : "border-slate-800 bg-slate-950"
+                    }`}
+                  >
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="font-bold text-white">
+                          {item.name}
+                        </span>
+                        <span className="rounded bg-slate-800 px-2 py-0.5 font-mono text-[10px] text-sky-300">
+                          {item.station}
+                        </span>
+                        <span className="font-mono text-xs font-bold text-emerald-400">
+                          ${item.price.toFixed(2)}
+                        </span>
+                      </div>
+                      <p className="mt-1 font-mono text-[11px] text-slate-400">
+                        Recipe:{" "}
+                        {item.recipe.length === 0
+                          ? "Direct station prep (no tracked raw SKU)"
+                          : item.recipe
+                              .map((r) => {
+                                const inv =
+                                  inventory.find(
+                                    (i) =>
+                                      i.id ===
+                                      r.inventoryItemId,
+                                  );
+                                return `${r.quantityRequired} ${inv?.unit || "u"} ${inv?.name || r.inventoryItemId}`;
+                              })
+                              .join(" + ")}
+                      </p>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          updateItemQty(
+                            item.id,
+                            -1,
+                          )
+                        }
+                        className="h-8 w-8 rounded-lg border border-slate-700 bg-slate-900 font-mono text-sm font-bold text-white hover:bg-slate-800"
+                      >
+                        −
+                      </button>
+                      <span className="w-8 text-center font-mono text-sm font-bold text-white">
+                        {qty}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          updateItemQty(
+                            item.id,
+                            1,
+                          )
+                        }
+                        className="h-8 w-8 rounded-lg border border-sky-500/40 bg-sky-500/20 font-mono text-sm font-bold text-sky-300 hover:bg-sky-500/30"
+                      >
+                        +
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* 6. Idempotency Key & Kitchen Notes */}
+          <div className="mt-5 grid gap-4 sm:grid-cols-2">
+            <label className="block">
+              <span className="mb-1 block font-mono text-xs font-bold uppercase text-slate-300">
+                Upstream Idempotency Key
+              </span>
+              <input
+                type="text"
+                value={idempotencyKey}
+                onChange={(e) =>
+                  setIdempotencyKey(
+                    e.target.value,
+                  )
+                }
+                className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 font-mono text-xs text-sky-300 outline-none focus:border-sky-400"
+              />
+            </label>
+
+            <label className="block">
+              <span className="mb-1 block font-mono text-xs font-bold uppercase text-slate-300">
+                Kitchen Prep Notes
+              </span>
+              <input
+                type="text"
+                value={customNotes}
+                onChange={(e) =>
+                  setCustomNotes(e.target.value)
+                }
+                placeholder="e.g. Allergy alert, extra sear..."
+                className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-xs text-white outline-none focus:border-sky-400"
+              />
+            </label>
+          </div>
+
+          {message && (
+            <div
+              className={`mt-5 rounded-xl border px-4 py-3 font-mono text-xs ${
+                messageType === "success"
+                  ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-300"
+                  : messageType === "warning"
+                    ? "border-amber-500/40 bg-amber-500/10 text-amber-300"
+                    : messageType === "info"
+                      ? "border-sky-500/40 bg-sky-500/10 text-sky-300"
+                      : "border-red-500/40 bg-red-500/10 text-red-300"
+              }`}
+            >
+              {message}
+            </div>
+          )}
+
+          <div className="mt-6 flex flex-wrap gap-3">
+            <button
+              type="button"
+              onClick={() =>
+                void submitOrder(false)
+              }
+              disabled={
+                cartItems.length === 0 ||
+                isSubmitting
+              }
+              className="flex-1 rounded-xl bg-gradient-to-r from-sky-500 to-emerald-500 px-5 py-3.5 font-mono text-xs font-black uppercase tracking-wider text-slate-950 shadow-lg transition hover:opacity-95 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {isSubmitting
+                ? "Injecting Canonical Order..."
+                : `Inject Order ($${orderTotal.toFixed(2)}) →`}
+            </button>
+
+            {webhookEvents.length > 0 && (
+              <button
+                type="button"
+                disabled={isSubmitting}
+                onClick={() => {
+                  const lastKey =
+                    webhookEvents[0]
+                      .idempotencyKey;
+                  setIdempotencyKey(lastKey);
+                  void (async () => {
+                    setIsSubmitting(true);
+                    try {
+                      const res = await fetch(
+                        "/api/orders",
+                        {
+                          method: "POST",
+                          headers: {
+                            "Content-Type":
+                              "application/json",
+                          },
+                          body: JSON.stringify({
+                            brandId:
+                              webhookEvents[0]
+                                .brandId,
+                            kitchenId:
+                              webhookEvents[0]
+                                .kitchenId,
+                            channel:
+                              webhookEvents[0]
+                                .channel,
+                            idempotencyKey:
+                              lastKey,
+                            items:
+                              cartItems.length >
+                              0
+                                ? cartItems.map(
+                                    (c) => ({
+                                      menuItemId:
+                                        c.menuItem
+                                          .id,
+                                      quantity:
+                                        c.quantity,
+                                    }),
+                                  )
+                                : [
+                                    {
+                                      menuItemId:
+                                        "MENU-BF-01",
+                                      quantity: 1,
+                                    },
+                                  ],
+                          }),
+                        },
+                      );
+                      const data =
+                        await res.json();
+                      await loadSystemSnapshot();
+                      if (
+                        data?.idempotentReplay
+                      ) {
+                        setMessage(
+                          `Idempotency Guard Verified! Replaying key "${lastKey}" was cleanly blocked via atomic reservation. Cached Order ${data.order.id} returned without duplicate creation.`,
+                        );
+                        setMessageType("info");
+                      }
+                    } finally {
+                      setIsSubmitting(false);
+                    }
+                  })();
+                }}
+                className="rounded-xl border border-amber-500/40 bg-amber-500/10 px-4 py-3.5 font-mono text-xs font-bold text-amber-300 hover:bg-amber-500/20"
+                title="Simulate an upstream aggregator webhook retry with the last idempotency key"
+              >
+                ↺ Simulate Duplicate Webhook Retry
+              </button>
+            )}
+          </div>
+        </section>
+
+        {/* Right: Live Recipe Stock Check & Idempotency / Outbox Diagnostics */}
+        <div className="space-y-6">
+          {/* Recipe Depletion Preview */}
+          <section className="rounded-2xl border border-slate-800 bg-slate-900/70 p-5">
+            <div className="flex items-center justify-between">
+              <h3 className="font-mono text-xs font-bold uppercase tracking-wider text-emerald-400">
+                Pre-Flight Recipe & Stock Check
+              </h3>
+              <Link
+                href="/inventory"
+                className="font-mono text-[11px] text-sky-400 hover:underline"
+              >
+                Stock Control →
+              </Link>
+            </div>
+            <p className="mt-1 text-xs text-slate-400">
+              Calculates exact raw ingredient depletion triggered when Line Cook transitions{" "}
+              <code>PENDING → PREPARING</code>.
+            </p>
+
+            {ingredientPreview.length === 0 ? (
+              <p className="mt-4 rounded-xl bg-slate-950 p-4 text-center text-xs text-slate-500">
+                No tracked raw recipe ingredients required for current selection.
+              </p>
+            ) : (
+              <div className="mt-3 space-y-2">
+                {ingredientPreview.map((ing) => (
+                  <div
+                    key={ing.id}
+                    className="flex items-center justify-between rounded-xl border border-slate-800 bg-slate-950 px-3.5 py-2.5 text-xs"
+                  >
+                    <div>
+                      <p className="font-semibold text-white">
+                        {ing.name}
+                      </p>
+                      <p className="font-mono text-[10px] text-slate-400">
+                        Requires: {ing.requiredQty}{" "}
+                        {ing.unit} • On Hand:{" "}
+                        {ing.currentStock}{" "}
+                        {ing.unit}
+                      </p>
+                    </div>
+                    <span
+                      className={`rounded-full px-2.5 py-0.5 font-mono text-[10px] font-bold ${
+                        ing.status ===
+                        "INSUFFICIENT"
+                          ? "bg-red-500/20 text-red-300 border border-red-500/40"
+                          : ing.status ===
+                              "LOW_STOCK"
+                            ? "bg-amber-500/20 text-amber-300 border border-amber-500/40"
+                            : "bg-emerald-500/20 text-emerald-300 border border-emerald-500/40"
+                      }`}
+                    >
+                      {ing.status}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </section>
+
+          {/* Two-Phase Atomic Idempotency Ledger */}
+          <section className="rounded-2xl border border-slate-800 bg-slate-900/70 p-5">
+            <h3 className="font-mono text-xs font-bold uppercase tracking-wider text-sky-400">
+              Atomic Webhook Deduplication Ledger
+            </h3>
+            <pre className="mt-2 overflow-x-auto rounded-xl border border-slate-800 bg-slate-950 p-3 font-mono text-[11px] text-emerald-300">
+{`INSERT INTO webhook_events (idempotency_key, status)
+VALUES ($1, 'processing')
+ON CONFLICT (idempotency_key) DO NOTHING
+RETURNING idempotency_key;`}
+            </pre>
+
+            <div className="mt-3 max-h-48 space-y-2 overflow-y-auto">
+              {webhookEvents
+                .slice(0, 6)
+                .map((w) => (
+                  <div
+                    key={w.idempotencyKey}
+                    className="flex items-center justify-between rounded-xl border border-slate-800 bg-slate-950 px-3 py-2 font-mono text-[11px]"
+                  >
+                    <div>
+                      <p className="font-bold text-white">
+                        {w.idempotencyKey} →{" "}
+                        <span className="text-sky-400">
+                          {w.orderId}
+                        </span>
+                      </p>
+                      <p className="text-[10px] text-slate-400">
+                        {w.payloadSummary}
+                      </p>
+                    </div>
+                    <span
+                      className={`rounded px-2 py-0.5 text-[10px] font-bold ${
+                        w.hitCount > 1
+                          ? "bg-amber-500/20 text-amber-300"
+                          : "bg-slate-800 text-slate-300"
+                      }`}
+                    >
+                      Hits: {w.hitCount}
+                    </span>
+                  </div>
+                ))}
+            </div>
+          </section>
+
+          {/* Transactional Outbox & Exponential Backoff Schedule */}
+          <section className="rounded-2xl border border-slate-800 bg-slate-900/70 p-5">
+            <h3 className="font-mono text-xs font-bold uppercase tracking-wider text-purple-400">
+              Transactional Outbox Retry Schedule
+            </h3>
+            <div className="mt-3 space-y-1.5">
+              {BACKOFF_SCHEDULE.map((b) => (
+                <div
+                  key={b.attempt}
+                  className="flex items-center justify-between rounded-lg bg-slate-950 px-3 py-1.5 text-[11px]"
+                >
+                  <span className="font-mono font-bold text-slate-200">
+                    {b.attempt} ({b.delay})
+                  </span>
+                  <span className="text-slate-400 text-right">
+                    {b.scenario}
+                  </span>
+                </div>
+              ))}
+            </div>
+            {outboxEvents.length > 0 && (
+              <div className="mt-3 border-t border-slate-800 pt-3">
+                <p className="font-mono text-[10px] uppercase text-slate-400 mb-1.5">
+                  Recent Outbox Fan-Out Events
+                </p>
+                {outboxEvents
+                  .slice(0, 3)
+                  .map((ev) => (
+                    <div
+                      key={ev.id}
+                      className="flex items-center justify-between font-mono text-[10px] text-slate-300 py-1"
+                    >
+                      <span>
+                        {ev.eventType} (
+                        {ev.aggregateId})
+                      </span>
+                      <span className="text-emerald-400">
+                        {ev.status}
+                      </span>
+                    </div>
+                  ))}
+              </div>
+            )}
+          </section>
         </div>
       </div>
-
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-
-        <label className="block">
-          <span className="mb-1 block text-xs text-neutral-400">
-            Brand
-          </span>
-
-          <select
-            value={selectedBrand}
-            onChange={(event) =>
-              handleBrandChange(
-                event.target
-                  .value as DbaBrand,
-              )
-            }
-            className="w-full rounded-lg border border-neutral-700 bg-neutral-900 px-3 py-3 text-sm outline-none focus:border-sky-500"
-          >
-            {BRANDS_DB.map(
-              (brand) => (
-                <option
-                  key={brand.id}
-                  value={brand.id}
-                >
-                  {brand.name}
-                </option>
-              ),
-            )}
-          </select>
-        </label>
-
-        <label className="block">
-          <span className="mb-1 block text-xs text-neutral-400">
-            Order Channel
-          </span>
-
-          <select
-            value={selectedChannel}
-            onChange={(event) =>
-              setSelectedChannel(
-                event.target
-                  .value as OrderChannel,
-              )
-            }
-            className="w-full rounded-lg border border-neutral-700 bg-neutral-900 px-3 py-3 text-sm outline-none focus:border-sky-500"
-          >
-            {CHANNELS.map(
-              (channel) => (
-                <option
-                  key={channel}
-                  value={channel}
-                >
-                  {channel}
-                </option>
-              ),
-            )}
-          </select>
-        </label>
-
-        <label className="block md:col-span-2">
-          <span className="mb-1 block text-xs text-neutral-400">
-            Menu Item
-          </span>
-
-          <select
-            value={
-              selectedMenuItemId
-            }
-            onChange={(event) =>
-              setSelectedMenuItemId(
-                event.target.value,
-              )
-            }
-            className="w-full rounded-lg border border-neutral-700 bg-neutral-900 px-3 py-3 text-sm outline-none focus:border-sky-500"
-          >
-            {availableMenuItems.map(
-              (item) => (
-                <option
-                  key={item.id}
-                  value={item.id}
-                >
-                  {item.name} · $
-                  {item.price.toFixed(
-                    2,
-                  )}{" "}
-                  · {item.station}
-                </option>
-              ),
-            )}
-          </select>
-        </label>
-
-        <label className="block">
-          <span className="mb-1 block text-xs text-neutral-400">
-            Quantity
-          </span>
-
-          <input
-            type="number"
-            min={1}
-            value={quantity}
-            onChange={(event) =>
-              setQuantity(
-                Math.max(
-                  1,
-                  Number.parseInt(
-                    event.target
-                      .value || "1",
-                    10,
-                  ),
-                ),
-              )
-            }
-            className="w-full rounded-lg border border-neutral-700 bg-neutral-900 px-3 py-3 text-sm outline-none focus:border-sky-500"
-          />
-        </label>
-
-        <label className="block">
-          <span className="mb-1 block text-xs text-neutral-400">
-            Kitchen
-          </span>
-
-          <input
-            value={kitchen.name}
-            disabled
-            className="w-full rounded-lg border border-neutral-800 bg-neutral-900/60 px-3 py-3 text-sm text-neutral-500"
-          />
-        </label>
-
-        <label className="block md:col-span-2">
-          <span className="mb-1 block text-xs text-neutral-400">
-            Kitchen Notes
-          </span>
-
-          <textarea
-            value={customNotes}
-            onChange={(event) =>
-              setCustomNotes(
-                event.target.value,
-              )
-            }
-            rows={3}
-            placeholder="Optional preparation notes..."
-            className="w-full resize-none rounded-lg border border-neutral-700 bg-neutral-900 px-3 py-3 text-sm outline-none focus:border-sky-500"
-          />
-        </label>
-
-      </div>
-
-      {message && (
-        <div
-          className={`mt-4 rounded-lg border px-3 py-3 text-xs ${
-            messageType === "success"
-              ? "border-emerald-800 bg-emerald-950/30 text-emerald-300"
-              : messageType ===
-                  "warning"
-                ? "border-amber-800 bg-amber-950/30 text-amber-300"
-                : "border-red-800 bg-red-950/30 text-red-300"
-          }`}
-        >
-          {message}
-        </div>
-      )}
-
-      <button
-        type="button"
-        onClick={handleSubmit}
-        disabled={
-          !selectedMenuItem ||
-          isSubmitting
-        }
-        className="mt-5 w-full rounded-lg bg-sky-500 px-4 py-3 text-sm font-semibold text-gray-950 transition hover:bg-sky-400 disabled:cursor-not-allowed disabled:opacity-50"
-      >
-        {isSubmitting
-          ? "Injecting Order..."
-          : "Inject Test Order"}
-      </button>
-
-    </section>
+    </div>
   );
 }

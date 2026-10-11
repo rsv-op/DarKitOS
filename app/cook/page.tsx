@@ -6,441 +6,405 @@ import {
   useMemo,
   useState,
 } from "react";
+import Link from "next/link";
+import AppShell from "@/components/AppShell";
+import {
+  BRANDS_DB,
+  KITCHENS_DB,
+  type KitchenStation,
+  type Order,
+} from "@/lib/db";
 
-type OrderStatus =
-  | "PENDING"
-  | "PREPARING"
-  | "READY_FOR_PICKUP"
-  | "DRIVER_ASSIGNED"
-  | "PICKED_UP"
-  | "DISPATCHED"
-  | "CANCELLED";
+const STATIONS: KitchenStation[] = [
+  "Grill",
+  "Fryer",
+  "Assembly",
+  "Cold Prep",
+];
 
-type OrderItem = {
-  id?: string;
-  menuItemId?: string;
-  name?: string;
-  quantity?: number;
-};
-
-type Order = {
-  id: string;
-  brandId: string;
-  kitchenId: string;
-  status: OrderStatus;
-  items: OrderItem[];
-  createdAt?: string;
-  receivedAt?: string;
-  prepStartedAt?: string;
-  prepCompletedAt?: string;
-  readyAt?: string;
-  inventoryWarnings?: string[];
-  inventoryUnavailable?: string[];
-};
-
-type OrdersResponse = {
-  orders?: Order[];
-  error?: string;
-};
-
-type ActionResponse = {
-  order?: Order;
-  error?: string;
-};
-
-function formatTime(
-  value?: string
-): string {
-  if (!value) {
-    return "--";
-  }
-
-  const date =
-    new Date(value);
-
-  if (
-    Number.isNaN(
-      date.getTime()
-    )
-  ) {
-    return "--";
-  }
-
-  return date.toLocaleTimeString(
-    [],
-    {
-      hour: "2-digit",
-      minute: "2-digit",
-    }
-  );
+function formatTime(value?: string): string {
+  if (!value) return "--";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "--";
+  return date.toLocaleTimeString([], {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 }
 
-function getOrderAge(
-  value?: string
-): string {
-  if (!value) {
-    return "--";
-  }
-
-  const created =
-    new Date(value).getTime();
-
-  if (
-    Number.isNaN(created)
-  ) {
-    return "--";
-  }
-
-  const minutes = Math.max(
+function getOrderAgeMins(value?: string): number {
+  if (!value) return 0;
+  const created = new Date(value).getTime();
+  if (Number.isNaN(created)) return 0;
+  return Math.max(
     0,
-    Math.floor(
-      (Date.now() - created) /
-        60000
-    )
+    Math.floor((Date.now() - created) / 60000),
   );
-
-  return `${minutes} min`;
 }
 
 export default function CookPage() {
-  const [orders, setOrders] =
-    useState<Order[]>([]);
-
-  const [loading, setLoading] =
-    useState(true);
-
-  const [error, setError] =
+  const [orders, setOrders] = useState<Order[]>(
+    [],
+  );
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [depletionNotice, setDepletionNotice] =
     useState("");
-
   const [updatingOrderId, setUpdatingOrderId] =
     useState<string | null>(null);
 
-  const loadOrders =
-    useCallback(
-      async () => {
-        try {
-          const response =
-            await fetch(
-              "/api/orders",
-              {
-                cache: "no-store",
-              }
-            );
+  const [kitchenFilter, setKitchenFilter] =
+    useState<string>("ALL");
+  const [brandFilter, setBrandFilter] =
+    useState<string>("ALL");
+  const [stationFilter, setStationFilter] =
+    useState<string>("ALL");
+  const [syncTransport, setSyncTransport] =
+    useState<
+      "WEBSOCKET" | "SSE" | "HTTP_POLLING"
+    >("WEBSOCKET");
 
-          const data =
-            (await response.json()) as OrdersResponse;
-
-          if (!response.ok) {
-            throw new Error(
-              data.error ??
-                "Unable to load orders."
-            );
-          }
-
-          setOrders(
-            Array.isArray(
-              data.orders
-            )
-              ? data.orders
-              : []
-          );
-
-          setError("");
-        } catch (loadError) {
-          console.error(
-            "Cook KDS load failed:",
-            loadError
-          );
-
-          setError(
-            loadError instanceof Error
-              ? loadError.message
-              : "Unable to load orders."
-          );
-        } finally {
-          setLoading(false);
-        }
-      },
-      []
-    );
-
-  useEffect(() => {
-    void loadOrders();
-
-    const interval =
-      window.setInterval(
-        () => {
-          void loadOrders();
-        },
-        5000
-      );
-
-    return () =>
-      window.clearInterval(
-        interval
-      );
-  }, [loadOrders]);
-
-  const activeOrders =
-    useMemo(
-      () =>
-        orders.filter(
-          (order) =>
-            order.status ===
-              "PENDING" ||
-            order.status ===
-              "PREPARING" ||
-            order.status ===
-              "READY_FOR_PICKUP"
-        ),
-      [orders]
-    );
-
-  const pendingOrders =
-    activeOrders.filter(
-      (order) =>
-        order.status ===
-        "PENDING"
-    );
-
-  const preparingOrders =
-    activeOrders.filter(
-      (order) =>
-        order.status ===
-        "PREPARING"
-    );
-
-  const readyOrders =
-    activeOrders.filter(
-      (order) =>
-        order.status ===
-        "READY_FOR_PICKUP"
-    );
-
-  async function updateOrder(
-    orderId: string,
-    action:
-      | "PREPARING"
-      | "READY_FOR_PICKUP"
-  ) {
-    setUpdatingOrderId(
-      orderId
-    );
-    setError("");
-
+  const loadOrders = useCallback(async () => {
     try {
-      const response =
-        await fetch(
-          "/api/orders",
-          {
-            method: "PATCH",
-            headers: {
-              "Content-Type":
-                "application/json",
-            },
-            body: JSON.stringify({
-              orderId,
-              action,
-            }),
-          }
-        );
-
-      const data =
-        (await response.json()) as ActionResponse;
+      const response = await fetch(
+        "/api/orders",
+        {
+          cache: "no-store",
+        },
+      );
+      const data = await response.json();
 
       if (!response.ok) {
         throw new Error(
           data.error ??
-            "Unable to update order."
+            "Unable to load kitchen orders.",
+        );
+      }
+
+      setOrders(
+        Array.isArray(data.orders)
+          ? data.orders
+          : [],
+      );
+      setError("");
+    } catch (loadError) {
+      setError(
+        loadError instanceof Error
+          ? loadError.message
+          : "Unable to load kitchen orders.",
+      );
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadOrders();
+    const intervalMs =
+      syncTransport === "WEBSOCKET"
+        ? 3000
+        : syncTransport === "SSE"
+          ? 4500
+          : 7000;
+    const interval = window.setInterval(() => {
+      void loadOrders();
+    }, intervalMs);
+    return () =>
+      window.clearInterval(interval);
+  }, [loadOrders, syncTransport]);
+
+  const activeOrders = useMemo(() => {
+    return orders.filter((order) => {
+      const statusOk =
+        order.status === "PENDING" ||
+        order.status === "PREPARING" ||
+        order.status === "READY_FOR_PICKUP";
+      if (!statusOk) return false;
+      if (
+        kitchenFilter !== "ALL" &&
+        order.kitchenId !== kitchenFilter
+      )
+        return false;
+      if (
+        brandFilter !== "ALL" &&
+        order.brandId !== brandFilter
+      )
+        return false;
+      if (
+        stationFilter !== "ALL" &&
+        !order.items.some(
+          (i) => i.station === stationFilter,
+        )
+      )
+        return false;
+      return true;
+    });
+  }, [
+    orders,
+    kitchenFilter,
+    brandFilter,
+    stationFilter,
+  ]);
+
+  const pendingOrders = activeOrders.filter(
+    (o) => o.status === "PENDING",
+  );
+  const preparingOrders = activeOrders.filter(
+    (o) => o.status === "PREPARING",
+  );
+  const readyOrders = activeOrders.filter(
+    (o) => o.status === "READY_FOR_PICKUP",
+  );
+
+  async function updateOrder(
+    orderId: string,
+    action: "PREPARING" | "READY_FOR_PICKUP",
+  ) {
+    setUpdatingOrderId(orderId);
+    setError("");
+    setDepletionNotice("");
+
+    try {
+      const response = await fetch(
+        "/api/orders",
+        {
+          method: "PATCH",
+          headers: {
+            "Content-Type":
+              "application/json",
+          },
+          body: JSON.stringify({
+            orderId,
+            action,
+          }),
+        },
+      );
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(
+          data.error ??
+            "Unable to update order.",
+        );
+      }
+
+      if (action === "PREPARING") {
+        const depleted = Array.isArray(
+          data.depletedItems,
+        )
+          ? data.depletedItems.join(", ")
+          : "Recipe items";
+        const alerts = Array.isArray(
+          data.lowStockAlerts,
+        )
+          ? data.lowStockAlerts
+          : [];
+        setDepletionNotice(
+          `Atomic Inventory Consumption Executed for ${orderId}: Depleted [${depleted}]${
+            alerts.length > 0
+              ? ` • Low-Stock Threshold Triggered: ${alerts.join(", ")}`
+              : ""
+          }.`,
+        );
+      } else {
+        setDepletionNotice(
+          `Order ${orderId} marked READY_FOR_PICKUP → routed to Dispatch Pass.`,
         );
       }
 
       await loadOrders();
     } catch (updateError) {
-      console.error(
-        "Cook order update failed:",
-        updateError
-      );
-
       setError(
         updateError instanceof Error
           ? updateError.message
-          : "Unable to update order."
+          : "Unable to update order.",
       );
     } finally {
-      setUpdatingOrderId(
-        null
-      );
+      setUpdatingOrderId(null);
     }
   }
 
-  function renderOrderCard(
-    order: Order
-  ) {
+  function renderOrderCard(order: Order) {
     const isUpdating =
-      updatingOrderId ===
-      order.id;
-
-    const hasWarnings =
-      Boolean(
-        order.inventoryWarnings
-          ?.length
-      );
-
-    const isUnavailable =
-      Boolean(
-        order.inventoryUnavailable
-          ?.length
-      );
+      updatingOrderId === order.id;
+    const hasWarnings = Boolean(
+      order.inventoryWarnings?.length,
+    );
+    const isUnavailable = Boolean(
+      order.inventoryUnavailable?.length,
+    );
+    const ageMins = getOrderAgeMins(
+      order.receivedAt ?? order.createdAt,
+    );
+    const isUrgent =
+      order.priority === "RUSH" ||
+      order.priority === "VIP" ||
+      ageMins >= 12;
 
     return (
       <article
         key={order.id}
-        className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm"
+        className={`rounded-2xl border p-4 shadow-lg transition-all ${
+          isUrgent
+            ? "border-amber-500/60 bg-slate-900/95 shadow-[0_0_20px_rgba(245,158,11,0.12)]"
+            : "border-slate-800 bg-slate-900/80"
+        }`}
       >
         <div className="flex items-start justify-between gap-3">
           <div>
-            <p className="text-lg font-bold text-slate-900">
-              {order.id}
-            </p>
-
-            <p className="text-sm text-slate-500">
-              {order.brandId}
+            <div className="flex items-center gap-2">
+              <p className="font-mono text-lg font-black text-white">
+                {order.id}
+              </p>
+              {order.priority &&
+                order.priority !== "NORMAL" && (
+                  <span className="rounded bg-red-500/20 px-2 py-0.5 font-mono text-[10px] font-bold text-red-300">
+                    {order.priority}
+                  </span>
+                )}
+            </div>
+            <p className="text-xs font-semibold text-sky-400">
+              {order.brandId} •{" "}
+              <span className="text-slate-400">
+                {order.kitchenId} •{" "}
+                {order.channel}
+              </span>
             </p>
           </div>
 
-          <div className="text-right text-xs text-slate-500">
-            <p>
-              Received{" "}
+          <div className="text-right font-mono text-xs">
+            <span
+              className={`inline-block rounded-lg px-2 py-0.5 font-bold ${
+                ageMins >= 15
+                  ? "bg-red-500/20 text-red-300"
+                  : ageMins >= 10
+                    ? "bg-amber-500/20 text-amber-300"
+                    : "bg-slate-800 text-slate-300"
+              }`}
+            >
+              ⏱ {ageMins} min
+            </span>
+            <p className="mt-1 text-[10px] text-slate-500">
+              In{" "}
               {formatTime(
                 order.receivedAt ??
-                  order.createdAt
-              )}
-            </p>
-
-            <p>
-              Age{" "}
-              {getOrderAge(
-                order.receivedAt ??
-                  order.createdAt
+                  order.createdAt,
               )}
             </p>
           </div>
         </div>
 
         <div className="mt-4 space-y-2">
-          {order.items.map(
-            (item, index) => (
-              <div
-                key={
-                  item.id ??
-                  item.menuItemId ??
-                  `${order.id}-${index}`
-                }
-                className="flex items-center justify-between rounded-xl bg-slate-50 px-3 py-2"
-              >
-                <span className="font-medium text-slate-800">
-                  {item.name ??
-                    item.menuItemId ??
-                    "Menu item"}
+          {order.items.map((item, index) => (
+            <div
+              key={
+                item.id ??
+                item.menuItemId ??
+                `${order.id}-${index}`
+              }
+              className="rounded-xl border border-slate-800 bg-slate-950 px-3 py-2.5"
+            >
+              <div className="flex items-center justify-between">
+                <span className="font-semibold text-sm text-white">
+                  {item.name}
                 </span>
-
-                <span className="text-sm font-bold text-slate-600">
-                  ×
-                  {item.quantity ??
-                    1}
-                </span>
+                <div className="flex items-center gap-2">
+                  <span className="rounded bg-slate-800 px-2 py-0.5 font-mono text-[10px] text-sky-300">
+                    {item.station}
+                  </span>
+                  <span className="font-mono text-base font-black text-emerald-400">
+                    ×{item.quantity}
+                  </span>
+                </div>
               </div>
-            )
-          )}
+              {item.notes && (
+                <p className="mt-1 font-mono text-[11px] text-amber-300">
+                  Note: {item.notes}
+                </p>
+              )}
+            </div>
+          ))}
         </div>
 
         {hasWarnings && (
-          <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
-            <p className="font-semibold">
-              Inventory / Stock low
+          <div className="mt-3 rounded-xl border border-amber-500/40 bg-amber-500/10 p-3 text-xs text-amber-300">
+            <p className="font-mono font-bold uppercase">
+              ⚠ Low Stock Alert on Station
             </p>
-
-            <ul className="mt-1 list-disc pl-5">
-              {order.inventoryWarnings?.map(
-                (warning) => (
-                  <li key={warning}>
-                    {warning}
-                  </li>
-                )
+            <p className="mt-0.5">
+              {order.inventoryWarnings?.join(
+                ", ",
               )}
-            </ul>
+            </p>
           </div>
         )}
 
         {isUnavailable && (
-          <div className="mt-3 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-800">
-            <p className="font-semibold">
-              Inventory unavailable
+          <div className="mt-3 rounded-xl border border-red-500/40 bg-red-500/10 p-3 text-xs text-red-300">
+            <p className="font-mono font-bold uppercase">
+              ✕ Stock-Out Block
             </p>
-
-            <ul className="mt-1 list-disc pl-5">
-              {order.inventoryUnavailable?.map(
-                (item) => (
-                  <li key={item}>
-                    {item}
-                  </li>
-                )
+            <p className="mt-0.5">
+              Missing:{" "}
+              {order.inventoryUnavailable?.join(
+                ", ",
               )}
-            </ul>
+            </p>
           </div>
         )}
 
         <div className="mt-4">
-          {order.status ===
-            "PENDING" && (
+          {order.status === "PENDING" && (
             <button
               type="button"
               disabled={
-                isUpdating ||
-                isUnavailable
+                isUpdating || isUnavailable
               }
               onClick={() =>
                 void updateOrder(
                   order.id,
-                  "PREPARING"
+                  "PREPARING",
                 )
               }
-              className="w-full rounded-xl bg-slate-900 px-4 py-4 text-base font-bold text-white disabled:cursor-not-allowed disabled:opacity-40"
+              className="w-full rounded-xl bg-sky-500 px-4 py-3.5 font-mono text-sm font-black uppercase tracking-wider text-slate-950 transition hover:bg-sky-400 disabled:cursor-not-allowed disabled:opacity-40"
             >
               {isUpdating
-                ? "Updating..."
+                ? "Depleting Recipe & Starting..."
                 : isUnavailable
                   ? "Inventory Unavailable"
-                  : "START PREPARING"}
+                  : "🔥 START PREPARING (Deplete Stock)"}
             </button>
           )}
 
-          {order.status ===
-            "PREPARING" && (
+          {order.status === "PREPARING" && (
             <button
               type="button"
-              disabled={
-                isUpdating
-              }
+              disabled={isUpdating}
               onClick={() =>
                 void updateOrder(
                   order.id,
-                  "READY_FOR_PICKUP"
+                  "READY_FOR_PICKUP",
                 )
               }
-              className="w-full rounded-xl bg-emerald-600 px-4 py-4 text-base font-bold text-white disabled:cursor-not-allowed disabled:opacity-40"
+              className="w-full rounded-xl bg-emerald-500 px-4 py-3.5 font-mono text-sm font-black uppercase tracking-wider text-slate-950 transition hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-40"
             >
               {isUpdating
                 ? "Updating..."
-                : "MARK READY"}
+                : "✓ MARK READY FOR PICKUP"}
             </button>
           )}
 
           {order.status ===
             "READY_FOR_PICKUP" && (
-            <div className="rounded-xl bg-emerald-50 px-4 py-4 text-center font-bold text-emerald-700">
-              READY FOR PICKUP
+            <div className="flex items-center justify-between rounded-xl border border-emerald-500/40 bg-emerald-500/10 px-4 py-3 font-mono text-xs font-bold text-emerald-300">
+              <span>STAGED AT DISPATCH PASS</span>
+              <Link
+                href="/dispatch"
+                className="underline hover:text-white"
+              >
+                Handoff →
+              </Link>
             </div>
           )}
         </div>
@@ -449,145 +413,244 @@ export default function CookPage() {
   }
 
   return (
-    <main className="min-h-screen bg-slate-100 px-4 py-5 sm:px-6">
-      <div className="mx-auto max-w-7xl">
-        <header className="mb-5">
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <p className="text-sm font-semibold uppercase tracking-wide text-slate-500">
-                Kitchen Operations
-              </p>
-
-              <h1 className="text-2xl font-black text-slate-900">
-                Cook KDS
-              </h1>
-            </div>
-
-            <button
-              type="button"
-              onClick={() =>
-                void loadOrders()
-              }
-              className="rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm font-semibold text-slate-700"
-            >
-              Refresh
-            </button>
+    <AppShell
+      title="Kitchen Display System (Cook KDS)"
+      subtitle="Real-time touchscreen ticket board with WebSocket/SSE/Polling fallback state machine and atomic recipe consumption on PENDING → PREPARING."
+      actions={
+        <>
+          {/* Resilient Sync Fallback Selector */}
+          <div className="flex items-center gap-1 rounded-xl border border-slate-800 bg-slate-900 p-1 font-mono text-[10px]">
+            <span className="px-2 text-slate-400">
+              Sync Mode:
+            </span>
+            {(
+              [
+                "WEBSOCKET",
+                "SSE",
+                "HTTP_POLLING",
+              ] as const
+            ).map((mode) => (
+              <button
+                key={mode}
+                type="button"
+                onClick={() =>
+                  setSyncTransport(mode)
+                }
+                className={`rounded-lg px-2 py-1 font-bold transition ${
+                  syncTransport === mode
+                    ? "bg-emerald-500 text-slate-950"
+                    : "text-slate-400 hover:text-white"
+                }`}
+              >
+                {mode === "HTTP_POLLING"
+                  ? "POLLING"
+                  : mode}
+              </button>
+            ))}
           </div>
-        </header>
+
+          <Link
+            href="/dispatch"
+            className="rounded-xl border border-slate-700 bg-slate-900 px-3.5 py-2 font-mono text-xs font-bold text-emerald-300 hover:border-emerald-500/40"
+          >
+            Dispatch Pass →
+          </Link>
+
+          <button
+            type="button"
+            onClick={() => void loadOrders()}
+            className="rounded-xl border border-slate-700 bg-slate-800 px-3.5 py-2 font-mono text-xs font-bold text-white hover:bg-slate-700"
+          >
+            ↻ Sync Now
+          </button>
+        </>
+      }
+    >
+      <div className="space-y-6">
+        {/* KDS Station & Kitchen Filter Bar */}
+        <section className="grid gap-3 rounded-2xl border border-slate-800 bg-slate-900/60 p-4 sm:grid-cols-3">
+          <label className="block">
+            <span className="font-mono text-[10px] font-bold uppercase text-slate-400">
+              Kitchen Facility
+            </span>
+            <select
+              value={kitchenFilter}
+              onChange={(e) =>
+                setKitchenFilter(e.target.value)
+              }
+              className="mt-1 w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-xs text-white"
+            >
+              <option value="ALL">
+                All Kitchen Hubs
+              </option>
+              {KITCHENS_DB.map((k) => (
+                <option key={k.id} value={k.id}>
+                  {k.id} • {k.name}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label className="block">
+            <span className="font-mono text-[10px] font-bold uppercase text-slate-400">
+              Virtual Brand
+            </span>
+            <select
+              value={brandFilter}
+              onChange={(e) =>
+                setBrandFilter(e.target.value)
+              }
+              className="mt-1 w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-xs text-white"
+            >
+              <option value="ALL">
+                All Virtual Brands
+              </option>
+              {BRANDS_DB.map((b) => (
+                <option key={b.id} value={b.id}>
+                  {b.name}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label className="block">
+            <span className="font-mono text-[10px] font-bold uppercase text-slate-400">
+              Prep Station Filter
+            </span>
+            <select
+              value={stationFilter}
+              onChange={(e) =>
+                setStationFilter(e.target.value)
+              }
+              className="mt-1 w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-xs text-white"
+            >
+              <option value="ALL">
+                All Stations (Grill / Fryer /
+                Assembly / Cold Prep)
+              </option>
+              {STATIONS.map((s) => (
+                <option key={s} value={s}>
+                  {s} Station
+                </option>
+              ))}
+            </select>
+          </label>
+        </section>
 
         {error && (
-          <div className="mb-5 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-700">
-            {error}
+          <div className="rounded-xl border border-red-500/40 bg-red-500/10 px-4 py-3 font-mono text-xs text-red-300">
+            ⚠ {error}
           </div>
         )}
 
-        <section className="mb-6 grid grid-cols-3 gap-2 sm:gap-4">
-          <div className="rounded-xl bg-white p-3 shadow-sm">
-            <p className="text-xs font-semibold uppercase text-slate-500">
-              Pending
+        {depletionNotice && (
+          <div className="rounded-xl border border-emerald-500/40 bg-emerald-500/10 px-4 py-3 font-mono text-xs text-emerald-300">
+            ✓ {depletionNotice}
+          </div>
+        )}
+
+        {/* Queue Summary Counters */}
+        <section className="grid grid-cols-3 gap-4">
+          <div className="rounded-2xl border border-amber-500/30 bg-amber-500/5 p-4">
+            <p className="font-mono text-xs font-bold uppercase text-amber-300">
+              1. Pending Queue
             </p>
-            <p className="mt-1 text-2xl font-black text-slate-900">
+            <p className="mt-1 text-3xl font-black text-white">
               {pendingOrders.length}
             </p>
+            <p className="text-[11px] text-slate-400">
+              Awaiting cook acceptance & stock depletion
+            </p>
           </div>
 
-          <div className="rounded-xl bg-white p-3 shadow-sm">
-            <p className="text-xs font-semibold uppercase text-slate-500">
-              Preparing
+          <div className="rounded-2xl border border-sky-500/30 bg-sky-500/5 p-4">
+            <p className="font-mono text-xs font-bold uppercase text-sky-300">
+              2. Preparing on Line
             </p>
-            <p className="mt-1 text-2xl font-black text-slate-900">
+            <p className="mt-1 text-3xl font-black text-white">
               {preparingOrders.length}
             </p>
+            <p className="text-[11px] text-slate-400">
+              Ingredients deducted from active ledger
+            </p>
           </div>
 
-          <div className="rounded-xl bg-white p-3 shadow-sm">
-            <p className="text-xs font-semibold uppercase text-slate-500">
-              Ready
+          <div className="rounded-2xl border border-emerald-500/30 bg-emerald-500/5 p-4">
+            <p className="font-mono text-xs font-bold uppercase text-emerald-300">
+              3. Staged Ready
             </p>
-            <p className="mt-1 text-2xl font-black text-slate-900">
+            <p className="mt-1 text-3xl font-black text-white">
               {readyOrders.length}
+            </p>
+            <p className="text-[11px] text-slate-400">
+              Ready for courier handoff at Dispatch
             </p>
           </div>
         </section>
 
-        {loading && (
-          <div className="rounded-2xl bg-white p-8 text-center text-slate-500 shadow-sm">
-            Loading kitchen orders...
+        {loading ? (
+          <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-10 text-center font-mono text-sm text-slate-400">
+            Loading KDS tickets...
+          </div>
+        ) : activeOrders.length === 0 ? (
+          <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-12 text-center">
+            <p className="text-lg font-bold text-white">
+              No active kitchen orders waiting for preparation
+            </p>
+            <p className="mt-1 text-xs text-slate-400">
+              New tickets injected via webhooks or Order Injection will appear here automatically.
+            </p>
+          </div>
+        ) : (
+          <div className="grid gap-6 lg:grid-cols-3">
+            <section>
+              <div className="mb-3 flex items-center justify-between border-b border-amber-500/30 pb-2">
+                <h2 className="font-mono text-sm font-black uppercase text-amber-300">
+                  Pending Tickets
+                </h2>
+                <span className="rounded-full bg-amber-500/20 px-2.5 py-0.5 font-mono text-xs font-bold text-amber-300">
+                  {pendingOrders.length}
+                </span>
+              </div>
+              <div className="space-y-4">
+                {pendingOrders.map(
+                  renderOrderCard,
+                )}
+              </div>
+            </section>
+
+            <section>
+              <div className="mb-3 flex items-center justify-between border-b border-sky-500/30 pb-2">
+                <h2 className="font-mono text-sm font-black uppercase text-sky-300">
+                  On Station (Preparing)
+                </h2>
+                <span className="rounded-full bg-sky-500/20 px-2.5 py-0.5 font-mono text-xs font-bold text-sky-300">
+                  {preparingOrders.length}
+                </span>
+              </div>
+              <div className="space-y-4">
+                {preparingOrders.map(
+                  renderOrderCard,
+                )}
+              </div>
+            </section>
+
+            <section>
+              <div className="mb-3 flex items-center justify-between border-b border-emerald-500/30 pb-2">
+                <h2 className="font-mono text-sm font-black uppercase text-emerald-300">
+                  Ready for Pickup
+                </h2>
+                <span className="rounded-full bg-emerald-500/20 px-2.5 py-0.5 font-mono text-xs font-bold text-emerald-300">
+                  {readyOrders.length}
+                </span>
+              </div>
+              <div className="space-y-4">
+                {readyOrders.map(renderOrderCard)}
+              </div>
+            </section>
           </div>
         )}
-
-        {!loading &&
-          activeOrders.length === 0 && (
-            <div className="rounded-2xl bg-white p-10 text-center shadow-sm">
-              <p className="text-lg font-bold text-slate-900">
-                No active orders
-              </p>
-
-              <p className="mt-1 text-sm text-slate-500">
-                New orders will appear here automatically.
-              </p>
-            </div>
-          )}
-
-        {!loading &&
-          activeOrders.length > 0 && (
-            <div className="grid gap-5 lg:grid-cols-3">
-              <section>
-                <div className="mb-3 flex items-center justify-between">
-                  <h2 className="text-lg font-black text-slate-900">
-                    New
-                  </h2>
-
-                  <span className="rounded-full bg-slate-200 px-3 py-1 text-xs font-bold text-slate-700">
-                    {pendingOrders.length}
-                  </span>
-                </div>
-
-                <div className="space-y-4">
-                  {pendingOrders.map(
-                    renderOrderCard
-                  )}
-                </div>
-              </section>
-
-              <section>
-                <div className="mb-3 flex items-center justify-between">
-                  <h2 className="text-lg font-black text-slate-900">
-                    Preparing
-                  </h2>
-
-                  <span className="rounded-full bg-amber-100 px-3 py-1 text-xs font-bold text-amber-800">
-                    {preparingOrders.length}
-                  </span>
-                </div>
-
-                <div className="space-y-4">
-                  {preparingOrders.map(
-                    renderOrderCard
-                  )}
-                </div>
-              </section>
-
-              <section>
-                <div className="mb-3 flex items-center justify-between">
-                  <h2 className="text-lg font-black text-slate-900">
-                    Ready
-                  </h2>
-
-                  <span className="rounded-full bg-emerald-100 px-3 py-1 text-xs font-bold text-emerald-800">
-                    {readyOrders.length}
-                  </span>
-                </div>
-
-                <div className="space-y-4">
-                  {readyOrders.map(
-                    renderOrderCard
-                  )}
-                </div>
-              </section>
-            </div>
-          )}
       </div>
-    </main>
+    </AppShell>
   );
 }
