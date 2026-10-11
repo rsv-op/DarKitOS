@@ -3,9 +3,9 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Dark OS",
+  title: "Northstar — Signal in the noise",
   description:
-    "Unified cloud kitchen operations system",
+    "The operating system for remarkable teams.",
 };
 
 export default function RootLayout({
