@@ -37,7 +37,8 @@ export type PermissionCode =
   | "INVENTORY_VIEW"
   | "INVENTORY_MANAGE"
   | "ORDER_CANCEL"
-  | "STAFF_MANAGE";
+  | "STAFF_MANAGE"
+  | "ORDER_INJECT";
 
 export type OrderStatus =
   | "PENDING"
@@ -66,6 +67,25 @@ export type CancellationSource =
   | "SYSTEM"
   | "MANUAL";
 
+export type CancellationStage =
+  | "BEFORE_PREP"
+  | "DURING_OR_AFTER_PREP"
+  | "AFTER_PICKUP";
+
+export type CancellationResolution =
+  | "INVENTORY_RESTORED"
+  | "UNAVOIDABLE_LOSS"
+  | "FOOD_AND_LABOR_LOSS"
+  | "AGGREGATOR_ACCOUNTING_CLAIM";
+
+export type InventoryMovementType =
+  | "SALE_CONSUMPTION"
+  | "RESTOCK"
+  | "MANUAL_ADJUSTMENT"
+  | "WASTE"
+  | "LOSS"
+  | "CANCELLATION_RESTORE";
+
 export type OrderEventType =
   | "RECEIVED"
   | "INVENTORY_CHECKED"
@@ -77,7 +97,11 @@ export type OrderEventType =
   | "DISPATCHED"
   | "CANCELLED"
   | "INVENTORY_WARNING"
-  | "INVENTORY_UNAVAILABLE";
+  | "INVENTORY_UNAVAILABLE"
+  | "INVENTORY_DEPLETED"
+  | "INVENTORY_RESTORED"
+  | "LOSS_RECORDED"
+  | "CLAIM_LOGGED";
 
 export interface BrandConfig {
   id: DbaBrand;
@@ -85,6 +109,8 @@ export interface BrandConfig {
   code: string;
   active: boolean;
   colorTheme: string;
+  tagline?: string;
+  cuisine?: string;
 }
 
 export interface KitchenConfig {
@@ -95,6 +121,7 @@ export interface KitchenConfig {
   areaCode?: string;
   active: boolean;
   timezone: string;
+  capacityPerHour?: number;
 }
 
 export interface BrandKitchenConfig {
@@ -110,6 +137,7 @@ export interface Employee {
   role: EmployeeRole;
   kitchenId?: string;
   active: boolean;
+  pin?: string;
 }
 
 export interface Permission {
@@ -139,6 +167,27 @@ export interface InventoryItem {
   reorderThreshold: number;
   costPerUnit: number;
   lastRestocked: string;
+  kitchenId?: string;
+  expectedYieldPct?: number;
+  actualYieldPct?: number;
+}
+
+export interface InventoryMovement {
+  id: string;
+  inventoryItemId: string;
+  itemName: string;
+  sku: string;
+  kitchenId: string;
+  type: InventoryMovementType;
+  quantity: number;
+  previousStock: number;
+  newStock: number;
+  unit: string;
+  costImpact: number;
+  orderId?: string;
+  actor: string;
+  reason: string;
+  timestamp: string;
 }
 
 export interface RecipeIngredient {
@@ -153,6 +202,8 @@ export interface MenuItem {
   price: number;
   station: KitchenStation;
   recipe: RecipeIngredient[];
+  active?: boolean;
+  prepTimeMins?: number;
 }
 
 export interface OrderItem {
@@ -160,6 +211,7 @@ export interface OrderItem {
   menuItemId: string;
   name: string;
   quantity: number;
+  price?: number;
   notes?: string;
   station: KitchenStation;
 }
@@ -175,6 +227,7 @@ export interface OrderEvent {
 export interface Order {
   id: string;
   externalOrderId?: string;
+  idempotencyKey?: string;
 
   brandId: DbaBrand;
   kitchenId: string;
@@ -183,8 +236,12 @@ export interface Order {
   source: OrderSource;
 
   status: OrderStatus;
+  priority?: "NORMAL" | "RUSH" | "VIP";
 
   items: OrderItem[];
+  totalAmount?: number;
+  itemCount?: number;
+  notes?: string;
 
   customerName?: string;
   driverName?: string;
@@ -201,16 +258,155 @@ export interface Order {
   driverAssignedAt?: string;
   pickedUpAt?: string;
   dispatchedAt?: string;
+  cancelledAt?: string;
 
   cancellationSource?: CancellationSource;
   cancellationReason?: string;
   cancelledBy?: string;
+  cancellationStage?: CancellationStage;
+  cancellationResolution?: CancellationResolution;
+  lossAmount?: number;
+  claimAmount?: number;
 
   inventoryDecision?: InventoryDecision;
   inventoryWarnings?: string[];
   inventoryUnavailable?: string[];
+  inventoryConsumed?: boolean;
+  inventoryRestored?: boolean;
 
   events: OrderEvent[];
+}
+
+export interface CancellationRecord {
+  id: string;
+  orderId: string;
+  brandId: DbaBrand;
+  kitchenId: string;
+  channel: OrderChannel;
+  stage: CancellationStage;
+  previousStatus: OrderStatus;
+  resolution: CancellationResolution;
+  source: CancellationSource;
+  reason: string;
+  actor: string;
+  timestamp: string;
+  financialLoss: number;
+  claimAmount: number;
+  restoredIngredients: {
+    inventoryItemId: string;
+    name: string;
+    quantity: number;
+  }[];
+  lostIngredients: {
+    inventoryItemId: string;
+    name: string;
+    quantity: number;
+  }[];
+  dispatchEvidence?: {
+    driverName?: string;
+    readyAt?: string;
+    driverAssignedAt?: string;
+    pickedUpAt?: string;
+    dispatchedAt?: string;
+  };
+}
+
+export interface OperationalActivity {
+  id: string;
+  type: string;
+  category:
+    | "ORDER"
+    | "INVENTORY"
+    | "CANCELLATION"
+    | "DISPATCH"
+    | "SYSTEM"
+    | "AUTH"
+    | "CLOUD7";
+  title: string;
+  details: string;
+  actor: string;
+  orderId?: string;
+  kitchenId?: string;
+  brandId?: DbaBrand;
+  timestamp: string;
+  severity: "info" | "success" | "warning" | "error";
+}
+
+export interface WebhookIdempotencyEntry {
+  idempotencyKey: string;
+  orderId: string;
+  status: "processing" | "completed" | "failed";
+  channel: OrderChannel;
+  brandId: DbaBrand;
+  kitchenId: string;
+  payloadSummary: string;
+  createdAt: string;
+  hitCount: number;
+}
+
+export interface OutboxEvent {
+  id: string;
+  eventType: string;
+  aggregateId: string;
+  payload: string;
+  attempt: number;
+  maxAttempts: number;
+  backoffSchedule: string;
+  status: "PENDING" | "DELIVERED" | "RETRYING" | "DLQ";
+  createdAt: string;
+}
+
+export interface RevenueLeakageVector {
+  id: string;
+  vector:
+    | "Failed Payments"
+    | "Expired Discounts"
+    | "Unbilled Usage"
+    | "Contract-to-Billing Drift"
+    | "Lapsed Renewals";
+  signature: string;
+  impactLevel: "Severe" | "High" | "Moderate";
+  impactNote: string;
+  potentialRevenue: number;
+  actualCollected: number;
+  leakedAmount: number;
+  affectedAccounts: number;
+  status: "DETECTED" | "AUDITING" | "RECOVERED";
+}
+
+export interface VirtualFileAsset {
+  id: string;
+  name: string;
+  category:
+    | "Health Certificate"
+    | "SOP Manual"
+    | "Menu Photography"
+    | "Recipe Card"
+    | "Architecture ADR"
+    | "Financial Audit";
+  size: string;
+  mimeType: string;
+  kitchenId?: string;
+  brandId?: DbaBrand;
+  uploadedBy: string;
+  updatedAt: string;
+  status: "VERIFIED" | "PENDING_REVIEW" | "ARCHIVED";
+  content: string;
+}
+
+export interface SystemSettings {
+  currency: "USD" | "INR" | "EUR";
+  timezone: string;
+  theme: "obsidian" | "midnight" | "cyber-emerald" | "titanium";
+  fluidAnimations: boolean;
+  syncMode: "WEBSOCKET" | "SSE" | "HTTP_POLLING";
+  autoAcceptOrders: boolean;
+  lowStockMultiplier: number;
+  prepSlaMinutes: number;
+  dispatchSlaMinutes: number;
+  rlsEnforcement: "STRICT_LOCAL_TX" | "SESSION";
+  circuitBreakerState: "CLOSED" | "HALF_OPEN" | "OPEN";
+  rateLimitRps: number;
 }
 
 export interface InventoryEvaluation {
@@ -234,6 +430,8 @@ export const BRANDS_DB: BrandConfig[] = [
     code: "BF",
     active: true,
     colorTheme: "amber",
+    tagline: "Artisanal Smash Burgers & Truffle Sides",
+    cuisine: "American Craft Grill",
   },
   {
     id: "TacoMatrix",
@@ -241,6 +439,8 @@ export const BRANDS_DB: BrandConfig[] = [
     code: "TM",
     active: true,
     colorTheme: "emerald",
+    tagline: "Slow-Braised Birria & Street Masa",
+    cuisine: "Modern Mexican Taqueria",
   },
   {
     id: "WingProtocol",
@@ -248,6 +448,8 @@ export const BRANDS_DB: BrandConfig[] = [
     code: "WP",
     active: true,
     colorTheme: "red",
+    tagline: "High-Heat Glazed Jumbo Wings",
+    cuisine: "Precision Fried Poultry",
   },
   {
     id: "GreenBowl",
@@ -255,6 +457,8 @@ export const BRANDS_DB: BrandConfig[] = [
     code: "GB",
     active: true,
     colorTheme: "cyan",
+    tagline: "Sashimi Poke & Macro-Balanced Bowls",
+    cuisine: "Pacific Raw & Greens",
   },
 ];
 
@@ -267,6 +471,7 @@ export const KITCHENS_DB: KitchenConfig[] = [
     areaCode: "GGN-01",
     active: true,
     timezone: "Asia/Kolkata",
+    capacityPerHour: 120,
   },
   {
     id: "K2",
@@ -276,6 +481,7 @@ export const KITCHENS_DB: KitchenConfig[] = [
     areaCode: "NDA-02",
     active: true,
     timezone: "Asia/Kolkata",
+    capacityPerHour: 95,
   },
   {
     id: "K3",
@@ -285,6 +491,7 @@ export const KITCHENS_DB: KitchenConfig[] = [
     areaCode: "DEL-03",
     active: true,
     timezone: "Asia/Kolkata",
+    capacityPerHour: 110,
   },
   {
     id: "K4",
@@ -294,15 +501,32 @@ export const KITCHENS_DB: KitchenConfig[] = [
     areaCode: "CYB-04",
     active: true,
     timezone: "Asia/Kolkata",
+    capacityPerHour: 85,
   },
 ];
 
-export const BRAND_KITCHENS_DB: BrandKitchenConfig[] =
-  BRANDS_DB.map((brand) => ({
-    brandId: brand.id,
-    kitchenId: "K1",
-    active: true,
-  }));
+export const BRAND_KITCHENS_DB: BrandKitchenConfig[] = [
+  // K1 Gurugram Central Hub serves all 4 virtual brands
+  { brandId: "BurgerForge", kitchenId: "K1", active: true },
+  { brandId: "TacoMatrix", kitchenId: "K1", active: true },
+  { brandId: "WingProtocol", kitchenId: "K1", active: true },
+  { brandId: "GreenBowl", kitchenId: "K1", active: true },
+  // K2 Noida Sector 62
+  { brandId: "BurgerForge", kitchenId: "K2", active: true },
+  { brandId: "TacoMatrix", kitchenId: "K2", active: true },
+  { brandId: "WingProtocol", kitchenId: "K2", active: false },
+  { brandId: "GreenBowl", kitchenId: "K2", active: true },
+  // K3 South Delhi Dark Kitchen
+  { brandId: "BurgerForge", kitchenId: "K3", active: true },
+  { brandId: "TacoMatrix", kitchenId: "K3", active: false },
+  { brandId: "WingProtocol", kitchenId: "K3", active: true },
+  { brandId: "GreenBowl", kitchenId: "K3", active: true },
+  // K4 Cyber City Express Hatch
+  { brandId: "BurgerForge", kitchenId: "K4", active: true },
+  { brandId: "TacoMatrix", kitchenId: "K4", active: true },
+  { brandId: "WingProtocol", kitchenId: "K4", active: true },
+  { brandId: "GreenBowl", kitchenId: "K4", active: false },
+];
 
 export const EMPLOYEES_DB: Employee[] = [
   {
@@ -311,6 +535,7 @@ export const EMPLOYEES_DB: Employee[] = [
     name: "Patric Revuelto",
     role: "OWNER",
     active: true,
+    pin: "3333",
   },
   {
     id: "EMP-K1-MGR-01",
@@ -319,6 +544,7 @@ export const EMPLOYEES_DB: Employee[] = [
     role: "MANAGER",
     kitchenId: "K1",
     active: true,
+    pin: "9999",
   },
   {
     id: "EMP-K1-COOK-01",
@@ -327,6 +553,16 @@ export const EMPLOYEES_DB: Employee[] = [
     role: "LINE_COOK",
     kitchenId: "K1",
     active: true,
+    pin: "1111",
+  },
+  {
+    id: "EMP-K1-DISP-01",
+    employeeCode: "3001",
+    name: "Arjun Mehta",
+    role: "DISPATCH",
+    kitchenId: "K1",
+    active: true,
+    pin: "2222",
   },
   {
     id: "EMP-K2-MGR-01",
@@ -341,6 +577,14 @@ export const EMPLOYEES_DB: Employee[] = [
     employeeCode: "2002",
     name: "Sunita Rao",
     role: "LINE_COOK",
+    kitchenId: "K2",
+    active: true,
+  },
+  {
+    id: "EMP-K2-DISP-01",
+    employeeCode: "3002",
+    name: "Karan Saxena",
+    role: "DISPATCH",
     kitchenId: "K2",
     active: true,
   },
@@ -361,6 +605,14 @@ export const EMPLOYEES_DB: Employee[] = [
     active: true,
   },
   {
+    id: "EMP-K3-DISP-01",
+    employeeCode: "3003",
+    name: "Neha Gupta",
+    role: "DISPATCH",
+    kitchenId: "K3",
+    active: true,
+  },
+  {
     id: "EMP-K4-MGR-01",
     employeeCode: "0004",
     name: "Deepesh Nair",
@@ -373,6 +625,14 @@ export const EMPLOYEES_DB: Employee[] = [
     employeeCode: "2004",
     name: "Anjali Das",
     role: "LINE_COOK",
+    kitchenId: "K4",
+    active: true,
+  },
+  {
+    id: "EMP-K4-DISP-01",
+    employeeCode: "3004",
+    name: "Rohan Joshi",
+    role: "DISPATCH",
     kitchenId: "K4",
     active: true,
   },
@@ -419,6 +679,11 @@ export const PERMISSIONS_DB: Permission[] = [
     code: "STAFF_MANAGE",
     description: "Manage staff access.",
   },
+  {
+    id: "PERM-ORDER-INJECT",
+    code: "ORDER_INJECT",
+    description: "Inject canonical orders into kitchen pipeline.",
+  },
 ];
 
 export const ROLE_PERMISSIONS_DB: RolePermission[] = [
@@ -430,11 +695,16 @@ export const ROLE_PERMISSIONS_DB: RolePermission[] = [
   { role: "OWNER", permissionId: "PERM-INVENTORY-MANAGE" },
   { role: "OWNER", permissionId: "PERM-ORDER-CANCEL" },
   { role: "OWNER", permissionId: "PERM-STAFF-MANAGE" },
+  { role: "OWNER", permissionId: "PERM-ORDER-INJECT" },
+  { role: "MANAGER", permissionId: "PERM-OWNER-VIEW" },
   { role: "MANAGER", permissionId: "PERM-KITCHEN-OPERATE" },
+  { role: "MANAGER", permissionId: "PERM-COOK-ORDERS" },
+  { role: "MANAGER", permissionId: "PERM-DISPATCH-ORDERS" },
   { role: "MANAGER", permissionId: "PERM-INVENTORY-VIEW" },
   { role: "MANAGER", permissionId: "PERM-INVENTORY-MANAGE" },
   { role: "MANAGER", permissionId: "PERM-ORDER-CANCEL" },
   { role: "MANAGER", permissionId: "PERM-STAFF-MANAGE" },
+  { role: "MANAGER", permissionId: "PERM-ORDER-INJECT" },
   { role: "LINE_COOK", permissionId: "PERM-KITCHEN-OPERATE" },
   { role: "LINE_COOK", permissionId: "PERM-COOK-ORDERS" },
   { role: "LINE_COOK", permissionId: "PERM-INVENTORY-VIEW" },
@@ -453,7 +723,10 @@ export const INVENTORY_DB: InventoryItem[] = [
     unit: "units",
     reorderThreshold: 30,
     costPerUnit: 1.2,
-    lastRestocked: new Date().toISOString(),
+    lastRestocked: "2026-10-11T04:00:00.000Z",
+    kitchenId: "K1",
+    expectedYieldPct: 88,
+    actualYieldPct: 85.4,
   },
   {
     id: "INV-002",
@@ -464,7 +737,10 @@ export const INVENTORY_DB: InventoryItem[] = [
     unit: "units",
     reorderThreshold: 25,
     costPerUnit: 0.4,
-    lastRestocked: new Date().toISOString(),
+    lastRestocked: "2026-10-11T04:00:00.000Z",
+    kitchenId: "K1",
+    expectedYieldPct: 98,
+    actualYieldPct: 96.2,
   },
   {
     id: "INV-003",
@@ -475,7 +751,10 @@ export const INVENTORY_DB: InventoryItem[] = [
     unit: "lbs",
     reorderThreshold: 10,
     costPerUnit: 4.5,
-    lastRestocked: new Date().toISOString(),
+    lastRestocked: "2026-10-11T04:00:00.000Z",
+    kitchenId: "K1",
+    expectedYieldPct: 80,
+    actualYieldPct: 74.5,
   },
   {
     id: "INV-004",
@@ -486,7 +765,10 @@ export const INVENTORY_DB: InventoryItem[] = [
     unit: "units",
     reorderThreshold: 50,
     costPerUnit: 0.1,
-    lastRestocked: new Date().toISOString(),
+    lastRestocked: "2026-10-11T04:00:00.000Z",
+    kitchenId: "K1",
+    expectedYieldPct: 97,
+    actualYieldPct: 95.8,
   },
   {
     id: "INV-005",
@@ -497,7 +779,10 @@ export const INVENTORY_DB: InventoryItem[] = [
     unit: "units",
     reorderThreshold: 100,
     costPerUnit: 0.55,
-    lastRestocked: new Date().toISOString(),
+    lastRestocked: "2026-10-11T04:00:00.000Z",
+    kitchenId: "K1",
+    expectedYieldPct: 85,
+    actualYieldPct: 81.2,
   },
   {
     id: "INV-006",
@@ -508,7 +793,10 @@ export const INVENTORY_DB: InventoryItem[] = [
     unit: "oz",
     reorderThreshold: 20,
     costPerUnit: 0.85,
-    lastRestocked: new Date().toISOString(),
+    lastRestocked: "2026-10-11T04:00:00.000Z",
+    kitchenId: "K1",
+    expectedYieldPct: 94,
+    actualYieldPct: 88.0,
   },
   {
     id: "INV-007",
@@ -519,7 +807,10 @@ export const INVENTORY_DB: InventoryItem[] = [
     unit: "lbs",
     reorderThreshold: 8,
     costPerUnit: 12,
-    lastRestocked: new Date().toISOString(),
+    lastRestocked: "2026-10-11T04:00:00.000Z",
+    kitchenId: "K1",
+    expectedYieldPct: 82,
+    actualYieldPct: 79.5,
   },
   {
     id: "INV-008",
@@ -530,7 +821,38 @@ export const INVENTORY_DB: InventoryItem[] = [
     unit: "units",
     reorderThreshold: 15,
     costPerUnit: 0.9,
-    lastRestocked: new Date().toISOString(),
+    lastRestocked: "2026-10-11T04:00:00.000Z",
+    kitchenId: "K1",
+    expectedYieldPct: 78,
+    actualYieldPct: 73.0,
+  },
+  {
+    id: "INV-009",
+    sku: "CHED-01",
+    name: "Aged Sharp Cheddar Slices",
+    category: "Dairy",
+    currentStock: 95,
+    unit: "units",
+    reorderThreshold: 30,
+    costPerUnit: 0.35,
+    lastRestocked: "2026-10-11T04:00:00.000Z",
+    kitchenId: "K1",
+    expectedYieldPct: 99,
+    actualYieldPct: 98.1,
+  },
+  {
+    id: "INV-010",
+    sku: "PACK-01",
+    name: "Thermal Vent Eco-Boxes",
+    category: "Packaging",
+    currentStock: 310,
+    unit: "units",
+    reorderThreshold: 80,
+    costPerUnit: 0.28,
+    lastRestocked: "2026-10-11T04:00:00.000Z",
+    kitchenId: "K1",
+    expectedYieldPct: 100,
+    actualYieldPct: 99.4,
   },
 ];
 
@@ -543,6 +865,8 @@ export const MENU_CATALOG: MenuItem[] = [
     name: "Double Smash Burger",
     price: 12.99,
     station: "Grill",
+    active: true,
+    prepTimeMins: 9,
     recipe: [
       {
         inventoryItemId: "INV-001",
@@ -560,7 +884,32 @@ export const MENU_CATALOG: MenuItem[] = [
     name: "Truffle Fries",
     price: 6.49,
     station: "Fryer",
+    active: true,
+    prepTimeMins: 6,
     recipe: [],
+  },
+  {
+    id: "MENU-BF-03",
+    brandId: "BurgerForge",
+    name: "Oklahoma Onion Melt",
+    price: 14.49,
+    station: "Grill",
+    active: true,
+    prepTimeMins: 10,
+    recipe: [
+      {
+        inventoryItemId: "INV-001",
+        quantityRequired: 2,
+      },
+      {
+        inventoryItemId: "INV-002",
+        quantityRequired: 1,
+      },
+      {
+        inventoryItemId: "INV-009",
+        quantityRequired: 2,
+      },
+    ],
   },
   {
     id: "MENU-TM-01",
@@ -568,6 +917,8 @@ export const MENU_CATALOG: MenuItem[] = [
     name: "Birria Taco Trio",
     price: 14.5,
     station: "Assembly",
+    active: true,
+    prepTimeMins: 8,
     recipe: [
       {
         inventoryItemId: "INV-003",
@@ -580,11 +931,36 @@ export const MENU_CATALOG: MenuItem[] = [
     ],
   },
   {
+    id: "MENU-TM-02",
+    brandId: "TacoMatrix",
+    name: "Avocado Quesabirria Vampiro",
+    price: 15.99,
+    station: "Assembly",
+    active: true,
+    prepTimeMins: 9,
+    recipe: [
+      {
+        inventoryItemId: "INV-003",
+        quantityRequired: 0.5,
+      },
+      {
+        inventoryItemId: "INV-004",
+        quantityRequired: 2,
+      },
+      {
+        inventoryItemId: "INV-008",
+        quantityRequired: 1,
+      },
+    ],
+  },
+  {
     id: "MENU-WP-01",
     brandId: "WingProtocol",
     name: "12pc Ghost Pepper Wings",
     price: 16.99,
     station: "Fryer",
+    active: true,
+    prepTimeMins: 12,
     recipe: [
       {
         inventoryItemId: "INV-005",
@@ -597,11 +973,32 @@ export const MENU_CATALOG: MenuItem[] = [
     ],
   },
   {
+    id: "MENU-WP-02",
+    brandId: "WingProtocol",
+    name: "6pc Tactical Fire Wings",
+    price: 9.99,
+    station: "Fryer",
+    active: true,
+    prepTimeMins: 10,
+    recipe: [
+      {
+        inventoryItemId: "INV-005",
+        quantityRequired: 6,
+      },
+      {
+        inventoryItemId: "INV-006",
+        quantityRequired: 2,
+      },
+    ],
+  },
+  {
     id: "MENU-GB-01",
     brandId: "GreenBowl",
     name: "Ahi Tuna Poke Bowl",
     price: 17.25,
     station: "Cold Prep",
+    active: true,
+    prepTimeMins: 7,
     recipe: [
       {
         inventoryItemId: "INV-007",
@@ -613,20 +1010,39 @@ export const MENU_CATALOG: MenuItem[] = [
       },
     ],
   },
+  {
+    id: "MENU-GB-02",
+    brandId: "GreenBowl",
+    name: "Double Avocado Tataki Bowl",
+    price: 18.75,
+    station: "Cold Prep",
+    active: true,
+    prepTimeMins: 7,
+    recipe: [
+      {
+        inventoryItemId: "INV-007",
+        quantityRequired: 0.5,
+      },
+      {
+        inventoryItemId: "INV-008",
+        quantityRequired: 2,
+      },
+    ],
+  },
 ];
 
-function getRequiredIngredients(
+export function getRequiredIngredients(
   order: Order,
+  menuCatalog: MenuItem[] = MENU_CATALOG,
 ): Map<string, number> {
   const requirements = new Map<string, number>();
 
   for (const orderItem of order.items) {
-    const menuItem =
-      MENU_CATALOG.find(
-        (item) =>
-          item.id === orderItem.menuItemId ||
-          item.name === orderItem.name,
-      );
+    const menuItem = menuCatalog.find(
+      (item) =>
+        item.id === orderItem.menuItemId ||
+        item.name === orderItem.name,
+    );
 
     if (!menuItem) {
       continue;
@@ -640,9 +1056,13 @@ function getRequiredIngredients(
 
       requirements.set(
         ingredient.inventoryItemId,
-        existing +
-          ingredient.quantityRequired *
-            orderItem.quantity,
+        Number(
+          (
+            existing +
+            ingredient.quantityRequired *
+              orderItem.quantity
+          ).toFixed(4),
+        ),
       );
     }
   }
@@ -653,9 +1073,12 @@ function getRequiredIngredients(
 export function evaluateOrderInventory(
   order: Order,
   inventory: InventoryItem[],
+  menuCatalog: MenuItem[] = MENU_CATALOG,
 ): InventoryEvaluation {
-  const requirements =
-    getRequiredIngredients(order);
+  const requirements = getRequiredIngredients(
+    order,
+    menuCatalog,
+  );
 
   const lowStockItems: string[] = [];
   const insufficientStockItems: string[] = [];
@@ -664,10 +1087,9 @@ export function evaluateOrderInventory(
     inventoryItemId,
     requiredQuantity,
   ] of requirements) {
-    const inventoryItem =
-      inventory.find(
-        (item) => item.id === inventoryItemId,
-      );
+    const inventoryItem = inventory.find(
+      (item) => item.id === inventoryItemId,
+    );
 
     if (!inventoryItem) {
       insufficientStockItems.push(
@@ -720,12 +1142,13 @@ export function evaluateOrderInventory(
 export function processOrderDepletion(
   order: Order,
   inventory: InventoryItem[],
+  menuCatalog: MenuItem[] = MENU_CATALOG,
 ): OrderDepletionResult {
-  const evaluation =
-    evaluateOrderInventory(
-      order,
-      inventory,
-    );
+  const evaluation = evaluateOrderInventory(
+    order,
+    inventory,
+    menuCatalog,
+  );
 
   if (
     evaluation.inventoryDecision ===
@@ -745,8 +1168,10 @@ export function processOrderDepletion(
     };
   }
 
-  const requirements =
-    getRequiredIngredients(order);
+  const requirements = getRequiredIngredients(
+    order,
+    menuCatalog,
+  );
 
   const updatedInventory = inventory.map(
     (inventoryItem) => {
@@ -763,9 +1188,12 @@ export function processOrderDepletion(
 
       return {
         ...inventoryItem,
-        currentStock:
-          inventoryItem.currentStock -
-          required,
+        currentStock: Number(
+          (
+            inventoryItem.currentStock -
+            required
+          ).toFixed(4),
+        ),
       };
     },
   );
@@ -775,12 +1203,11 @@ export function processOrderDepletion(
   for (const [
     inventoryItemId,
   ] of requirements) {
-    const item =
-      inventory.find(
-        (inventoryItem) =>
-          inventoryItem.id ===
-          inventoryItemId,
-      );
+    const item = inventory.find(
+      (inventoryItem) =>
+        inventoryItem.id ===
+        inventoryItemId,
+    );
 
     if (item) {
       depletedItems.push(item.name);
@@ -792,7 +1219,7 @@ export function processOrderDepletion(
       .filter(
         (item) =>
           item.currentStock <=
-          item.reorderThreshold &&
+            item.reorderThreshold &&
           requirements.has(item.id),
       )
       .map((item) => item.name);
@@ -805,4 +1232,53 @@ export function processOrderDepletion(
       evaluation.inventoryDecision,
     insufficientStockItems: [],
   };
+}
+
+export function calculateOrderRecipeCost(
+  order: Order,
+  inventory: InventoryItem[] = INVENTORY_DB,
+  menuCatalog: MenuItem[] = MENU_CATALOG,
+): number {
+  const requirements = getRequiredIngredients(
+    order,
+    menuCatalog,
+  );
+  let totalCost = 0;
+
+  for (const [
+    inventoryItemId,
+    requiredQty,
+  ] of requirements) {
+    const item = inventory.find(
+      (i) => i.id === inventoryItemId,
+    );
+    if (item) {
+      totalCost +=
+        item.costPerUnit * requiredQty;
+    }
+  }
+
+  return Number(totalCost.toFixed(2));
+}
+
+export function calculateOrderTotalAmount(
+  items: OrderItem[],
+  menuCatalog: MenuItem[] = MENU_CATALOG,
+): number {
+  let total = 0;
+  for (const item of items) {
+    if (typeof item.price === "number") {
+      total += item.price * item.quantity;
+      continue;
+    }
+    const menu = menuCatalog.find(
+      (m) =>
+        m.id === item.menuItemId ||
+        m.name === item.name,
+    );
+    if (menu) {
+      total += menu.price * item.quantity;
+    }
+  }
+  return Number(total.toFixed(2));
 }

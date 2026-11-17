@@ -1,132 +1,99 @@
 import { NextRequest, NextResponse } from "next/server";
-
-import {
-  EMPLOYEES_DB,
-  ROLE_PERMISSIONS_DB,
-  type Employee,
-  type InventoryItem,
-  type PermissionCode,
-} from "@/lib/db";
-
+import { getAuthenticatedEmployee } from "@/lib/domain/auth-service";
+import { hasPermission } from "@/lib/domain/permission-service";
 import {
   getInventory,
-  replaceInventory,
+  getInventoryMovements,
+  mutateCanonicalInventory,
 } from "@/lib/store";
 
-import { getEmployeeFromCookie } from "@/lib/domain/auth-service";
-import { hasPermission } from "@/lib/domain/permission-service";
-
-function getEmployee(
-  request: NextRequest
-): Employee | null {
-  return getEmployeeFromCookie(
-    request.cookies.get("employee_code")?.value
-  );
-}
-
-export async function GET(
-  request: NextRequest
-) {
+export async function GET(request: NextRequest) {
   try {
     const employee =
-      getEmployee(request);
+      await getAuthenticatedEmployee(request);
 
     if (!employee) {
       return NextResponse.json(
-        {
-          error: "Unauthorized",
-        },
-        { status: 401 }
+        { error: "Unauthorized" },
+        { status: 401 },
       );
     }
 
     if (
       !hasPermission(
         employee,
-        "INVENTORY_VIEW"
+        "INVENTORY_VIEW",
       ) &&
-      !hasPermission(
-        employee,
-        "OWNER_VIEW"
-      )
+      !hasPermission(employee, "OWNER_VIEW")
     ) {
       return NextResponse.json(
-        {
-          error: "Forbidden",
-        },
-        { status: 403 }
+        { error: "Forbidden" },
+        { status: 403 },
       );
     }
 
     return NextResponse.json({
       inventory: getInventory(),
+      movements: getInventoryMovements(),
     });
   } catch (error) {
     console.error(
       "GET /api/inventory failed:",
-      error
+      error,
     );
 
     return NextResponse.json(
-      {
-        error:
-          "Unable to load inventory",
-      },
-      { status: 500 }
+      { error: "Unable to load inventory" },
+      { status: 500 },
     );
   }
 }
 
 export async function PATCH(
-  request: NextRequest
+  request: NextRequest,
 ) {
   try {
     const employee =
-      getEmployee(request);
+      await getAuthenticatedEmployee(request);
 
     if (!employee) {
       return NextResponse.json(
-        {
-          error: "Unauthorized",
-        },
-        { status: 401 }
+        { error: "Unauthorized" },
+        { status: 401 },
       );
     }
 
     if (
       !hasPermission(
         employee,
-        "INVENTORY_MANAGE"
-      )
-    ) {
-      return NextResponse.json(
-        {
-          error: "Forbidden",
-        },
-        { status: 403 }
-      );
-    }
-
-    const body =
-      await request.json();
-
-    if (
-      !body ||
-      typeof body !== "object"
+        "INVENTORY_MANAGE",
+      ) &&
+      !hasPermission(employee, "OWNER_VIEW")
     ) {
       return NextResponse.json(
         {
           error:
-            "Invalid inventory payload",
+            "Forbidden: Requires INVENTORY_MANAGE permission",
         },
-        { status: 400 }
+        { status: 403 },
+      );
+    }
+
+    const body = await request.json();
+
+    if (!body || typeof body !== "object") {
+      return NextResponse.json(
+        { error: "Invalid inventory payload" },
+        { status: 400 },
       );
     }
 
     const itemId =
       typeof body.id === "string"
         ? body.id.trim()
-        : "";
+        : typeof body.itemId === "string"
+          ? body.itemId.trim()
+          : "";
 
     if (!itemId) {
       return NextResponse.json(
@@ -134,91 +101,53 @@ export async function PATCH(
           error:
             "Inventory item id is required",
         },
-        { status: 400 }
+        { status: 400 },
       );
     }
 
-    const inventory =
-      getInventory();
+    const actorLabel = `${employee.employeeCode} (${employee.name})`;
 
-    const existingItem =
-      inventory.find(
-        (item) =>
-          item.id === itemId
-      );
-
-    if (!existingItem) {
-      return NextResponse.json(
-        {
-          error:
-            "Inventory item not found",
-        },
-        { status: 404 }
-      );
-    }
-
-    const nextStock =
-      typeof body.currentStock ===
-      "number"
-        ? body.currentStock
-        : existingItem.currentStock;
-
-    if (
-      !Number.isFinite(
-        nextStock
-      ) ||
-      nextStock < 0
-    ) {
-      return NextResponse.json(
-        {
-          error:
-            "currentStock must be a non-negative number",
-        },
-        { status: 400 }
-      );
-    }
-
-    const updatedItem:
-      InventoryItem = {
-        ...existingItem,
-        currentStock:
-          nextStock,
-        lastRestocked:
-          nextStock >
-          existingItem.currentStock
-            ? new Date().toISOString()
-            : existingItem.lastRestocked,
-      };
-
-    const updatedInventory =
-      inventory.map(
-        (item) =>
-          item.id === itemId
-            ? updatedItem
-            : item
-      );
-
-    replaceInventory(
-      updatedInventory
-    );
+    const result = mutateCanonicalInventory({
+      itemId,
+      action:
+        body.action ||
+        (typeof body.currentStock === "number"
+          ? "SET_STOCK"
+          : "RESTOCK"),
+      quantity:
+        typeof body.quantity === "number"
+          ? body.quantity
+          : undefined,
+      currentStock:
+        typeof body.currentStock === "number"
+          ? body.currentStock
+          : undefined,
+      reason: body.reason,
+      kitchenId:
+        body.kitchenId || employee.kitchenId,
+      actor: actorLabel,
+    });
 
     return NextResponse.json({
-      inventory:
-        updatedInventory,
-      item: updatedItem,
+      inventory: result.inventory,
+      item: result.item,
+      movement: result.movement,
+      movements: getInventoryMovements(),
     });
   } catch (error) {
-    console.error(
-      "PATCH /api/inventory failed:",
-      error
-    );
+    const message =
+      error instanceof Error
+        ? error.message
+        : "Unable to update inventory";
+    const status = message.includes(
+      "not found",
+    )
+      ? 404
+      : 400;
 
     return NextResponse.json(
-      {
-        error:
-          "Unable to update inventory",
-      },
-      { status: 500 }
+      { error: message },
+      { status },
     );
   }
 }

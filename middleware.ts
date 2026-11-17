@@ -1,10 +1,12 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
-import { verifyToken } from "./lib/auth";
+import { findEmployeeByCode, verifyToken } from "./lib/auth";
 
 const PUBLIC_ROUTES = [
   "/login",
+  "/api/login",
   "/api/auth/login",
+  "/api/session",
 ];
 
 const STATIC_ASSETS = [
@@ -14,75 +16,67 @@ const STATIC_ASSETS = [
 ];
 
 export async function middleware(
-  request: NextRequest
+  request: NextRequest,
 ) {
   const { pathname } = request.nextUrl;
 
-  // Bypass static files and public routes
   if (
     STATIC_ASSETS.some((path) =>
-      pathname.startsWith(path)
+      pathname.startsWith(path),
     ) ||
     PUBLIC_ROUTES.some(
-      (route) => pathname === route
+      (route) => pathname === route,
     )
   ) {
     return NextResponse.next();
   }
 
   const token = request.cookies.get(
-    "dark_cloud_session"
+    "dark_cloud_session",
+  )?.value;
+  const empCode = request.cookies.get(
+    "employee_code",
   )?.value;
 
-  if (!token) {
-    const loginUrl = new URL(
-      "/login",
-      request.url
-    );
-    loginUrl.searchParams.set(
-      "redirect",
-      pathname
-    );
-    return NextResponse.redirect(loginUrl);
-  }
+  let session = token
+    ? await verifyToken(token)
+    : null;
 
-  // Edge JWT verification to prevent spoofed cookies
-  const session = await verifyToken(token);
-
-  if (!session) {
-    const response = NextResponse.redirect(
-      new URL(
-        "/login?error=session_expired",
-        request.url
-      )
-    );
-    response.cookies.delete(
-      "dark_cloud_session"
-    );
-    return response;
-  }
-
-  // Root router: send authenticated users to their canonical station
-  if (pathname === "/") {
-    switch (session.role) {
-      case "OWNER":
-      case "MANAGER":
-        return NextResponse.redirect(
-          new URL("/dashboard", request.url)
-        );
-      case "LINE_COOK":
-        return NextResponse.redirect(
-          new URL("/kds", request.url)
-        );
-      case "DISPATCH":
-        return NextResponse.redirect(
-          new URL("/dispatch", request.url)
-        );
-      default:
-        return NextResponse.redirect(
-          new URL("/login", request.url)
-        );
+  if (!session && empCode) {
+    const emp = findEmployeeByCode(empCode);
+    if (emp) {
+      session = {
+        userId: emp.id,
+        employeeCode: emp.employeeCode,
+        name: emp.name,
+        role: emp.role,
+        kitchenId: emp.kitchenId,
+      };
     }
+  }
+
+  // Root router: send users to Command Center (or role-specific station if logged in)
+  if (pathname === "/") {
+    if (session) {
+      switch (session.role) {
+        case "OWNER":
+        case "MANAGER":
+          return NextResponse.redirect(
+            new URL("/dashboard", request.url),
+          );
+        case "LINE_COOK":
+          return NextResponse.redirect(
+            new URL("/kds", request.url),
+          );
+        case "DISPATCH":
+          return NextResponse.redirect(
+            new URL("/dispatch", request.url),
+          );
+      }
+    }
+    return NextResponse.redirect(
+      new URL("/dashboard", request.url),
+    );
   }
 
   return NextResponse.next();
