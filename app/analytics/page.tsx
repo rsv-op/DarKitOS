@@ -319,8 +319,8 @@ export default function AnalyticsPage() {
 
   return (
     <AppShell
-      title="Business Intelligence, VerticalForge & Cloud7 Diagnostics"
-      subtitle="Quantify operational durations, food yield & COGS variance, quote-to-cash revenue leakage, and Cloud7 multi-tenant infrastructure health."
+      title="Analytics"
+      subtitle="Review order volume, prep times, ingredient costs, and how much revenue was collected."
       actions={
         <div className="flex rounded-xl border border-slate-800 bg-slate-900 p-1">
           <button

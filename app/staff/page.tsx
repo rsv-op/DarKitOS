@@ -170,8 +170,8 @@ export default function StaffPage() {
 
   return (
     <AppShell
-      title="Staff Administration & Canonical RBAC Permission Matrix"
-      subtitle="Administer kitchen personnel, terminal employee codes, designated kitchens, and audit server-enforced Role-Based Access Control (RBAC)."
+      title="Staff & access"
+      subtitle="Manage staff, assign people to kitchens, and see what each role can do."
     >
       <div className="space-y-6">
         {error && (

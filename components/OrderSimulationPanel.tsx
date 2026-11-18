@@ -24,10 +24,6 @@ import {
   type WebhookIdempotencyEntry,
 } from "@/lib/db";
 
-type Props = {
-  onInject?: (order: Order) => void;
-};
-
 const CHANNELS: OrderChannel[] = [
   "Swiggy",
   "Zomato",
@@ -76,9 +72,7 @@ const BACKOFF_SCHEDULE = [
   },
 ];
 
-export default function OrderSimulationPanel({
-  onInject,
-}: Props) {
+export default function OrderSimulationPanel() {
   const [brandKitchens, setBrandKitchens] =
     useState<BrandKitchenConfig[]>(
       BRAND_KITCHENS_DB,
@@ -106,7 +100,7 @@ export default function OrderSimulationPanel({
     "NORMAL" | "RUSH" | "VIP"
   >("NORMAL");
   const [customerName, setCustomerName] =
-    useState("Vikramaditya Singh");
+    useState("Demo customer");
   const [customNotes, setCustomNotes] =
     useState("");
   const [idempotencyKey, setIdempotencyKey] =
@@ -122,6 +116,7 @@ export default function OrderSimulationPanel({
   });
 
   const [message, setMessage] = useState("");
+  const [createdOrderId, setCreatedOrderId] = useState<string | null>(null);
   const [messageType, setMessageType] =
     useState<
       "success" | "warning" | "error" | "info"
@@ -301,7 +296,7 @@ export default function OrderSimulationPanel({
   ) {
     if (cartItems.length === 0) {
       setMessage(
-        "Select at least one menu item with quantity >= 1.",
+        "Choose at least one menu item.",
       );
       setMessageType("error");
       return;
@@ -309,6 +304,7 @@ export default function OrderSimulationPanel({
 
     setIsSubmitting(true);
     setMessage("");
+    setCreatedOrderId(null);
 
     const activeKey = reuseKey
       ? idempotencyKey
@@ -331,7 +327,7 @@ export default function OrderSimulationPanel({
             priority,
             customerName:
               customerName.trim() ||
-              "Aggregator Guest",
+              "Demo customer",
             notes:
               customNotes.trim() || undefined,
             idempotencyKey: activeKey,
@@ -351,7 +347,7 @@ export default function OrderSimulationPanel({
       if (!response.ok) {
         setMessage(
           data?.error ||
-            "Order injection rejected by server validation.",
+            "Couldn’t create the sample order. Check your selections and try again.",
         );
         setMessageType("error");
         return;
@@ -359,12 +355,12 @@ export default function OrderSimulationPanel({
 
       const storedOrder =
         data?.order as Order;
-      onInject?.(storedOrder);
+      setCreatedOrderId(storedOrder.id);
       await loadSystemSnapshot();
 
       if (data?.idempotentReplay) {
         setMessage(
-          `Idempotency Guard Triggered: Duplicate webhook key "${activeKey}" intercepted via ON CONFLICT DO NOTHING. Returned existing Order ${storedOrder.id} without double creation!`,
+          `Order ${storedOrder.id} already exists. No duplicate order was created.`,
         );
         setMessageType("info");
       } else if (
@@ -372,7 +368,7 @@ export default function OrderSimulationPanel({
         "INSUFFICIENT_STOCK"
       ) {
         setMessage(
-          `Order ${storedOrder.id} created with INSUFFICIENT STOCK flag for: ${(data.inventoryUnavailable || []).join(", ")}. KDS prep will block until restocked.`,
+          `Order ${storedOrder.id} was created, but the kitchen needs more ${(data.inventoryUnavailable || []).join(", ")} before prep can start.`,
         );
         setMessageType("warning");
         setIdempotencyKey(
@@ -382,7 +378,7 @@ export default function OrderSimulationPanel({
         data?.inventoryDecision === "LOW_STOCK"
       ) {
         setMessage(
-          `Order ${storedOrder.id} injected into ${selectedKitchenId} with LOW STOCK warning for: ${(data.inventoryWarnings || []).join(", ")}.`,
+          `Order ${storedOrder.id} was created. Stock is running low for: ${(data.inventoryWarnings || []).join(", ")}.`,
         );
         setMessageType("warning");
         setIdempotencyKey(
@@ -390,7 +386,7 @@ export default function OrderSimulationPanel({
         );
       } else {
         setMessage(
-          `Order ${storedOrder.id} ($${(storedOrder.totalAmount ?? orderTotal).toFixed(2)}) injected into canonical store → now live on KDS & Global Order Monitor!`,
+          `Order ${storedOrder.id} was created. Find it in Live Orders or on the Kitchen Board.`,
         );
         setMessageType("success");
         setIdempotencyKey(
@@ -403,7 +399,7 @@ export default function OrderSimulationPanel({
         err,
       );
       setMessage(
-        "Unable to reach the Orders API.",
+        "Couldn’t save the order. Please try again.",
       );
       setMessageType("error");
     } finally {
@@ -413,34 +409,28 @@ export default function OrderSimulationPanel({
 
   return (
     <div className="space-y-6">
-      <div className="grid gap-6 lg:grid-cols-[1.2fr_0.8fr]">
+      <div className="grid gap-6 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,0.8fr)]">
         {/* Left: Order Injection & BrandKitchen Cascading Builder */}
-        <section className="rounded-2xl border border-slate-800 bg-slate-900/70 p-6 text-slate-100 shadow-xl">
+        <section className="rounded-2xl border border-slate-800 bg-slate-900/70 p-4 text-slate-100 shadow-xl sm:p-6">
           <div className="mb-5 flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 pb-4">
             <div>
               <span className="font-mono text-xs font-bold uppercase tracking-wider text-sky-400">
-                Canonical Order Injection Pipeline
+                Sample data only
               </span>
               <h2 className="mt-1 text-xl font-black text-white">
-                Create & Inject Multi-Brand Order
+                Build a sample order
               </h2>
-              <p className="text-xs text-slate-400">
-                Enforces server-side{" "}
-                <code>BrandKitchen</code>{" "}
-                validation, recipe resolution, and
-                atomic idempotency.
+              <p className="mt-1 text-sm leading-6 text-slate-300">
+                A meal is already selected. Keep the defaults to try your first order, or change them to make your own example.
               </p>
             </div>
-            <span className="rounded-full border border-emerald-500/40 bg-emerald-500/10 px-3 py-1 font-mono text-[10px] font-bold uppercase text-emerald-300">
-              Exactly-Once API
-            </span>
           </div>
 
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             {/* 1. Virtual Brand */}
             <label className="block">
               <span className="mb-1.5 block font-mono text-xs font-bold uppercase text-slate-300">
-                1. Virtual Brand (DBA)
+                1. Food brand
               </span>
               <select
                 value={selectedBrand}
@@ -466,7 +456,7 @@ export default function OrderSimulationPanel({
             {/* 2. Cascading Physical Kitchen */}
             <label className="block">
               <span className="mb-1.5 block font-mono text-xs font-bold uppercase text-slate-300">
-                2. Physical Kitchen (BrandKitchen)
+                2. Kitchen location
               </span>
               <select
                 value={selectedKitchenId}
@@ -491,7 +481,7 @@ export default function OrderSimulationPanel({
                       {k.id} • {k.name}{" "}
                       {authorized
                         ? "(Authorized)"
-                        : "(Unauthorized in BrandKitchen)"}
+                        : "(Doesn’t serve this brand)"}
                     </option>
                   );
                 })}
@@ -501,7 +491,7 @@ export default function OrderSimulationPanel({
             {/* 3. Order Channel */}
             <label className="block">
               <span className="mb-1.5 block font-mono text-xs font-bold uppercase text-slate-300">
-                3. Aggregator / Channel
+                3. Order source
               </span>
               <select
                 value={selectedChannel}
@@ -556,7 +546,7 @@ export default function OrderSimulationPanel({
 
               <label className="block">
                 <span className="mb-1.5 block font-mono text-xs font-bold uppercase text-slate-300">
-                  Customer
+                  Sample customer name
                 </span>
                 <input
                   type="text"
@@ -574,9 +564,9 @@ export default function OrderSimulationPanel({
 
           {/* 5. Brand-Owned Menu Catalog Selection */}
           <div className="mt-5">
-            <div className="mb-2 flex items-center justify-between">
+            <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
               <span className="font-mono text-xs font-bold uppercase text-slate-300">
-                4. Select Menu Items ({selectedBrand} Catalog)
+                4. Add menu items
               </span>
               <span className="font-mono text-xs text-emerald-400">
                 Order Total: ${orderTotal.toFixed(2)}
@@ -596,7 +586,7 @@ export default function OrderSimulationPanel({
                     }`}
                   >
                     <div>
-                      <div className="flex items-center gap-2">
+                      <div className="flex flex-wrap items-center gap-2">
                         <span className="font-bold text-white">
                           {item.name}
                         </span>
@@ -634,6 +624,7 @@ export default function OrderSimulationPanel({
                             -1,
                           )
                         }
+                        aria-label={`Remove one ${item.name}`}
                         className="h-8 w-8 rounded-lg border border-slate-700 bg-slate-900 font-mono text-sm font-bold text-white hover:bg-slate-800"
                       >
                         −
@@ -649,6 +640,7 @@ export default function OrderSimulationPanel({
                             1,
                           )
                         }
+                        aria-label={`Add one ${item.name}`}
                         className="h-8 w-8 rounded-lg border border-sky-500/40 bg-sky-500/20 font-mono text-sm font-bold text-sky-300 hover:bg-sky-500/30"
                       >
                         +
@@ -660,27 +652,10 @@ export default function OrderSimulationPanel({
             </div>
           </div>
 
-          {/* 6. Idempotency Key & Kitchen Notes */}
-          <div className="mt-5 grid gap-4 sm:grid-cols-2">
+          <div className="mt-5">
             <label className="block">
               <span className="mb-1 block font-mono text-xs font-bold uppercase text-slate-300">
-                Upstream Idempotency Key
-              </span>
-              <input
-                type="text"
-                value={idempotencyKey}
-                onChange={(e) =>
-                  setIdempotencyKey(
-                    e.target.value,
-                  )
-                }
-                className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 font-mono text-xs text-sky-300 outline-none focus:border-sky-400"
-              />
-            </label>
-
-            <label className="block">
-              <span className="mb-1 block font-mono text-xs font-bold uppercase text-slate-300">
-                Kitchen Prep Notes
+                Kitchen notes (optional)
               </span>
               <input
                 type="text"
@@ -706,7 +681,15 @@ export default function OrderSimulationPanel({
                       : "border-red-500/40 bg-red-500/10 text-red-300"
               }`}
             >
-              {message}
+              <p role={messageType === "error" ? "alert" : "status"}>{message}</p>
+              {createdOrderId && (
+                <Link
+                  href={`/live-orders?order=${encodeURIComponent(createdOrderId)}`}
+                  className="mt-2 inline-block rounded font-semibold text-white underline underline-offset-4 focus-visible:outline focus-visible:outline-offset-2 focus-visible:outline-sky-400"
+                >
+                  Find this order in Live Orders →
+                </Link>
+              )}
             </div>
           )}
 
@@ -723,9 +706,30 @@ export default function OrderSimulationPanel({
               className="flex-1 rounded-xl bg-gradient-to-r from-sky-500 to-emerald-500 px-5 py-3.5 font-mono text-xs font-black uppercase tracking-wider text-slate-950 shadow-lg transition hover:opacity-95 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {isSubmitting
-                ? "Injecting Canonical Order..."
-                : `Inject Order ($${orderTotal.toFixed(2)}) →`}
+                ? "Creating order…"
+                : `Create sample order ($${orderTotal.toFixed(2)})`}
             </button>
+
+          </div>
+
+          <details className="mt-4 rounded-xl border border-slate-800 bg-slate-950/55 p-3.5">
+            <summary className="cursor-pointer text-sm font-medium text-slate-300">Advanced order options</summary>
+            <p className="my-2 text-xs leading-5 text-slate-400">Test how the workspace handles repeat order notifications.</p>
+            <label className="block">
+              <span className="mb-1 block font-mono text-xs font-bold uppercase text-slate-300">
+                Upstream Idempotency Key
+              </span>
+              <input
+                type="text"
+                value={idempotencyKey}
+                onChange={(e) =>
+                  setIdempotencyKey(
+                    e.target.value,
+                  )
+                }
+                className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 font-mono text-xs text-sky-300 outline-none focus:border-sky-400"
+              />
+            </label>
 
             {webhookEvents.length > 0 && (
               <button
@@ -797,13 +801,13 @@ export default function OrderSimulationPanel({
                     }
                   })();
                 }}
-                className="rounded-xl border border-amber-500/40 bg-amber-500/10 px-4 py-3.5 font-mono text-xs font-bold text-amber-300 hover:bg-amber-500/20"
+                className="mt-3 rounded-xl border border-amber-500/40 bg-amber-500/10 px-4 py-3.5 font-mono text-xs font-bold text-amber-300 hover:bg-amber-500/20"
                 title="Simulate an upstream aggregator webhook retry with the last idempotency key"
               >
                 ↺ Simulate Duplicate Webhook Retry
               </button>
             )}
-          </div>
+          </details>
         </section>
 
         {/* Right: Live Recipe Stock Check & Idempotency / Outbox Diagnostics */}
@@ -812,23 +816,22 @@ export default function OrderSimulationPanel({
           <section className="rounded-2xl border border-slate-800 bg-slate-900/70 p-5">
             <div className="flex items-center justify-between">
               <h3 className="font-mono text-xs font-bold uppercase tracking-wider text-emerald-400">
-                Pre-Flight Recipe & Stock Check
+                Ingredients needed
               </h3>
               <Link
                 href="/inventory"
                 className="font-mono text-[11px] text-sky-400 hover:underline"
               >
-                Stock Control →
+                View Inventory →
               </Link>
             </div>
             <p className="mt-1 text-xs text-slate-400">
-              Calculates exact raw ingredient depletion triggered when Line Cook transitions{" "}
-              <code>PENDING → PREPARING</code>.
+              These ingredients are deducted from stock when the kitchen starts preparing the order.
             </p>
 
             {ingredientPreview.length === 0 ? (
               <p className="mt-4 rounded-xl bg-slate-950 p-4 text-center text-xs text-slate-500">
-                No tracked raw recipe ingredients required for current selection.
+                No ingredients are tracked for these items.
               </p>
             ) : (
               <div className="mt-3 space-y-2">
@@ -867,95 +870,100 @@ export default function OrderSimulationPanel({
             )}
           </section>
 
-          {/* Two-Phase Atomic Idempotency Ledger */}
-          <section className="rounded-2xl border border-slate-800 bg-slate-900/70 p-5">
-            <h3 className="font-mono text-xs font-bold uppercase tracking-wider text-sky-400">
-              Atomic Webhook Deduplication Ledger
-            </h3>
-            <pre className="mt-2 overflow-x-auto rounded-xl border border-slate-800 bg-slate-950 p-3 font-mono text-[11px] text-emerald-300">
-{`INSERT INTO webhook_events (idempotency_key, status)
-VALUES ($1, 'processing')
-ON CONFLICT (idempotency_key) DO NOTHING
-RETURNING idempotency_key;`}
-            </pre>
+          <details className="min-w-0 rounded-2xl border border-slate-800 bg-slate-900/70 p-4">
+            <summary className="cursor-pointer text-sm font-medium text-slate-300">Order delivery diagnostics</summary>
+            <div className="mt-3 space-y-3">
+              {/* Two-Phase Atomic Idempotency Ledger */}
+              <section className="rounded-2xl border border-slate-800 bg-slate-900/70 p-5">
+                <h3 className="font-mono text-xs font-bold uppercase tracking-wider text-sky-400">
+                  Atomic Webhook Deduplication Ledger
+                </h3>
+                <pre className="mt-2 overflow-x-auto rounded-xl border border-slate-800 bg-slate-950 p-3 font-mono text-[11px] text-emerald-300">
+    {`INSERT INTO webhook_events (idempotency_key, status)
+    VALUES ($1, 'processing')
+    ON CONFLICT (idempotency_key) DO NOTHING
+    RETURNING idempotency_key;`}
+                </pre>
 
-            <div className="mt-3 max-h-48 space-y-2 overflow-y-auto">
-              {webhookEvents
-                .slice(0, 6)
-                .map((w) => (
-                  <div
-                    key={w.idempotencyKey}
-                    className="flex items-center justify-between rounded-xl border border-slate-800 bg-slate-950 px-3 py-2 font-mono text-[11px]"
-                  >
-                    <div>
-                      <p className="font-bold text-white">
-                        {w.idempotencyKey} →{" "}
-                        <span className="text-sky-400">
-                          {w.orderId}
+                <div className="mt-3 max-h-48 space-y-2 overflow-y-auto">
+                  {webhookEvents
+                    .slice(0, 6)
+                    .map((w) => (
+                      <div
+                        key={w.idempotencyKey}
+                        className="flex items-center justify-between rounded-xl border border-slate-800 bg-slate-950 px-3 py-2 font-mono text-[11px]"
+                      >
+                        <div>
+                          <p className="font-bold text-white">
+                            {w.idempotencyKey} →{" "}
+                            <span className="text-sky-400">
+                              {w.orderId}
+                            </span>
+                          </p>
+                          <p className="text-[10px] text-slate-400">
+                            {w.payloadSummary}
+                          </p>
+                        </div>
+                        <span
+                          className={`rounded px-2 py-0.5 text-[10px] font-bold ${
+                            w.hitCount > 1
+                              ? "bg-amber-500/20 text-amber-300"
+                              : "bg-slate-800 text-slate-300"
+                          }`}
+                        >
+                          Hits: {w.hitCount}
                         </span>
-                      </p>
-                      <p className="text-[10px] text-slate-400">
-                        {w.payloadSummary}
-                      </p>
-                    </div>
-                    <span
-                      className={`rounded px-2 py-0.5 text-[10px] font-bold ${
-                        w.hitCount > 1
-                          ? "bg-amber-500/20 text-amber-300"
-                          : "bg-slate-800 text-slate-300"
-                      }`}
-                    >
-                      Hits: {w.hitCount}
-                    </span>
-                  </div>
-                ))}
-            </div>
-          </section>
-
-          {/* Transactional Outbox & Exponential Backoff Schedule */}
-          <section className="rounded-2xl border border-slate-800 bg-slate-900/70 p-5">
-            <h3 className="font-mono text-xs font-bold uppercase tracking-wider text-purple-400">
-              Transactional Outbox Retry Schedule
-            </h3>
-            <div className="mt-3 space-y-1.5">
-              {BACKOFF_SCHEDULE.map((b) => (
-                <div
-                  key={b.attempt}
-                  className="flex items-center justify-between rounded-lg bg-slate-950 px-3 py-1.5 text-[11px]"
-                >
-                  <span className="font-mono font-bold text-slate-200">
-                    {b.attempt} ({b.delay})
-                  </span>
-                  <span className="text-slate-400 text-right">
-                    {b.scenario}
-                  </span>
+                      </div>
+                    ))}
                 </div>
-              ))}
-            </div>
-            {outboxEvents.length > 0 && (
-              <div className="mt-3 border-t border-slate-800 pt-3">
-                <p className="font-mono text-[10px] uppercase text-slate-400 mb-1.5">
-                  Recent Outbox Fan-Out Events
-                </p>
-                {outboxEvents
-                  .slice(0, 3)
-                  .map((ev) => (
+              </section>
+
+              {/* Transactional Outbox & Exponential Backoff Schedule */}
+              <section className="rounded-2xl border border-slate-800 bg-slate-900/70 p-5">
+                <h3 className="font-mono text-xs font-bold uppercase tracking-wider text-purple-400">
+                  Transactional Outbox Retry Schedule
+                </h3>
+                <div className="mt-3 space-y-1.5">
+                  {BACKOFF_SCHEDULE.map((b) => (
                     <div
-                      key={ev.id}
-                      className="flex items-center justify-between font-mono text-[10px] text-slate-300 py-1"
+                      key={b.attempt}
+                      className="flex items-center justify-between rounded-lg bg-slate-950 px-3 py-1.5 text-[11px]"
                     >
-                      <span>
-                        {ev.eventType} (
-                        {ev.aggregateId})
+                      <span className="font-mono font-bold text-slate-200">
+                        {b.attempt} ({b.delay})
                       </span>
-                      <span className="text-emerald-400">
-                        {ev.status}
+                      <span className="text-slate-400 text-right">
+                        {b.scenario}
                       </span>
                     </div>
                   ))}
-              </div>
-            )}
-          </section>
+                </div>
+                {outboxEvents.length > 0 && (
+                  <div className="mt-3 border-t border-slate-800 pt-3">
+                    <p className="font-mono text-[10px] uppercase text-slate-400 mb-1.5">
+                      Recent Outbox Fan-Out Events
+                    </p>
+                    {outboxEvents
+                      .slice(0, 3)
+                      .map((ev) => (
+                        <div
+                          key={ev.id}
+                          className="flex items-center justify-between font-mono text-[10px] text-slate-300 py-1"
+                        >
+                          <span>
+                            {ev.eventType} (
+                            {ev.aggregateId})
+                          </span>
+                          <span className="text-emerald-400">
+                            {ev.status}
+                          </span>
+                        </div>
+                      ))}
+                  </div>
+                )}
+              </section>
+            </div>
+          </details>
         </div>
       </div>
     </div>

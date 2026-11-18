@@ -370,10 +370,10 @@ export default function CookPage() {
               className="w-full rounded-xl bg-sky-500 px-4 py-3.5 font-mono text-sm font-black uppercase tracking-wider text-slate-950 transition hover:bg-sky-400 disabled:cursor-not-allowed disabled:opacity-40"
             >
               {isUpdating
-                ? "Depleting Recipe & Starting..."
+                ? "Starting prep…"
                 : isUnavailable
                   ? "Inventory Unavailable"
-                  : "🔥 START PREPARING (Deplete Stock)"}
+                  : "Start preparing"}
             </button>
           )}
 
@@ -391,14 +391,14 @@ export default function CookPage() {
             >
               {isUpdating
                 ? "Updating..."
-                : "✓ MARK READY FOR PICKUP"}
+                : "Mark ready for pickup"}
             </button>
           )}
 
           {order.status ===
             "READY_FOR_PICKUP" && (
             <div className="flex items-center justify-between rounded-xl border border-emerald-500/40 bg-emerald-500/10 px-4 py-3 font-mono text-xs font-bold text-emerald-300">
-              <span>STAGED AT DISPATCH PASS</span>
+              <span>Waiting for courier pickup</span>
               <Link
                 href="/dispatch"
                 className="underline hover:text-white"
@@ -414,8 +414,8 @@ export default function CookPage() {
 
   return (
     <AppShell
-      title="Kitchen Display System (Cook KDS)"
-      subtitle="Real-time touchscreen ticket board with WebSocket/SSE/Polling fallback state machine and atomic recipe consumption on PENDING → PREPARING."
+      title="Kitchen Board"
+      subtitle="See which meals need cooking, start preparing an order, and mark it ready for pickup."
       actions={
         <>
           {/* Resilient Sync Fallback Selector */}
@@ -453,7 +453,7 @@ export default function CookPage() {
             href="/dispatch"
             className="rounded-xl border border-slate-700 bg-slate-900 px-3.5 py-2 font-mono text-xs font-bold text-emerald-300 hover:border-emerald-500/40"
           >
-            Dispatch Pass →
+            Open Dispatch →
           </Link>
 
           <button

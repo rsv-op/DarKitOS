@@ -1,12 +1,14 @@
 "use client";
 
 import {
+  Suspense,
   useCallback,
   useEffect,
   useMemo,
   useState,
 } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import AppShell from "@/components/AppShell";
 import {
   BRANDS_DB,
@@ -67,6 +69,12 @@ function formatTime(value?: string): string {
   });
 }
 
+function OpenLinkedOrder({ onSelect }: { onSelect: (id: string | null) => void }) {
+  const orderId = useSearchParams().get("order");
+  useEffect(() => onSelect(orderId), [orderId, onSelect]);
+  return null;
+}
+
 export default function LiveOrdersPage() {
   const [orders, setOrders] = useState<Order[]>(
     [],
@@ -86,6 +94,10 @@ export default function LiveOrdersPage() {
   const [search, setSearch] = useState("");
   const [selectedOrderId, setSelectedOrderId] =
     useState<string | null>(null);
+  const openLinkedOrder = useCallback((id: string | null) => {
+    setSearch(id ?? "");
+    setSelectedOrderId(id);
+  }, []);
 
   const [cancelReason, setCancelReason] =
     useState(
@@ -246,15 +258,15 @@ export default function LiveOrdersPage() {
 
   return (
     <AppShell
-      title="Global Order Monitor & Lifecycle Inspector"
-      subtitle="Consume the canonical order store, filter across brands/kitchens/channels, inspect immutable event timelines, and execute stage-aware cancellations."
+      title="Live Orders"
+      subtitle="Find orders by number, see where each one is in the kitchen, and review changes or cancellations."
       actions={
         <>
           <Link
             href="/order-injection"
             className="rounded-xl bg-sky-500 px-3.5 py-2 font-mono text-xs font-bold text-slate-950 hover:bg-sky-400"
           >
-            + Inject Order
+            Add sample order
           </Link>
           <button
             type="button"
@@ -266,13 +278,16 @@ export default function LiveOrdersPage() {
         </>
       }
     >
+      <Suspense fallback={null}>
+        <OpenLinkedOrder onSelect={openLinkedOrder} />
+      </Suspense>
       <div className="space-y-6">
-        {/* Advanced Filtering Grid */}
+        {/* Order filters */}
         <section className="rounded-2xl border border-slate-800 bg-slate-900/60 p-4">
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
             <label className="block">
               <span className="font-mono text-[10px] font-bold uppercase text-slate-400">
-                Search Order / Item / Guest
+                Search by order number, meal, or customer
               </span>
               <input
                 type="text"
@@ -398,7 +413,7 @@ export default function LiveOrdersPage() {
         )}
 
         {/* Main Split: Order Cards Grid & Detailed Inspector Drawer */}
-        <div className="grid gap-6 lg:grid-cols-[1.15fr_0.85fr]">
+        <div className="grid gap-6 lg:grid-cols-[minmax(0,1.15fr)_minmax(0,0.85fr)]">
           <section className="space-y-3">
             {loading && orders.length === 0 ? (
               <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-10 text-center font-mono text-sm text-slate-400">
@@ -410,7 +425,7 @@ export default function LiveOrdersPage() {
                   No active orders match current filters
                 </p>
                 <p className="mt-1 text-xs text-slate-400">
-                  Inject a new order or clear your filter selection to view the pipeline.
+                  Add a sample order or adjust your filters to see more orders.
                 </p>
               </div>
             ) : (
@@ -517,10 +532,9 @@ export default function LiveOrdersPage() {
                         Events:{" "}
                         {order.events.length}
                       </span>
-                      <span className="text-sky-400 font-bold">
-                        Click to Inspect Timeline &
-                        Actions →
-                      </span>
+                      <button type="button" aria-label={`View details for ${order.id}`} aria-controls="order-details" className="rounded font-bold text-sky-300 hover:underline focus-visible:outline focus-visible:outline-offset-2 focus-visible:outline-sky-400">
+                        View order details →
+                      </button>
                     </div>
                   </article>
                 );
@@ -529,14 +543,14 @@ export default function LiveOrdersPage() {
           </section>
 
           {/* Right: Order Event Timeline & Stage-Aware Cancellation Inspector */}
-          <aside className="rounded-2xl border border-slate-800 bg-slate-900/80 p-5 h-fit sticky top-20">
+          <aside id="order-details" aria-label="Order details" className="h-fit rounded-2xl border border-slate-800 bg-slate-900/80 p-4 sm:p-5 lg:sticky lg:top-20">
             {!selectedOrder ? (
               <div className="py-16 text-center">
                 <p className="font-mono text-sm font-bold text-slate-300">
-                  Select any order card on the left
+                  Select an order to see its details
                 </p>
                 <p className="mt-1 text-xs text-slate-500">
-                  Inspect its full immutable event timeline, recipe consumption ledger, dispatch evidence, and stage-aware cancellation controls.
+                  You’ll see what’s happened so far, ingredients used, and pickup details.
                 </p>
               </div>
             ) : (
@@ -544,7 +558,7 @@ export default function LiveOrdersPage() {
                 <div className="flex items-start justify-between border-b border-slate-800 pb-4">
                   <div>
                     <span className="font-mono text-xs font-bold uppercase text-sky-400">
-                      Canonical Order Aggregate
+                      Order details
                     </span>
                     <h2 className="mt-0.5 font-mono text-2xl font-black text-white">
                       {selectedOrder.id}
@@ -564,6 +578,12 @@ export default function LiveOrdersPage() {
                     )}
                   </span>
                 </div>
+
+                {(selectedOrder.status === "PENDING" || selectedOrder.status === "PREPARING") && (
+                  <Link href="/kds" className="inline-flex rounded-lg bg-sky-500 px-3 py-2 text-sm font-semibold text-slate-950 hover:bg-sky-400">
+                    Continue on the Kitchen Board →
+                  </Link>
+                )}
 
                 {/* Inventory & Dispatch Metadata */}
                 <div className="grid grid-cols-2 gap-3 rounded-xl border border-slate-800 bg-slate-950 p-3.5 font-mono text-xs">
@@ -621,7 +641,7 @@ export default function LiveOrdersPage() {
                 {/* Stage-Aware Cancellation Engine */}
                 <div className="rounded-xl border border-red-500/30 bg-red-500/5 p-4">
                   <p className="font-mono text-xs font-bold uppercase text-red-300">
-                    Stage-Dependent Cancellation Engine
+                    Cancel order
                   </p>
                   <p className="mt-1 text-xs text-slate-300">
                     {selectedOrder.status ===
@@ -753,7 +773,7 @@ export default function LiveOrdersPage() {
                 {/* Immutable Event Timeline */}
                 <div>
                   <h3 className="font-mono text-xs font-bold uppercase tracking-wider text-slate-300 mb-3">
-                    Immutable Order Event Timeline (
+                    Order history (
                     {selectedOrder.events.length})
                   </h3>
                   <div className="space-y-2.5 max-h-72 overflow-y-auto pr-1">

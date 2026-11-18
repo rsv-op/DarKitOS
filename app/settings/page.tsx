@@ -78,8 +78,8 @@ export default function SettingsPage() {
 
   return (
     <AppShell
-      title="System Personalization & Cloud7 Security Settings (/settings)"
-      subtitle="Configure business localization, order/KDS SLA thresholds, PostgreSQL RLS enforcement, and live-preview OS themes with self-healing fallbacks."
+      title="Settings"
+      subtitle="Adjust the workspace appearance, regional preferences, and kitchen timing targets."
     >
       <div className="space-y-6">
         {notice && (

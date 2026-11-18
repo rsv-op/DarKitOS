@@ -3,9 +3,9 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Dark OS",
+  title: "DarKitOS — Cloud Kitchen Workspace",
   description:
-    "Unified cloud kitchen operations system",
+    "Explore DarKitOS, the workspace for delivery kitchens to track orders, prep meals, hand off to couriers, and monitor stock.",
 };
 
 export default function RootLayout({

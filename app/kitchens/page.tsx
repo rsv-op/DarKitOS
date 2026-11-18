@@ -101,8 +101,8 @@ export default function KitchensPage() {
 
   return (
     <AppShell
-      title="Physical Kitchen Facility Administration"
-      subtitle="Monitor physical production hubs, mapped virtual brands, assigned station staff, live KDS ticket load, and operational status."
+      title="Kitchens"
+      subtitle="See which brands, staff, and orders belong to each kitchen location."
       actions={
         <Link
           href="/brands"

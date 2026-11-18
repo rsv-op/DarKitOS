@@ -9,6 +9,18 @@ The objective is not to create a collection of dashboards.
 
 The objective is to create one operational system with one source of truth.
 
+## Try the demo
+
+Start on the public homepage (`/`) for a short tour of what DarKitOS does. Choose **Open demo workspace** to open the overview, or use **Sign in → Choose a demo role** to try the Owner, Manager, Cook, or Dispatch views. Start as **Owner** to try the whole workflow:
+
+1. In **Sample Orders**, create a sample order with the prefilled meal.
+2. Find the same order number in **Live Orders**.
+3. On the **Kitchen Board**, start preparing it and mark it ready for pickup.
+4. In **Dispatch**, assign a driver, confirm pickup, and mark it dispatched.
+5. Check **Inventory** for ingredients used and **Analytics** for order summaries.
+
+The demo uses shared, temporary sample data. Don’t enter real customer or business information.
+
 ---
 
 # 1. Product Vision
