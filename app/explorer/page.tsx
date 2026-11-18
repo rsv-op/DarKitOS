@@ -138,8 +138,8 @@ export default function ExplorerPage() {
 
   return (
     <AppShell
-      title="Virtual File Explorer & Operational Asset Vault (/explorer)"
-      subtitle="Upload, categorize, and inspect health inspection certificates, SOP manuals, recipe specs, menu photography, and Cloud7 ADRs."
+      title="File Explorer"
+      subtitle="Keep kitchen documents, recipe guides, and menu photos in one place."
     >
       <div className="space-y-6">
         {notice && (

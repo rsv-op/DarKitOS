@@ -9,6 +9,7 @@ import {
 import Link from "next/link";
 import AppShell from "@/components/AppShell";
 import DesktopWindowManager from "@/components/DesktopWindowManager";
+import WorkspaceQuickStart from "@/components/WorkspaceQuickStart";
 import {
   BRANDS_DB,
   KITCHENS_DB,
@@ -419,11 +420,11 @@ export default function OwnerPage() {
 
   return (
     <AppShell
-      title="Owner Command Center & Core Desktop"
-      subtitle="Observational command center across Cloud7 infrastructure, VerticalForge diagnostics, and DarKIT OS stations."
+      title="Overview"
+      subtitle="See orders, ingredient stock, and sales across the kitchens you can access."
       actions={
         <>
-          <div className="flex rounded-xl border border-slate-800 bg-slate-900 p-1">
+          <div role="group" aria-label="Overview view" className="flex rounded-xl border border-slate-800 bg-slate-900 p-1">
             <button
               type="button"
               onClick={() =>
@@ -435,7 +436,7 @@ export default function OwnerPage() {
                   : "text-slate-400 hover:text-white"
               }`}
             >
-              ◈ Fluidic Dashboard
+              Dashboard
             </button>
             <button
               type="button"
@@ -448,7 +449,7 @@ export default function OwnerPage() {
                   : "text-slate-400 hover:text-white"
               }`}
             >
-              ⊞ Desktop Window Manager
+              Desktop view
             </button>
           </div>
 
@@ -456,33 +457,8 @@ export default function OwnerPage() {
             href="/order-injection"
             className="rounded-xl bg-sky-500 px-3.5 py-2 font-mono text-xs font-bold text-slate-950 transition hover:bg-sky-400"
           >
-            + Inject Order
+            Add sample order
           </Link>
-
-          <button
-            type="button"
-            onClick={() =>
-              void handleStoreAction(
-                "RESET_STORE",
-              )
-            }
-            className="rounded-xl border border-slate-700 bg-slate-900 px-3 py-2 font-mono text-xs font-semibold text-slate-300 hover:border-sky-500/40 hover:text-white"
-          >
-            Reset Seed
-          </button>
-
-          <button
-            type="button"
-            onClick={() =>
-              void handleStoreAction(
-                "CLEAR_ORDERS",
-              )
-            }
-            className="rounded-xl border border-slate-800 bg-slate-900 px-3 py-2 font-mono text-xs font-semibold text-slate-400 hover:border-amber-500/40 hover:text-amber-300"
-            title="Clear all orders to inspect honest empty states"
-          >
-            Empty State Test
-          </button>
 
           <button
             type="button"
@@ -511,11 +487,11 @@ export default function OwnerPage() {
         />
       ) : (
         <div className="space-y-6">
-          {/* Scope Filters & Station Shortcuts */}
-          <section className="grid gap-4 rounded-2xl border border-slate-800/90 bg-slate-900/60 p-4 sm:grid-cols-2 lg:grid-cols-4">
+          <WorkspaceQuickStart />
+          <section aria-label="Overview filters" className="grid gap-4 rounded-2xl border border-slate-800/90 bg-slate-900/60 p-4 sm:grid-cols-2">
             <label className="block">
               <span className="font-mono text-[11px] font-bold uppercase tracking-wider text-slate-400">
-                Physical Kitchen Scope
+                Kitchen location
               </span>
               <select
                 value={kitchenScope}
@@ -527,7 +503,7 @@ export default function OwnerPage() {
                 className="mt-1.5 w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm text-white outline-none focus:border-sky-400"
               >
                 <option value="ALL">
-                  All Physical Kitchens (K1–K4)
+                  All kitchens
                 </option>
                 {KITCHENS_DB.map((k) => (
                   <option
@@ -542,7 +518,7 @@ export default function OwnerPage() {
 
             <label className="block">
               <span className="font-mono text-[11px] font-bold uppercase tracking-wider text-slate-400">
-                Virtual Brand Scope
+                Food brand
               </span>
               <select
                 value={brandScope}
@@ -552,7 +528,7 @@ export default function OwnerPage() {
                 className="mt-1.5 w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm text-white outline-none focus:border-sky-400"
               >
                 <option value="ALL">
-                  All Virtual Brands (4 DBAs)
+                  All brands
                 </option>
                 {BRANDS_DB.map((b) => (
                   <option
@@ -565,37 +541,6 @@ export default function OwnerPage() {
               </select>
             </label>
 
-            <div className="sm:col-span-2 flex flex-col justify-end">
-              <span className="font-mono text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-1.5">
-                Quick Station Launchers
-              </span>
-              <div className="grid grid-cols-4 gap-2">
-                <Link
-                  href="/live-orders"
-                  className="rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-center font-mono text-xs font-bold text-slate-200 hover:border-sky-500/50 hover:text-sky-300"
-                >
-                  Live Orders
-                </Link>
-                <Link
-                  href="/kds"
-                  className="rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-center font-mono text-xs font-bold text-sky-300 hover:border-sky-500/50"
-                >
-                  Cook KDS
-                </Link>
-                <Link
-                  href="/dispatch"
-                  className="rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-center font-mono text-xs font-bold text-emerald-300 hover:border-emerald-500/50"
-                >
-                  Dispatch
-                </Link>
-                <Link
-                  href="/inventory"
-                  className="rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-center font-mono text-xs font-bold text-amber-300 hover:border-amber-500/50"
-                >
-                  Inventory
-                </Link>
-              </div>
-            </div>
           </section>
 
           {/* 8 Real-Time KPI Cards */}
@@ -605,13 +550,13 @@ export default function OwnerPage() {
               value={String(
                 analytics.totalOrders,
               )}
-              sub="Canonical Store"
+              sub="Across selected kitchens"
               tone="slate"
             />
             <KpiCard
               label="Gross Sales"
               value={`$${analytics.grossRevenue.toFixed(2)}`}
-              sub={`AOV $${analytics.aov.toFixed(2)}`}
+              sub={`Average $${analytics.aov.toFixed(2)} per order`}
               tone="emerald"
             />
             <KpiCard
@@ -627,11 +572,11 @@ export default function OwnerPage() {
               value={String(
                 analytics.preparingOrders,
               )}
-              sub="On KDS Station"
+              sub="On the Kitchen Board"
               tone="amber"
             />
             <KpiCard
-              label="Ready Pass"
+              label="Ready for Pickup"
               value={String(
                 analytics.readyOrders,
               )}
@@ -643,7 +588,7 @@ export default function OwnerPage() {
               value={String(
                 analytics.completedOrders,
               )}
-              sub="Completed Lifecycle"
+              sub="Handed to courier"
               tone="teal"
             />
             <KpiCard
@@ -672,17 +617,17 @@ export default function OwnerPage() {
             <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
               <div>
                 <h2 className="text-sm font-bold uppercase tracking-wider text-white">
-                  Canonical Order State Machine Distribution
+                  Orders by status
                 </h2>
                 <p className="text-xs text-slate-400">
-                  Live distribution across immutable transitions: PENDING → PREPARING → READY_FOR_PICKUP → DRIVER_ASSIGNED → PICKED_UP → DISPATCHED
+                  See how many orders are waiting, cooking, or on their way out.
                 </p>
               </div>
               <Link
                 href="/live-orders"
                 className="font-mono text-xs font-bold text-sky-400 hover:underline"
               >
-                Inspect All Orders →
+                View Live Orders →
               </Link>
             </div>
 
@@ -1162,6 +1107,18 @@ export default function OwnerPage() {
           </section>
         </div>
       )}
+      <details className="mt-6 rounded-xl border border-slate-800 bg-slate-900/60 p-4">
+        <summary className="cursor-pointer text-sm font-semibold text-slate-300">Demo data tools</summary>
+        <p className="mt-2 text-sm text-slate-400">These actions change the shared demo workspace.</p>
+        <div className="mt-3 flex flex-wrap gap-2">
+          <button type="button" onClick={() => void handleStoreAction("RESET_STORE")} className="rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-xs font-semibold text-slate-200 hover:border-sky-500/40">
+            Reset sample data
+          </button>
+          <button type="button" onClick={() => void handleStoreAction("CLEAR_ORDERS")} className="rounded-lg border border-amber-500/25 bg-slate-950 px-3 py-2 text-xs font-semibold text-amber-200 hover:border-amber-500/60">
+            Clear all orders
+          </button>
+        </div>
+      </details>
     </AppShell>
   );
 }

@@ -455,8 +455,8 @@ export default function DispatchPage() {
 
   return (
     <AppShell
-      title="Dispatch Handoff & Courier Evidence Hub"
-      subtitle="Orchestrate READY_FOR_PICKUP → DRIVER_ASSIGNED → PICKED_UP → DISPATCHED transitions and preserve handoff evidence for accounting claims."
+      title="Dispatch"
+      subtitle="Assign a driver to a ready order, confirm pickup, and record the handoff."
       actions={
         <>
           <select

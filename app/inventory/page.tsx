@@ -279,8 +279,8 @@ export default function InventoryPage() {
 
   return (
     <AppShell
-      title="Stock Control & Inventory Consumption Ledger"
-      subtitle="Manage canonical physical stock levels, reorder thresholds, restocks, waste/loss adjustments, and audit real-time recipe depletion movements."
+      title="Inventory"
+      subtitle="See what ingredients are on hand, what’s running low, and what was used when meals were prepared."
       actions={
         <button
           type="button"

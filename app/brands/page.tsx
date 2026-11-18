@@ -190,8 +190,8 @@ export default function BrandsPage() {
 
   return (
     <AppShell
-      title="Virtual Brand Management & BrandKitchen Matrix"
-      subtitle="Administer virtual food brands (DBAs), control the many-to-many BrandKitchen production matrix, and manage recipe-linked menu catalogs."
+      title="Brands"
+      subtitle="Manage the food brands and menus customers order from, and choose which kitchens can prepare each menu."
     >
       <div className="space-y-6">
         {error && (

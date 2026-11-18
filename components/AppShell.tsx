@@ -6,6 +6,8 @@ import React, {
   useState,
 } from "react";
 import Link from "next/link";
+import GuideIcon, { type GuideIconName } from "@/components/GuideIcon";
+import { DEMO_ROLES } from "@/lib/getting-started";
 import {
   usePathname,
   useRouter,
@@ -28,119 +30,94 @@ interface NavItem {
   label: string;
   href: string;
   aliases?: string[];
-  badge?: string;
   group: "command" | "operations" | "enterprise";
   permission?: PermissionCode;
-  icon: string;
+  icon: GuideIconName;
 }
 
 const NAV_ITEMS: NavItem[] = [
   {
-    label: "Command Center",
+    label: "Overview",
     href: "/dashboard",
     aliases: ["/owner"],
     group: "command",
-    icon: "⌘",
+    icon: "home",
   },
   {
-    label: "BI & VerticalForge",
+    label: "Getting started",
+    href: "/",
+    group: "command",
+    icon: "info",
+  },
+  {
+    label: "Analytics",
     href: "/analytics",
     aliases: ["/performance"],
-    badge: "ROI",
     group: "command",
-    icon: "◈",
+    icon: "chart",
   },
   {
-    label: "Order Injection",
+    label: "Sample Orders",
     href: "/order-injection",
     aliases: ["/dev"],
-    badge: "SIM",
     group: "operations",
-    icon: "⚡",
+    icon: "ticket",
   },
   {
     label: "Live Orders",
     href: "/live-orders",
     aliases: ["/orders"],
     group: "operations",
-    icon: "◎",
+    icon: "list",
   },
   {
-    label: "Cook KDS",
+    label: "Kitchen Board",
     href: "/kds",
     aliases: ["/cook"],
-    badge: "KDS",
     group: "operations",
-    icon: "🔥",
+    icon: "cook",
   },
   {
-    label: "Dispatch Hub",
+    label: "Dispatch",
     href: "/dispatch",
     group: "operations",
-    icon: "✦",
+    icon: "truck",
   },
   {
-    label: "Stock Control",
+    label: "Inventory",
     href: "/inventory",
     group: "operations",
-    icon: "▣",
+    icon: "box",
   },
   {
-    label: "Virtual Brands",
+    label: "Brands",
     href: "/brands",
     group: "enterprise",
-    icon: "❖",
+    icon: "brand",
   },
   {
-    label: "Physical Kitchens",
+    label: "Kitchens",
     href: "/kitchens",
     group: "enterprise",
-    icon: "⌂",
+    icon: "home",
   },
   {
-    label: "Staff & RBAC",
+    label: "Staff & access",
     href: "/staff",
     group: "enterprise",
-    icon: "⛨",
+    icon: "staff",
   },
   {
     label: "File Explorer",
     href: "/explorer",
     group: "enterprise",
-    icon: "▤",
+    icon: "folder",
   },
   {
-    label: "OS Settings",
+    label: "Settings",
     href: "/settings",
     group: "enterprise",
-    icon: "⚙",
-  },
-];
-
-const QUICK_PERSONAS = [
-  {
-    code: "OWNER-01",
-    label: "Owner (Patric)",
-    role: "OWNER",
-    color: "text-amber-300 border-amber-500/40 bg-amber-500/10",
-  },
-  {
-    code: "0001",
-    label: "Manager (Priya • K1)",
-    role: "MANAGER",
-    color: "text-purple-300 border-purple-500/40 bg-purple-500/10",
-  },
-  {
-    code: "2001",
-    label: "Line Cook (Rajesh • K1)",
-    role: "LINE_COOK",
-    color: "text-sky-300 border-sky-500/40 bg-sky-500/10",
-  },
-  {
-    code: "3001",
-    label: "Dispatch (Arjun • K1)",
-    role: "DISPATCH",
-    color: "text-emerald-300 border-emerald-500/40 bg-emerald-500/10",
+    icon: "settings",
   },
 ];
 
@@ -244,11 +221,6 @@ export default function AppShell({
   };
 
   const currentEmp = session?.employee;
-  const syncMode =
-    session?.settings?.syncMode || "WEBSOCKET";
-  const circuitState =
-    session?.settings?.circuitBreakerState ||
-    "CLOSED";
   const theme =
     session?.settings?.theme || "obsidian";
 
@@ -265,10 +237,10 @@ export default function AppShell({
     <div
       className={`min-h-screen ${themeBg} text-slate-100 flex flex-col selection:bg-sky-500/30 selection:text-sky-200`}
     >
-      {/* Top Cloud7 / VerticalForge / DarKIT OS Telemetry Bar */}
+      {/* Workspace toolbar */}
       <header className="sticky top-0 z-40 border-b border-slate-800/80 bg-slate-950/85 backdrop-blur-xl">
         <div className="mx-auto flex h-14 max-w-[1600px] items-center justify-between gap-3 px-4 sm:px-6">
-          {/* Left: Brand Logo & Ecosystem Status */}
+          {/* Brand and mobile navigation */}
           <div className="flex items-center gap-3">
             <button
               type="button"
@@ -276,7 +248,8 @@ export default function AppShell({
                 setMobileMenuOpen(!mobileMenuOpen)
               }
               className="flex h-9 w-9 items-center justify-center rounded-lg border border-slate-800 bg-slate-900 text-slate-300 lg:hidden"
-              aria-label="Toggle navigation"
+              aria-label="Open workspace navigation"
+              aria-expanded={mobileMenuOpen}
             >
               ☰
             </button>
@@ -285,60 +258,27 @@ export default function AppShell({
               href="/dashboard"
               className="flex items-center gap-2.5 group"
             >
-              <div className="flex h-9 w-9 items-center justify-center rounded-xl border border-sky-500/40 bg-gradient-to-br from-sky-500/20 to-emerald-500/20 shadow-[0_0_20px_rgba(14,165,233,0.2)] transition group-hover:border-sky-400">
-                <span className="font-mono text-sm font-black tracking-tighter text-sky-400">
-                  DK
-                </span>
-              </div>
+              <span className="grid h-9 w-9 place-items-center rounded-xl border border-cyan-300/20 bg-cyan-300/10 text-cyan-200 transition group-hover:border-cyan-300/45">
+                <GuideIcon name="brand" />
+              </span>
               <div>
-                <div className="flex items-center gap-1.5">
-                  <span className="font-mono text-sm font-black tracking-tight text-white">
-                    DarKIT
-                  </span>
-                  <span className="font-mono text-sm font-black text-emerald-400">
-                    OS
-                  </span>
-                  <span className="hidden rounded border border-slate-700/80 bg-slate-900 px-1.5 py-0.5 font-mono text-[10px] text-slate-400 sm:inline-block">
-                    v4.2 • Cloud7
-                  </span>
-                </div>
+                <span className="text-sm font-bold tracking-tight text-white">
+                  DarKit<span className="text-cyan-200">OS</span>
+                </span>
                 <p className="hidden text-[10px] text-slate-400 sm:block">
-                  VerticalForge Diagnostic & Kitchen Command
+                  Cloud kitchen workspace
                 </p>
               </div>
             </Link>
-
-            {/* Telemetry Pills */}
-            <div className="hidden xl:flex items-center gap-2 pl-4 border-l border-slate-800/80">
-              <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-1 font-mono text-[10px] font-semibold text-emerald-300">
-                <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                SYNC: {syncMode}
-              </span>
-              <span className="inline-flex items-center gap-1.5 rounded-full border border-sky-500/30 bg-sky-500/10 px-2.5 py-1 font-mono text-[10px] font-semibold text-sky-300">
-                RLS: is_local=true
-              </span>
-              <span
-                className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 font-mono text-[10px] font-semibold ${
-                  circuitState === "CLOSED"
-                    ? "border-slate-700 bg-slate-900 text-slate-300"
-                    : circuitState === "HALF_OPEN"
-                      ? "border-amber-500/40 bg-amber-500/10 text-amber-300"
-                      : "border-red-500/40 bg-red-500/10 text-red-300"
-                }`}
-              >
-                GATEWAY: {circuitState}
-              </span>
-            </div>
           </div>
 
-          {/* Right: Persona Switcher, ADR Reference, Clock, User & Logout */}
+          {/* Demo roles, technical details, and account */}
           <div className="flex items-center gap-2 sm:gap-3">
-            {/* Quick Role Switcher for seamless RBAC testing */}
-            <div className="hidden md:flex items-center gap-1 rounded-xl border border-slate-800 bg-slate-900/90 p-1">
+            <div role="group" aria-label="Demo role" className="hidden lg:flex items-center gap-1 rounded-xl border border-slate-800 bg-slate-900/90 p-1">
               <span className="px-2 font-mono text-[10px] uppercase tracking-wider text-slate-400">
-                Persona:
+                Demo role:
               </span>
-              {QUICK_PERSONAS.map((p) => {
+              {DEMO_ROLES.map((p) => {
                 const active =
                   currentEmp?.employeeCode ===
                   p.code;
@@ -359,11 +299,10 @@ export default function AppShell({
                         ? "bg-sky-500 text-slate-950 shadow-sm"
                         : "text-slate-300 hover:bg-slate-800 hover:text-white"
                     }`}
+                    aria-pressed={active}
                     title={`Switch to ${p.label}`}
                   >
-                    {p.role === "LINE_COOK"
-                      ? "COOK"
-                      : p.role}
+                    {p.label}
                   </button>
                 );
               })}
@@ -372,19 +311,19 @@ export default function AppShell({
             <button
               type="button"
               onClick={() => setAdrModalOpen(true)}
-              className="rounded-xl border border-sky-500/30 bg-sky-500/10 px-3 py-1.5 font-mono text-xs font-semibold text-sky-300 transition hover:bg-sky-500/20"
+              className="hidden rounded-xl border border-slate-700 bg-slate-900 px-3 py-1.5 text-xs font-semibold text-slate-300 transition hover:bg-slate-800 sm:inline-flex"
             >
-              ADR Spec
+              System details
             </button>
 
             {currentEmp && (
               <div className="flex items-center gap-2 rounded-xl border border-slate-800 bg-slate-900/90 px-3 py-1.5">
-                <div className="text-right">
+                <div className="hidden text-right sm:block">
                   <p className="text-xs font-bold leading-none text-white">
                     {currentEmp.name}
                   </p>
                   <p className="mt-0.5 font-mono text-[10px] text-emerald-400">
-                    {currentEmp.role} •{" "}
+                    {DEMO_ROLES.find(({ role }) => role === currentEmp.role)?.label ?? currentEmp.role} •{" "}
                     {currentEmp.kitchenId ||
                       "GLOBAL"}
                   </p>
@@ -397,7 +336,7 @@ export default function AppShell({
                   className="ml-1 rounded-lg border border-slate-700 bg-slate-800 px-2 py-1 font-mono text-[10px] font-semibold text-slate-300 hover:border-red-500/40 hover:bg-red-500/10 hover:text-red-300"
                   title="Sign out of station"
                 >
-                  Exit
+                  Sign out
                 </button>
               </div>
             )}
@@ -417,10 +356,10 @@ export default function AppShell({
         <aside className="hidden lg:flex w-64 shrink-0 flex-col justify-between border-r border-slate-800/80 bg-slate-950/50 p-4">
           <div className="space-y-6">
             <div>
-              <p className="px-3 font-mono text-[10px] font-bold uppercase tracking-widest text-slate-500">
-                Command & Diagnostics
+              <p className="px-3 font-mono text-[10px] font-bold uppercase tracking-widest text-slate-400">
+                Workspace
               </p>
-              <nav className="mt-2 space-y-1">
+              <nav aria-label="Workspace" className="mt-2 space-y-1">
                 {NAV_ITEMS.filter(
                   (i) => i.group === "command",
                 ).map((item) => {
@@ -430,6 +369,7 @@ export default function AppShell({
                     <Link
                       key={item.href}
                       href={item.href}
+                      aria-current={active ? "page" : undefined}
                       className={`flex items-center justify-between rounded-xl px-3 py-2.5 text-sm font-medium transition-all ${
                         active
                           ? "bg-gradient-to-r from-sky-500/20 to-emerald-500/10 text-white border border-sky-500/40 shadow-[0_0_20px_rgba(14,165,233,0.12)]"
@@ -437,16 +377,9 @@ export default function AppShell({
                       }`}
                     >
                       <span className="flex items-center gap-2.5">
-                        <span className="font-mono text-base text-sky-400">
-                          {item.icon}
-                        </span>
+                        <GuideIcon name={item.icon} className="h-4 w-4 shrink-0 text-sky-300" />
                         {item.label}
                       </span>
-                      {item.badge && (
-                        <span className="rounded-md bg-slate-800 px-1.5 py-0.5 font-mono text-[10px] font-bold text-sky-300">
-                          {item.badge}
-                        </span>
-                      )}
                     </Link>
                   );
                 })}
@@ -454,10 +387,10 @@ export default function AppShell({
             </div>
 
             <div>
-              <p className="px-3 font-mono text-[10px] font-bold uppercase tracking-widest text-slate-500">
-                Live Kitchen Pipeline
+              <p className="px-3 font-mono text-[10px] font-bold uppercase tracking-widest text-slate-400">
+                Orders & stock
               </p>
-              <nav className="mt-2 space-y-1">
+              <nav aria-label="Orders and stock" className="mt-2 space-y-1">
                 {NAV_ITEMS.filter(
                   (i) => i.group === "operations",
                 ).map((item) => {
@@ -467,6 +400,7 @@ export default function AppShell({
                     <Link
                       key={item.href}
                       href={item.href}
+                      aria-current={active ? "page" : undefined}
                       className={`flex items-center justify-between rounded-xl px-3 py-2.5 text-sm font-medium transition-all ${
                         active
                           ? "bg-gradient-to-r from-sky-500/20 to-emerald-500/10 text-white border border-sky-500/40 shadow-[0_0_20px_rgba(14,165,233,0.12)]"
@@ -474,16 +408,9 @@ export default function AppShell({
                       }`}
                     >
                       <span className="flex items-center gap-2.5">
-                        <span className="font-mono text-base text-emerald-400">
-                          {item.icon}
-                        </span>
+                        <GuideIcon name={item.icon} className="h-4 w-4 shrink-0 text-emerald-300" />
                         {item.label}
                       </span>
-                      {item.badge && (
-                        <span className="rounded-md bg-slate-800 px-1.5 py-0.5 font-mono text-[10px] font-bold text-emerald-300">
-                          {item.badge}
-                        </span>
-                      )}
                     </Link>
                   );
                 })}
@@ -491,10 +418,10 @@ export default function AppShell({
             </div>
 
             <div>
-              <p className="px-3 font-mono text-[10px] font-bold uppercase tracking-widest text-slate-500">
-                Enterprise & OS Modules
+              <p className="px-3 font-mono text-[10px] font-bold uppercase tracking-widest text-slate-400">
+                Team & setup
               </p>
-              <nav className="mt-2 space-y-1">
+              <nav aria-label="Team and setup" className="mt-2 space-y-1">
                 {NAV_ITEMS.filter(
                   (i) => i.group === "enterprise",
                 ).map((item) => {
@@ -504,6 +431,7 @@ export default function AppShell({
                     <Link
                       key={item.href}
                       href={item.href}
+                      aria-current={active ? "page" : undefined}
                       className={`flex items-center justify-between rounded-xl px-3 py-2.5 text-sm font-medium transition-all ${
                         active
                           ? "bg-gradient-to-r from-sky-500/20 to-emerald-500/10 text-white border border-sky-500/40 shadow-[0_0_20px_rgba(14,165,233,0.12)]"
@@ -511,9 +439,7 @@ export default function AppShell({
                       }`}
                     >
                       <span className="flex items-center gap-2.5">
-                        <span className="font-mono text-base text-amber-400">
-                          {item.icon}
-                        </span>
+                        <GuideIcon name={item.icon} className="h-4 w-4 shrink-0 text-amber-300" />
                         {item.label}
                       </span>
                     </Link>
@@ -523,43 +449,9 @@ export default function AppShell({
             </div>
           </div>
 
-          {/* Ecosystem Footer Card */}
-          <div className="mt-6 rounded-2xl border border-slate-800/90 bg-slate-900/60 p-3.5">
-            <div className="flex items-center justify-between">
-              <span className="font-mono text-[10px] font-bold uppercase tracking-wider text-sky-400">
-                Cloud7 Matrix
-              </span>
-              <span className="h-2 w-2 rounded-full bg-emerald-400" />
-            </div>
-            <p className="mt-1 text-xs font-semibold text-slate-200">
-              Single Canonical Store
-            </p>
-            <p className="mt-0.5 text-[11px] text-slate-400">
-              UI → API → Domain → Store → Persistence
-            </p>
-            {session?.permissions && (
-              <div className="mt-2.5 flex flex-wrap gap-1">
-                {session.permissions
-                  .slice(0, 4)
-                  .map((perm) => (
-                    <span
-                      key={perm}
-                      className="rounded bg-slate-950 px-1.5 py-0.5 font-mono text-[9px] text-slate-400"
-                    >
-                      {perm}
-                    </span>
-                  ))}
-                {session.permissions.length >
-                  4 && (
-                  <span className="rounded bg-slate-950 px-1.5 py-0.5 font-mono text-[9px] text-sky-400">
-                    +
-                    {session.permissions.length -
-                      4}{" "}
-                    more
-                  </span>
-                )}
-              </div>
-            )}
+          <div className="mt-6 rounded-xl border border-slate-800 bg-slate-900/60 p-3.5">
+            <p className="text-xs font-semibold text-slate-200">Demo workspace</p>
+            <p className="mt-1 text-xs leading-5 text-slate-400">Sample data only. Changes may reset.</p>
           </div>
         </aside>
 
@@ -576,13 +468,14 @@ export default function AppShell({
               <div>
                 <div className="mb-4 flex items-center justify-between">
                   <span className="font-mono text-base font-bold text-white">
-                    DarKIT OS Navigation
+                    Workspace navigation
                   </span>
                   <button
                     type="button"
                     onClick={() =>
                       setMobileMenuOpen(false)
                     }
+                    aria-label="Close workspace navigation"
                     className="rounded-lg border border-slate-800 px-2.5 py-1 text-xs text-slate-400"
                   >
                     ✕
@@ -590,15 +483,17 @@ export default function AppShell({
                 </div>
 
                 {/* Mobile Persona Switcher */}
-                <div className="mb-4 rounded-xl border border-slate-800 bg-slate-900 p-2.5">
+                <div role="group" aria-label="Demo role" className="mb-4 rounded-xl border border-slate-800 bg-slate-900 p-2.5">
                   <p className="mb-2 font-mono text-[10px] uppercase text-slate-400">
-                    Switch Active Persona
+                    Switch demo role
                   </p>
                   <div className="grid grid-cols-2 gap-1.5">
-                    {QUICK_PERSONAS.map((p) => (
+                    {DEMO_ROLES.map((p) => (
                       <button
                         key={p.code}
                         type="button"
+                        disabled={switchingCode !== null}
+                        aria-pressed={currentEmp?.employeeCode === p.code}
                         onClick={() =>
                           void handleQuickSwitch(
                             p.code,
@@ -611,17 +506,18 @@ export default function AppShell({
                             : "bg-slate-800 text-slate-300"
                         }`}
                       >
-                        {p.role}
+                        {p.label}
                       </button>
                     ))}
                   </div>
                 </div>
 
-                <nav className="space-y-1">
+                <nav aria-label="Workspace" className="space-y-1">
                   {NAV_ITEMS.map((item) => (
                     <Link
                       key={item.href}
                       href={item.href}
+                      aria-current={isRouteActive(item) ? "page" : undefined}
                       onClick={() =>
                         setMobileMenuOpen(false)
                       }
@@ -632,12 +528,19 @@ export default function AppShell({
                       }`}
                     >
                       <span className="flex items-center gap-2">
-                        <span>{item.icon}</span>
+                        <GuideIcon name={item.icon} className="h-4 w-4 shrink-0 text-cyan-300" />
                         {item.label}
                       </span>
                     </Link>
                   ))}
                 </nav>
+                <button
+                  type="button"
+                  onClick={() => { setMobileMenuOpen(false); setAdrModalOpen(true); }}
+                  className="mt-4 rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-xs font-semibold text-slate-300 sm:hidden"
+                >
+                  System details
+                </button>
               </div>
             </div>
           </div>
@@ -650,7 +553,7 @@ export default function AppShell({
             <div>
               <div className="flex items-center gap-2">
                 <span className="font-mono text-[11px] font-semibold uppercase tracking-widest text-sky-400">
-                  DarKIT OS • Unified Vertical Operating System
+                  DarKitOS · Cloud kitchen workspace
                 </span>
               </div>
               <h1 className="mt-1 text-2xl font-black tracking-tight text-white sm:text-3xl">
