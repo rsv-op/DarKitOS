@@ -7,7 +7,6 @@ import {
 } from "react";
 import AppShell from "@/components/AppShell";
 import {
-  EMPLOYEES_DB,
   KITCHENS_DB,
   PERMISSIONS_DB,
   ROLE_PERMISSIONS_DB,
@@ -25,7 +24,7 @@ const ROLES: EmployeeRole[] = [
 export default function StaffPage() {
   const [employees, setEmployees] = useState<
     Employee[]
-  >(EMPLOYEES_DB);
+  >([]);
   const [roleFilter, setRoleFilter] =
     useState<string>("ALL");
   const [kitchenFilter, setKitchenFilter] =

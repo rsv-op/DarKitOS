@@ -7,12 +7,14 @@ import {
 } from "react";
 import Link from "next/link";
 import AppShell from "@/components/AppShell";
+import { formatCurrency, type SupportedCurrency } from "@/lib/currency";
 import {
   KITCHENS_DB,
   type BrandKitchenConfig,
   type Employee,
   type KitchenConfig,
   type Order,
+  type SystemSettings,
 } from "@/lib/db";
 
 export default function KitchensPage() {
@@ -29,6 +31,8 @@ export default function KitchensPage() {
   >([]);
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
+  const [currency, setCurrency] =
+    useState<SupportedCurrency>("INR");
 
   const loadData = useCallback(async () => {
     try {
@@ -50,6 +54,8 @@ export default function KitchensPage() {
         setOrders(data.orders);
       if (Array.isArray(data.employees))
         setEmployees(data.employees);
+      if (data.settings?.currency)
+        setCurrency(data.settings.currency);
     } catch (err) {
       setError(
         err instanceof Error
@@ -61,6 +67,13 @@ export default function KitchensPage() {
 
   useEffect(() => {
     void loadData();
+    const onSettingsUpdated = (event: Event) => {
+      const custom = event as CustomEvent<SystemSettings>;
+      if (custom.detail?.currency) setCurrency(custom.detail.currency);
+    };
+    window.addEventListener("darkit:settings-updated", onSettingsUpdated);
+    return () =>
+      window.removeEventListener("darkit:settings-updated", onSettingsUpdated);
   }, [loadData]);
 
   async function toggleKitchen(
@@ -228,7 +241,7 @@ export default function KitchensPage() {
                       Gross Revenue
                     </p>
                     <p className="mt-1 text-2xl font-black text-emerald-400">
-                      ${revenue.toFixed(2)}
+                      {formatCurrency(revenue, currency)}
                     </p>
                   </div>
                 </div>

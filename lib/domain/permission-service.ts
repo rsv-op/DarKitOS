@@ -37,3 +37,28 @@ export function getRolePermissions(
     allowedIds.has(p.id),
   ).map((p) => p.code);
 }
+
+/**
+ * Returns true if the employee can view/act across all physical kitchens.
+ * Only OWNER accounts (or accounts explicitly lacking a kitchen assignment while holding OWNER_VIEW)
+ * have multi-kitchen global visibility.
+ */
+export function hasGlobalScope(employee: Employee): boolean {
+  return employee.role === "OWNER" || !employee.kitchenId;
+}
+
+/**
+ * Returns true if the employee is authorized to view or act on a specific kitchen.
+ */
+export function canAccessKitchen(
+  employee: Employee,
+  kitchenId: string | undefined,
+): boolean {
+  if (!kitchenId || kitchenId === "GLOBAL") {
+    return hasGlobalScope(employee);
+  }
+  if (hasGlobalScope(employee)) {
+    return true;
+  }
+  return employee.kitchenId === kitchenId;
+}

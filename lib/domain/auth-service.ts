@@ -1,9 +1,13 @@
+import { cookies } from "next/headers";
 import type { NextRequest } from "next/server";
 import { type Employee } from "@/lib/db";
 import { getEmployees } from "@/lib/store";
 import {
   findEmployeeByCode,
   getSession,
+  isDemoSandboxEnabled,
+  sanitizeEmployee,
+  type PublicEmployee,
 } from "@/lib/auth";
 
 export function getEmployeeByCode(
@@ -12,72 +16,55 @@ export function getEmployeeByCode(
   return findEmployeeByCode(employeeCode, getEmployees());
 }
 
-export function getEmployeeFromCookie(
-  cookieValue?: string,
-): Employee | null {
-  if (!cookieValue) {
-    return null;
-  }
-
-  return getEmployeeByCode(cookieValue);
-}
-
 export async function getAuthenticatedEmployee(
   request?: NextRequest,
-): Promise<Employee | null> {
-  // 1. Check explicit header (used in iframe preview environments where 3rd-party cookies may be blocked)
-  const headerCode = request?.headers.get(
-    "x-employee-code",
-  );
-  if (headerCode) {
-    const byHeader = getEmployeeByCode(headerCode);
-    if (byHeader) return byHeader;
-  }
-
-  // 2. Check employee_code cookie
-  const empCode = request
-    ? request.cookies.get("employee_code")?.value
-    : undefined;
-
-  if (empCode) {
-    const byCode = getEmployeeByCode(empCode);
-    if (byCode) return byCode;
-  }
-
-  // 3. Check signed JWT session cookie
-  const session = await getSession(request);
-  if (session) {
-    if (session.employeeCode) {
-      const byCode = getEmployeeByCode(
-        session.employeeCode,
-      );
-      if (byCode) return byCode;
-    }
-
-    const employees = getEmployees();
-    const byId = employees.find(
-      (e) => e.active && e.id === session.userId,
-    );
-    if (byId) return byId;
-
-    return {
-      id: session.userId,
-      employeeCode:
-        session.employeeCode || session.role,
-      name: session.name || session.role,
-      role: session.role,
-      kitchenId: session.kitchenId || "K1",
-      active: true,
-    };
-  }
-
-  // 4. Default to canonical OWNER-01 session for seamless preview access unless explicitly logged out
-  const loggedOut = request?.cookies.get(
-    "dark_cloud_logged_out",
-  )?.value;
-  if (loggedOut === "1") {
+): Promise<PublicEmployee | null> {
+  // 1. Respect explicit sign-out marker FIRST (for both Route Handlers and Server Components)
+  const cookieStore = request ? request.cookies : cookies();
+  if (cookieStore.get("dark_cloud_logged_out")?.value === "1") {
     return null;
   }
 
-  return getEmployeeByCode("OWNER-01");
+  // 2. Verify signed HS256 JWT session cookie
+  const session = await getSession(request);
+  if (session) {
+    const employees = getEmployees();
+
+    if (session.developer && isDemoSandboxEnabled()) {
+      return {
+        id: session.userId || "EMP-DEV-01",
+        employeeCode: session.employeeCode || "DEVELOPER",
+        name: session.name || "DarKitOS Demo Architect",
+        role: "OWNER",
+        kitchenId: session.kitchenId || "K1",
+        active: true,
+      };
+    }
+
+    const activeMatch = employees.find(
+      (e) =>
+        e.active &&
+        (e.id === session.userId ||
+          (session.employeeCode &&
+            e.employeeCode.toLowerCase() ===
+              session.employeeCode.toLowerCase())),
+    );
+    if (activeMatch) {
+      return sanitizeEmployee(activeMatch);
+    }
+
+    // Employee was deactivated or removed since JWT was issued
+    return null;
+  }
+
+  // 3. In non-demo production mode, require explicit authentication
+  if (!isDemoSandboxEnabled()) {
+    return null;
+  }
+
+  // 4. Instant demo sandbox default to OWNER-01 for seamless owner walkthroughs
+  const defaultOwner = getEmployeeByCode("OWNER-01");
+  return defaultOwner
+    ? sanitizeEmployee(defaultOwner)
+    : null;
 }

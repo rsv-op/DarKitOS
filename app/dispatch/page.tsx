@@ -8,9 +8,11 @@ import {
 } from "react";
 import Link from "next/link";
 import AppShell from "@/components/AppShell";
+import { formatCurrency, type SupportedCurrency } from "@/lib/currency";
 import {
   KITCHENS_DB,
   type Order,
+  type PermissionCode,
 } from "@/lib/db";
 
 const COURIER_PRESETS = [
@@ -53,6 +55,10 @@ export default function DispatchPage() {
     useState<string | null>(null);
   const [kitchenFilter, setKitchenFilter] =
     useState<string>("ALL");
+  const [canCancelOrders, setCanCancelOrders] =
+    useState<boolean>(false);
+  const [currency, setCurrency] =
+    useState<SupportedCurrency>("INR");
 
   // Inline driver assignment state per order
   const [driverInputs, setDriverInputs] =
@@ -60,6 +66,28 @@ export default function DispatchPage() {
   const [etaInputs, setEtaInputs] = useState<
     Record<string, number>
   >({});
+
+  useEffect(() => {
+    let active = true;
+    fetch("/api/session", { cache: "no-store" })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (!active || !data) return;
+        const perms = (data.permissions || []) as PermissionCode[];
+        setCanCancelOrders(
+          perms.includes("ORDER_CANCEL") || perms.includes("OWNER_VIEW"),
+        );
+        if (data.settings?.currency) {
+          setCurrency(data.settings.currency);
+        }
+      })
+      .catch(() => {
+        // ignore transient error
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const loadOrders = useCallback(async () => {
     try {
@@ -200,7 +228,7 @@ export default function DispatchPage() {
 
       if (action === "CANCELLED") {
         setNotice(
-          `Post-Pickup Cancellation Logged for ${orderId}: Aggregator Accounting Claim ($${(data.cancellationRecord?.claimAmount ?? 0).toFixed(2)}) created with preserved courier evidence.`,
+          `Post-Pickup Cancellation Logged for ${orderId}: Aggregator Accounting Claim (${formatCurrency(data.cancellationRecord?.claimAmount ?? 0, currency)}) created with preserved courier evidence.`,
         );
       } else {
         setNotice(
@@ -431,22 +459,24 @@ export default function DispatchPage() {
                 : "✓ MARK DISPATCHED (COMPLETE)"}
             </button>
 
-            <button
-              type="button"
-              disabled={isUpdating}
-              onClick={() =>
-                void updateOrder(
-                  order.id,
-                  "CANCELLED",
-                  undefined,
-                  undefined,
-                  "Post-pickup aggregator cancellation -> logged for accounting claim reconciliation",
-                )
-              }
-              className="w-full rounded-xl border border-red-500/40 bg-red-500/10 px-3 py-2 font-mono text-[10px] font-bold uppercase text-red-300 hover:bg-red-500/20"
-            >
-              ⚠ Post-Pickup Cancel (Aggregator Claim)
-            </button>
+            {canCancelOrders && (
+              <button
+                type="button"
+                disabled={isUpdating}
+                onClick={() =>
+                  void updateOrder(
+                    order.id,
+                    "CANCELLED",
+                    undefined,
+                    undefined,
+                    "Post-pickup aggregator cancellation -> logged for accounting claim reconciliation",
+                  )
+                }
+                className="w-full rounded-xl border border-red-500/40 bg-red-500/10 px-3 py-2 font-mono text-[10px] font-bold uppercase text-red-300 hover:bg-red-500/20"
+              >
+                ⚠ Post-Pickup Cancel (Aggregator Claim)
+              </button>
+            )}
           </div>
         )}
       </article>

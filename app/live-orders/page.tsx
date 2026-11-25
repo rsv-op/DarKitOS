@@ -10,6 +10,7 @@ import {
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import AppShell from "@/components/AppShell";
+import { formatCurrency, type SupportedCurrency } from "@/lib/currency";
 import {
   BRANDS_DB,
   KITCHENS_DB,
@@ -17,6 +18,7 @@ import {
   type Order,
   type OrderChannel,
   type OrderStatus,
+  type SystemSettings,
 } from "@/lib/db";
 
 const STATUSES: OrderStatus[] = [
@@ -82,6 +84,35 @@ export default function LiveOrdersPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [feedback, setFeedback] = useState("");
+  const [currency, setCurrency] =
+    useState<SupportedCurrency>("INR");
+
+  const fmt = useCallback(
+    (amount: number) => formatCurrency(amount, currency),
+    [currency],
+  );
+
+  useEffect(() => {
+    let active = true;
+    fetch("/api/session", { cache: "no-store" })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (!active || !data) return;
+        if (data.settings?.currency) setCurrency(data.settings.currency);
+      })
+      .catch(() => {
+        // ignore transient error
+      });
+    const onSettingsUpdated = (event: Event) => {
+      const custom = event as CustomEvent<SystemSettings>;
+      if (custom.detail?.currency) setCurrency(custom.detail.currency);
+    };
+    window.addEventListener("darkit:settings-updated", onSettingsUpdated);
+    return () => {
+      active = false;
+      window.removeEventListener("darkit:settings-updated", onSettingsUpdated);
+    };
+  }, []);
 
   const [statusFilter, setStatusFilter] =
     useState<string>("ALL");
@@ -237,7 +268,7 @@ export default function LiveOrdersPage() {
       } else if (nextStatus === "CANCELLED") {
         const rec = data.cancellationRecord;
         setFeedback(
-          `Order ${orderId} cancelled (${rec?.stage || "STAGE"}) → Resolution: ${rec?.resolution || "PROCESSED"} • Loss: $${(rec?.financialLoss ?? 0).toFixed(2)} • Claim: $${(rec?.claimAmount ?? 0).toFixed(2)}.`,
+          `Order ${orderId} cancelled (${rec?.stage || "STAGE"}) → Resolution: ${rec?.resolution || "PROCESSED"} • Loss: ${fmt(rec?.financialLoss ?? 0)} • Claim: ${fmt(rec?.claimAmount ?? 0)}.`,
         );
       } else {
         setFeedback(
@@ -489,11 +520,7 @@ export default function LiveOrdersPage() {
                           )}
                         </span>
                         <p className="mt-1 font-mono text-sm font-bold text-emerald-400">
-                          $
-                          {(
-                            order.totalAmount ??
-                            0
-                          ).toFixed(2)}
+                          {fmt(order.totalAmount ?? 0)}
                         </p>
                       </div>
                     </div>
@@ -624,16 +651,8 @@ export default function LiveOrdersPage() {
                       Loss / Claim
                     </span>
                     <p className="mt-0.5 text-amber-300">
-                      Loss: $
-                      {(
-                        selectedOrder.lossAmount ??
-                        0
-                      ).toFixed(2)}{" "}
-                      • Claim: $
-                      {(
-                        selectedOrder.claimAmount ??
-                        0
-                      ).toFixed(2)}
+                      Loss: {fmt(selectedOrder.lossAmount ?? 0)} • Claim:{" "}
+                      {fmt(selectedOrder.claimAmount ?? 0)}
                     </p>
                   </div>
                 </div>

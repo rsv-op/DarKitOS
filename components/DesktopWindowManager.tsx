@@ -642,9 +642,9 @@ export default function DesktopWindowManager({
         </div>
 
         <div className="flex items-center gap-3 font-mono text-[11px] text-slate-400">
-          <span>PgBouncer: Transaction Pool</span>
+          <span>Sprint 0 Canonical Store</span>
           <span className="text-emerald-400">
-            ● Cloud7 Online
+            ● Sandbox Online
           </span>
         </div>
 
@@ -684,7 +684,7 @@ export default function DesktopWindowManager({
                   href: "/kitchens",
                 },
                 {
-                  label: "VerticalForge BI & Leakage",
+                  label: "Analytics & Margin Audit",
                   href: "/analytics",
                 },
                 {

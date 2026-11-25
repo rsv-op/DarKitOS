@@ -163,7 +163,7 @@ export interface InventoryItem {
     | "Sauce"
     | "Dry Good";
   currentStock: number;
-  unit: "oz" | "lbs" | "units" | "count";
+  unit: "oz" | "lbs" | "g" | "kg" | "ml" | "units" | "count";
   reorderThreshold: number;
   costPerUnit: number;
   lastRestocked: string;
@@ -358,12 +358,7 @@ export interface OutboxEvent {
 
 export interface RevenueLeakageVector {
   id: string;
-  vector:
-    | "Failed Payments"
-    | "Expired Discounts"
-    | "Unbilled Usage"
-    | "Contract-to-Billing Drift"
-    | "Lapsed Renewals";
+  vector: string;
   signature: string;
   impactLevel: "Severe" | "High" | "Moderate";
   impactNote: string;
@@ -378,6 +373,7 @@ export interface VirtualFileAsset {
   id: string;
   name: string;
   category:
+    | "Owner Brief"
     | "Health Certificate"
     | "SOP Manual"
     | "Menu Photography"
@@ -395,7 +391,7 @@ export interface VirtualFileAsset {
 }
 
 export interface SystemSettings {
-  currency: "USD" | "INR" | "EUR";
+  currency: "INR" | "USD" | "EUR";
   timezone: string;
   theme: "obsidian" | "midnight" | "cyber-emerald" | "titanium";
   fluidAnimations: boolean;
@@ -535,7 +531,6 @@ export const EMPLOYEES_DB: Employee[] = [
     name: "Patric Revuelto",
     role: "OWNER",
     active: true,
-    pin: "3333",
   },
   {
     id: "EMP-K1-MGR-01",
@@ -544,7 +539,6 @@ export const EMPLOYEES_DB: Employee[] = [
     role: "MANAGER",
     kitchenId: "K1",
     active: true,
-    pin: "9999",
   },
   {
     id: "EMP-K1-COOK-01",
@@ -553,7 +547,6 @@ export const EMPLOYEES_DB: Employee[] = [
     role: "LINE_COOK",
     kitchenId: "K1",
     active: true,
-    pin: "1111",
   },
   {
     id: "EMP-K1-DISP-01",
@@ -562,7 +555,6 @@ export const EMPLOYEES_DB: Employee[] = [
     role: "DISPATCH",
     kitchenId: "K1",
     active: true,
-    pin: "2222",
   },
   {
     id: "EMP-K2-MGR-01",
@@ -722,7 +714,7 @@ export const INVENTORY_DB: InventoryItem[] = [
     currentStock: 140,
     unit: "units",
     reorderThreshold: 30,
-    costPerUnit: 1.2,
+    costPerUnit: 85,
     lastRestocked: "2026-10-11T04:00:00.000Z",
     kitchenId: "K1",
     expectedYieldPct: 88,
@@ -736,7 +728,7 @@ export const INVENTORY_DB: InventoryItem[] = [
     currentStock: 18,
     unit: "units",
     reorderThreshold: 25,
-    costPerUnit: 0.4,
+    costPerUnit: 28,
     lastRestocked: "2026-10-11T04:00:00.000Z",
     kitchenId: "K1",
     expectedYieldPct: 98,
@@ -747,10 +739,10 @@ export const INVENTORY_DB: InventoryItem[] = [
     sku: "BIRRIA-01",
     name: "Slow-Cooked Birria Beef",
     category: "Protein",
-    currentStock: 45,
-    unit: "lbs",
-    reorderThreshold: 10,
-    costPerUnit: 4.5,
+    currentStock: 22,
+    unit: "kg",
+    reorderThreshold: 6,
+    costPerUnit: 580,
     lastRestocked: "2026-10-11T04:00:00.000Z",
     kitchenId: "K1",
     expectedYieldPct: 80,
@@ -764,7 +756,7 @@ export const INVENTORY_DB: InventoryItem[] = [
     currentStock: 220,
     unit: "units",
     reorderThreshold: 50,
-    costPerUnit: 0.1,
+    costPerUnit: 12,
     lastRestocked: "2026-10-11T04:00:00.000Z",
     kitchenId: "K1",
     expectedYieldPct: 97,
@@ -778,7 +770,7 @@ export const INVENTORY_DB: InventoryItem[] = [
     currentStock: 350,
     unit: "units",
     reorderThreshold: 100,
-    costPerUnit: 0.55,
+    costPerUnit: 18,
     lastRestocked: "2026-10-11T04:00:00.000Z",
     kitchenId: "K1",
     expectedYieldPct: 85,
@@ -789,10 +781,10 @@ export const INVENTORY_DB: InventoryItem[] = [
     sku: "GHOST-01",
     name: "Ghost Pepper Glaze",
     category: "Sauce",
-    currentStock: 12,
-    unit: "oz",
-    reorderThreshold: 20,
-    costPerUnit: 0.85,
+    currentStock: 360,
+    unit: "ml",
+    reorderThreshold: 600,
+    costPerUnit: 0.5,
     lastRestocked: "2026-10-11T04:00:00.000Z",
     kitchenId: "K1",
     expectedYieldPct: 94,
@@ -803,10 +795,10 @@ export const INVENTORY_DB: InventoryItem[] = [
     sku: "TUNA-01",
     name: "Sashimi Grade Ahi Tuna",
     category: "Protein",
-    currentStock: 28,
-    unit: "lbs",
-    reorderThreshold: 8,
-    costPerUnit: 12,
+    currentStock: 14,
+    unit: "kg",
+    reorderThreshold: 4,
+    costPerUnit: 1200,
     lastRestocked: "2026-10-11T04:00:00.000Z",
     kitchenId: "K1",
     expectedYieldPct: 82,
@@ -820,7 +812,7 @@ export const INVENTORY_DB: InventoryItem[] = [
     currentStock: 65,
     unit: "units",
     reorderThreshold: 15,
-    costPerUnit: 0.9,
+    costPerUnit: 65,
     lastRestocked: "2026-10-11T04:00:00.000Z",
     kitchenId: "K1",
     expectedYieldPct: 78,
@@ -834,7 +826,7 @@ export const INVENTORY_DB: InventoryItem[] = [
     currentStock: 95,
     unit: "units",
     reorderThreshold: 30,
-    costPerUnit: 0.35,
+    costPerUnit: 22,
     lastRestocked: "2026-10-11T04:00:00.000Z",
     kitchenId: "K1",
     expectedYieldPct: 99,
@@ -848,11 +840,25 @@ export const INVENTORY_DB: InventoryItem[] = [
     currentStock: 310,
     unit: "units",
     reorderThreshold: 80,
-    costPerUnit: 0.28,
+    costPerUnit: 18,
     lastRestocked: "2026-10-11T04:00:00.000Z",
     kitchenId: "K1",
     expectedYieldPct: 100,
     actualYieldPct: 99.4,
+  },
+  {
+    id: "INV-011",
+    sku: "FRIES-01",
+    name: "Truffle Skin-On Fries Pack",
+    category: "Produce",
+    currentStock: 120,
+    unit: "units",
+    reorderThreshold: 30,
+    costPerUnit: 42,
+    lastRestocked: "2026-10-11T04:00:00.000Z",
+    kitchenId: "K1",
+    expectedYieldPct: 96,
+    actualYieldPct: 94.5,
   },
 ];
 
@@ -863,7 +869,7 @@ export const MENU_CATALOG: MenuItem[] = [
     id: "MENU-BF-01",
     brandId: "BurgerForge",
     name: "Double Smash Burger",
-    price: 12.99,
+    price: 349,
     station: "Grill",
     active: true,
     prepTimeMins: 9,
@@ -882,17 +888,26 @@ export const MENU_CATALOG: MenuItem[] = [
     id: "MENU-BF-02",
     brandId: "BurgerForge",
     name: "Truffle Fries",
-    price: 6.49,
+    price: 189,
     station: "Fryer",
     active: true,
     prepTimeMins: 6,
-    recipe: [],
+    recipe: [
+      {
+        inventoryItemId: "INV-011",
+        quantityRequired: 1,
+      },
+      {
+        inventoryItemId: "INV-010",
+        quantityRequired: 1,
+      },
+    ],
   },
   {
     id: "MENU-BF-03",
     brandId: "BurgerForge",
     name: "Oklahoma Onion Melt",
-    price: 14.49,
+    price: 389,
     station: "Grill",
     active: true,
     prepTimeMins: 10,
@@ -915,14 +930,14 @@ export const MENU_CATALOG: MenuItem[] = [
     id: "MENU-TM-01",
     brandId: "TacoMatrix",
     name: "Birria Taco Trio",
-    price: 14.5,
+    price: 399,
     station: "Assembly",
     active: true,
     prepTimeMins: 8,
     recipe: [
       {
         inventoryItemId: "INV-003",
-        quantityRequired: 0.5,
+        quantityRequired: 0.25,
       },
       {
         inventoryItemId: "INV-004",
@@ -934,14 +949,14 @@ export const MENU_CATALOG: MenuItem[] = [
     id: "MENU-TM-02",
     brandId: "TacoMatrix",
     name: "Avocado Quesabirria Vampiro",
-    price: 15.99,
+    price: 449,
     station: "Assembly",
     active: true,
     prepTimeMins: 9,
     recipe: [
       {
         inventoryItemId: "INV-003",
-        quantityRequired: 0.5,
+        quantityRequired: 0.25,
       },
       {
         inventoryItemId: "INV-004",
@@ -957,7 +972,7 @@ export const MENU_CATALOG: MenuItem[] = [
     id: "MENU-WP-01",
     brandId: "WingProtocol",
     name: "12pc Ghost Pepper Wings",
-    price: 16.99,
+    price: 469,
     station: "Fryer",
     active: true,
     prepTimeMins: 12,
@@ -968,7 +983,7 @@ export const MENU_CATALOG: MenuItem[] = [
       },
       {
         inventoryItemId: "INV-006",
-        quantityRequired: 4,
+        quantityRequired: 120,
       },
     ],
   },
@@ -976,7 +991,7 @@ export const MENU_CATALOG: MenuItem[] = [
     id: "MENU-WP-02",
     brandId: "WingProtocol",
     name: "6pc Tactical Fire Wings",
-    price: 9.99,
+    price: 269,
     station: "Fryer",
     active: true,
     prepTimeMins: 10,
@@ -987,7 +1002,7 @@ export const MENU_CATALOG: MenuItem[] = [
       },
       {
         inventoryItemId: "INV-006",
-        quantityRequired: 2,
+        quantityRequired: 60,
       },
     ],
   },
@@ -995,14 +1010,14 @@ export const MENU_CATALOG: MenuItem[] = [
     id: "MENU-GB-01",
     brandId: "GreenBowl",
     name: "Ahi Tuna Poke Bowl",
-    price: 17.25,
+    price: 529,
     station: "Cold Prep",
     active: true,
     prepTimeMins: 7,
     recipe: [
       {
         inventoryItemId: "INV-007",
-        quantityRequired: 0.4,
+        quantityRequired: 0.2,
       },
       {
         inventoryItemId: "INV-008",
@@ -1014,14 +1029,14 @@ export const MENU_CATALOG: MenuItem[] = [
     id: "MENU-GB-02",
     brandId: "GreenBowl",
     name: "Double Avocado Tataki Bowl",
-    price: 18.75,
+    price: 579,
     station: "Cold Prep",
     active: true,
     prepTimeMins: 7,
     recipe: [
       {
         inventoryItemId: "INV-007",
-        quantityRequired: 0.5,
+        quantityRequired: 0.25,
       },
       {
         inventoryItemId: "INV-008",

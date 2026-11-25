@@ -7,6 +7,7 @@ import {
   useState,
 } from "react";
 import Link from "next/link";
+import { formatCurrency, type SupportedCurrency } from "@/lib/currency";
 import {
   BRANDS_DB,
   BRAND_KITCHENS_DB,
@@ -21,6 +22,7 @@ import {
   type Order,
   type OrderChannel,
   type OutboxEvent,
+  type SystemSettings,
   type WebhookIdempotencyEntry,
 } from "@/lib/db";
 
@@ -123,6 +125,8 @@ export default function OrderSimulationPanel() {
     >("success");
   const [isSubmitting, setIsSubmitting] =
     useState(false);
+  const [currency, setCurrency] =
+    useState<SupportedCurrency>("INR");
 
   const loadSystemSnapshot =
     useCallback(async () => {
@@ -144,6 +148,8 @@ export default function OrderSimulationPanel() {
           setWebhookEvents(data.webhookEvents);
         if (Array.isArray(data.outboxEvents))
           setOutboxEvents(data.outboxEvents);
+        if (data.settings?.currency)
+          setCurrency(data.settings.currency);
       } catch {
         // fallback to defaults
       }
@@ -151,6 +157,13 @@ export default function OrderSimulationPanel() {
 
   useEffect(() => {
     void loadSystemSnapshot();
+    const onSettingsUpdated = (event: Event) => {
+      const custom = event as CustomEvent<SystemSettings>;
+      if (custom.detail?.currency) setCurrency(custom.detail.currency);
+    };
+    window.addEventListener("darkit:settings-updated", onSettingsUpdated);
+    return () =>
+      window.removeEventListener("darkit:settings-updated", onSettingsUpdated);
   }, [loadSystemSnapshot]);
 
   // Valid kitchens for selected brand from canonical BrandKitchen matrix
@@ -569,7 +582,7 @@ export default function OrderSimulationPanel() {
                 4. Add menu items
               </span>
               <span className="font-mono text-xs text-emerald-400">
-                Order Total: ${orderTotal.toFixed(2)}
+                Order Total: {formatCurrency(orderTotal, currency)}
               </span>
             </div>
 
@@ -594,7 +607,7 @@ export default function OrderSimulationPanel() {
                           {item.station}
                         </span>
                         <span className="font-mono text-xs font-bold text-emerald-400">
-                          ${item.price.toFixed(2)}
+                          {formatCurrency(item.price, currency)}
                         </span>
                       </div>
                       <p className="mt-1 font-mono text-[11px] text-slate-400">
@@ -707,7 +720,7 @@ export default function OrderSimulationPanel() {
             >
               {isSubmitting
                 ? "Creating order…"
-                : `Create sample order ($${orderTotal.toFixed(2)})`}
+                : `Create sample order (${formatCurrency(orderTotal, currency)})`}
             </button>
 
           </div>

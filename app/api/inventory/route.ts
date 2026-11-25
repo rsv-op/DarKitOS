@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAuthenticatedEmployee } from "@/lib/domain/auth-service";
-import { hasPermission } from "@/lib/domain/permission-service";
+import {
+  canAccessKitchen,
+  hasGlobalScope,
+  hasPermission,
+} from "@/lib/domain/permission-service";
 import {
   getInventory,
   getInventoryMovements,
@@ -9,8 +13,7 @@ import {
 
 export async function GET(request: NextRequest) {
   try {
-    const employee =
-      await getAuthenticatedEmployee(request);
+    const employee = await getAuthenticatedEmployee(request);
 
     if (!employee) {
       return NextResponse.json(
@@ -20,10 +23,7 @@ export async function GET(request: NextRequest) {
     }
 
     if (
-      !hasPermission(
-        employee,
-        "INVENTORY_VIEW",
-      ) &&
+      !hasPermission(employee, "INVENTORY_VIEW") &&
       !hasPermission(employee, "OWNER_VIEW")
     ) {
       return NextResponse.json(
@@ -32,15 +32,19 @@ export async function GET(request: NextRequest) {
       );
     }
 
+    const allMovements = getInventoryMovements();
+    const movements = hasGlobalScope(employee)
+      ? allMovements
+      : allMovements.filter(
+          (m) => m.kitchenId === employee.kitchenId,
+        );
+
     return NextResponse.json({
       inventory: getInventory(),
-      movements: getInventoryMovements(),
+      movements,
     });
   } catch (error) {
-    console.error(
-      "GET /api/inventory failed:",
-      error,
-    );
+    console.error("GET /api/inventory failed:", error);
 
     return NextResponse.json(
       { error: "Unable to load inventory" },
@@ -49,12 +53,9 @@ export async function GET(request: NextRequest) {
   }
 }
 
-export async function PATCH(
-  request: NextRequest,
-) {
+export async function PATCH(request: NextRequest) {
   try {
-    const employee =
-      await getAuthenticatedEmployee(request);
+    const employee = await getAuthenticatedEmployee(request);
 
     if (!employee) {
       return NextResponse.json(
@@ -64,10 +65,7 @@ export async function PATCH(
     }
 
     if (
-      !hasPermission(
-        employee,
-        "INVENTORY_MANAGE",
-      ) &&
+      !hasPermission(employee, "INVENTORY_MANAGE") &&
       !hasPermission(employee, "OWNER_VIEW")
     ) {
       return NextResponse.json(
@@ -97,11 +95,22 @@ export async function PATCH(
 
     if (!itemId) {
       return NextResponse.json(
-        {
-          error:
-            "Inventory item id is required",
-        },
+        { error: "Inventory item id is required" },
         { status: 400 },
+      );
+    }
+
+    const targetKitchenId =
+      typeof body.kitchenId === "string" && body.kitchenId.trim()
+        ? body.kitchenId.trim()
+        : employee.kitchenId || "K1";
+
+    if (!canAccessKitchen(employee, targetKitchenId)) {
+      return NextResponse.json(
+        {
+          error: `Forbidden: Employee ${employee.employeeCode} cannot adjust inventory for kitchen ${targetKitchenId}`,
+        },
+        { status: 403 },
       );
     }
 
@@ -123,27 +132,29 @@ export async function PATCH(
           ? body.currentStock
           : undefined,
       reason: body.reason,
-      kitchenId:
-        body.kitchenId || employee.kitchenId,
+      kitchenId: targetKitchenId,
       actor: actorLabel,
     });
+
+    const allMovements = getInventoryMovements();
+    const movements = hasGlobalScope(employee)
+      ? allMovements
+      : allMovements.filter(
+          (m) => m.kitchenId === employee.kitchenId,
+        );
 
     return NextResponse.json({
       inventory: result.inventory,
       item: result.item,
       movement: result.movement,
-      movements: getInventoryMovements(),
+      movements,
     });
   } catch (error) {
     const message =
       error instanceof Error
         ? error.message
         : "Unable to update inventory";
-    const status = message.includes(
-      "not found",
-    )
-      ? 404
-      : 400;
+    const status = message.includes("not found") ? 404 : 400;
 
     return NextResponse.json(
       { error: message },

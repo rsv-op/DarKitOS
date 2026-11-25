@@ -7,9 +7,12 @@ import {
   useState,
 } from "react";
 import AppShell from "@/components/AppShell";
+import { formatCurrency, type SupportedCurrency } from "@/lib/currency";
 import type {
   InventoryItem,
   InventoryMovement,
+  PermissionCode,
+  SystemSettings,
 } from "@/lib/db";
 
 const CATEGORIES: InventoryItem["category"][] = [
@@ -97,6 +100,44 @@ export default function InventoryPage() {
     );
   const [submitting, setSubmitting] =
     useState(false);
+  const [currency, setCurrency] =
+    useState<SupportedCurrency>("INR");
+  const [canManageInventory, setCanManageInventory] =
+    useState<boolean>(true);
+
+  const fmt = useCallback(
+    (amount: number) => formatCurrency(amount, currency),
+    [currency],
+  );
+
+  useEffect(() => {
+    let active = true;
+    fetch("/api/session", { cache: "no-store" })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (!active || !data) return;
+        if (data.settings?.currency) {
+          setCurrency(data.settings.currency);
+        }
+        const perms = (data.permissions || []) as PermissionCode[];
+        setCanManageInventory(
+          perms.includes("INVENTORY_MANAGE") || perms.includes("OWNER_VIEW"),
+        );
+      })
+      .catch(() => {
+        // ignore transient error
+      });
+
+    const onSettingsUpdated = (event: Event) => {
+      const custom = event as CustomEvent<SystemSettings>;
+      if (custom.detail?.currency) setCurrency(custom.detail.currency);
+    };
+    window.addEventListener("darkit:settings-updated", onSettingsUpdated);
+    return () => {
+      active = false;
+      window.removeEventListener("darkit:settings-updated", onSettingsUpdated);
+    };
+  }, []);
 
   const loadInventory =
     useCallback(async () => {
@@ -307,8 +348,7 @@ export default function InventoryPage() {
               Stock Valuation
             </p>
             <p className="mt-1 text-2xl font-black text-white">
-              $
-              {stats.totalValuation.toFixed(2)}
+              {fmt(stats.totalValuation)}
             </p>
           </div>
           <div className="rounded-2xl border border-emerald-500/30 bg-emerald-500/5 p-4">
@@ -507,10 +547,7 @@ export default function InventoryPage() {
                               {item.unit}
                             </td>
                             <td className="px-4 py-3 font-mono text-emerald-400">
-                              $
-                              {item.costPerUnit.toFixed(
-                                2,
-                              )}
+                              {fmt(item.costPerUnit)}
                             </td>
                             <td className="px-4 py-3">
                               <span
@@ -520,26 +557,32 @@ export default function InventoryPage() {
                               </span>
                             </td>
                             <td className="px-4 py-3 text-right">
-                              <button
-                                type="button"
-                                disabled={
-                                  submitting
-                                }
-                                onClick={(
-                                  e,
-                                ) => {
-                                  e.stopPropagation();
-                                  void executeMutation(
-                                    item,
-                                    "RESTOCK",
-                                    25,
-                                    "Quick +25 station restock",
-                                  );
-                                }}
-                                className="rounded-lg bg-emerald-500/20 border border-emerald-500/40 px-2.5 py-1 font-mono text-[10px] font-bold text-emerald-300 hover:bg-emerald-500/30"
-                              >
-                                +25 Restock
-                              </button>
+                              {canManageInventory ? (
+                                <button
+                                  type="button"
+                                  disabled={
+                                    submitting
+                                  }
+                                  onClick={(
+                                    e,
+                                  ) => {
+                                    e.stopPropagation();
+                                    void executeMutation(
+                                      item,
+                                      "RESTOCK",
+                                      25,
+                                      "Quick +25 station restock",
+                                    );
+                                  }}
+                                  className="rounded-lg bg-emerald-500/20 border border-emerald-500/40 px-2.5 py-1 font-mono text-[10px] font-bold text-emerald-300 hover:bg-emerald-500/30"
+                                >
+                                  +25 Restock
+                                </button>
+                              ) : (
+                                <span className="font-mono text-[10px] text-slate-500">
+                                  Read-only
+                                </span>
+                              )}
                             </td>
                           </tr>
                         );
@@ -770,10 +813,7 @@ export default function InventoryPage() {
                           {mov.unit}
                         </td>
                         <td className="px-3 py-2.5 font-mono text-amber-300">
-                          $
-                          {mov.costImpact.toFixed(
-                            2,
-                          )}
+                          {fmt(mov.costImpact)}
                         </td>
                         <td className="px-3 py-2.5 text-slate-300">
                           <p>{mov.reason}</p>

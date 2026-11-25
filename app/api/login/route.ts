@@ -4,8 +4,11 @@ import {
 } from "next/server";
 import {
   findEmployeeByCode,
+  isDemoSandboxEnabled,
   isDeveloperCode,
+  isSafeRedirectPath,
   roleFromEmployeeCode,
+  sanitizeEmployee,
   signToken,
   type AuthRole,
 } from "@/lib/auth";
@@ -15,9 +18,7 @@ import {
   recordActivity,
 } from "@/lib/store";
 
-function getDefaultRoute(
-  role: AuthRole,
-): string {
+function getDefaultRoute(role: AuthRole): string {
   switch (role) {
     case "developer":
       return "/order-injection";
@@ -33,20 +34,21 @@ function getDefaultRoute(
   }
 }
 
-export async function POST(
-  request: NextRequest,
-) {
+function isHttpsRequest(request: NextRequest): boolean {
+  const forwardedProto = request.headers.get("x-forwarded-proto");
+  if (forwardedProto) {
+    return forwardedProto.split(",")[0].trim().toLowerCase() === "https";
+  }
+  return request.nextUrl.protocol === "https:";
+}
+
+export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
 
-    if (
-      !body ||
-      typeof body !== "object"
-    ) {
+    if (!body || typeof body !== "object") {
       return NextResponse.json(
-        {
-          error: "Invalid login payload",
-        },
+        { error: "Invalid login payload" },
         { status: 400 },
       );
     }
@@ -60,47 +62,31 @@ export async function POST(
 
     if (!rawCode) {
       return NextResponse.json(
-        {
-          error:
-            "Employee code or station PIN is required",
-        },
+        { error: "Employee code or station PIN is required" },
         { status: 400 },
       );
     }
 
     const employees = getEmployees();
-    const role = roleFromEmployeeCode(
-      rawCode,
-      employees,
-    );
-    const employee = findEmployeeByCode(
-      rawCode,
-      employees,
-    );
+    const role = roleFromEmployeeCode(rawCode, employees);
+    const employee = findEmployeeByCode(rawCode, employees);
 
     if (!role || !employee) {
       return NextResponse.json(
-        {
-          error:
-            "Invalid or inactive employee code / PIN",
-        },
+        { error: "Invalid or inactive employee code / PIN" },
         { status: 401 },
       );
     }
 
-    const developer =
-      isDeveloperCode(rawCode);
+    const developer = isDeveloperCode(rawCode);
 
     const requestedRedirect =
       typeof body.redirect === "string" &&
-      body.redirect.startsWith("/") &&
-      body.redirect !== "/login"
+      isSafeRedirectPath(body.redirect)
         ? body.redirect
         : "";
 
-    const destination =
-      requestedRedirect ||
-      getDefaultRoute(role);
+    const destination = requestedRedirect || getDefaultRoute(role);
 
     const jwt = await signToken({
       userId: employee.id,
@@ -112,80 +98,97 @@ export async function POST(
       developer,
     });
 
-    const permissions =
-      getRolePermissions(employee.role);
+    const permissions = getRolePermissions(employee.role);
+    const safeEmployee = sanitizeEmployee(employee);
 
     recordActivity({
       type: "AUTH_LOGIN",
       category: "AUTH",
-      title: `${employee.name} (${employee.role}) Signed In`,
-      details: `Authenticated via terminal code ${employee.employeeCode}${employee.kitchenId ? ` at ${employee.kitchenId}` : " (Global Scope)"}.`,
-      actor: `${employee.employeeCode} (${employee.name})`,
-      kitchenId: employee.kitchenId,
+      title: `${safeEmployee.name} (${safeEmployee.role}) Signed In`,
+      details: `Authenticated via terminal code ${safeEmployee.employeeCode}${safeEmployee.kitchenId ? ` at ${safeEmployee.kitchenId}` : " (Global Scope)"}.`,
+      actor: `${safeEmployee.employeeCode} (${safeEmployee.name})`,
+      kitchenId: safeEmployee.kitchenId,
       severity: "info",
     });
 
     const response = NextResponse.json({
-      employee: {
-        id: employee.id,
-        employeeCode:
-          employee.employeeCode,
-        name: employee.name,
-        role: employee.role,
-        kitchenId: employee.kitchenId,
-      },
+      employee: safeEmployee,
       role,
       permissions,
       developer,
+      demoSandboxEnabled: isDemoSandboxEnabled(),
       redirectTo: destination,
     });
 
-    const cookieOptions = {
+    const secureCookie = isHttpsRequest(request);
+
+    response.cookies.set("dark_cloud_session", jwt, {
       httpOnly: true,
-      sameSite: "lax" as const,
+      sameSite: "lax",
       path: "/",
-      secure:
-        process.env.NODE_ENV ===
-        "production",
+      secure: secureCookie,
       maxAge: 60 * 60 * 12,
-    };
+    });
 
-    response.cookies.set(
-      "employee_code",
-      employee.employeeCode,
-      cookieOptions,
-    );
-
-    response.cookies.set(
-      "dark_cloud_session",
-      jwt,
-      cookieOptions,
-    );
+    // Clear explicit logout marker and any legacy unsigned employee_code cookie
+    response.cookies.set("dark_cloud_logged_out", "", {
+      httpOnly: true,
+      sameSite: "lax",
+      path: "/",
+      secure: secureCookie,
+      maxAge: 0,
+      expires: new Date(0),
+    });
+    response.cookies.set("employee_code", "", {
+      httpOnly: true,
+      sameSite: "lax",
+      path: "/",
+      secure: secureCookie,
+      maxAge: 0,
+      expires: new Date(0),
+    });
 
     return response;
   } catch (error) {
-    console.error(
-      "POST /api/login failed:",
-      error,
-    );
+    console.error("POST /api/login failed:", error);
 
     return NextResponse.json(
-      {
-        error:
-          "Unable to process login",
-      },
+      { error: "Unable to process login" },
       { status: 500 },
     );
   }
 }
 
-export async function DELETE() {
+export async function DELETE(request: NextRequest) {
+  const secureCookie = isHttpsRequest(request);
   const response = NextResponse.json({
     success: true,
   });
-  response.cookies.delete("employee_code");
-  response.cookies.delete(
-    "dark_cloud_session",
-  );
+
+  response.cookies.set("dark_cloud_session", "", {
+    httpOnly: true,
+    sameSite: "lax",
+    path: "/",
+    secure: secureCookie,
+    maxAge: 0,
+    expires: new Date(0),
+  });
+  response.cookies.set("employee_code", "", {
+    httpOnly: true,
+    sameSite: "lax",
+    path: "/",
+    secure: secureCookie,
+    maxAge: 0,
+    expires: new Date(0),
+  });
+  // Explicitly record logout so Demo Sandbox Mode does not immediately re-authenticate as Owner
+  response.cookies.set("dark_cloud_logged_out", "1", {
+    httpOnly: true,
+    sameSite: "lax",
+    path: "/",
+    secure: secureCookie,
+    maxAge: 60 * 60 * 24,
+  });
+
   return response;
 }

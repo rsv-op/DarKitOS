@@ -3,6 +3,7 @@
 import React, {
   useCallback,
   useEffect,
+  useMemo,
   useState,
 } from "react";
 import Link from "next/link";
@@ -24,6 +25,7 @@ interface SessionData {
   permissions: PermissionCode[];
   employees: Employee[];
   settings?: SystemSettings;
+  demoSandboxEnabled?: boolean;
 }
 
 interface NavItem {
@@ -37,10 +39,11 @@ interface NavItem {
 
 const NAV_ITEMS: NavItem[] = [
   {
-    label: "Overview",
+    label: "Owner Showcase",
     href: "/dashboard",
     aliases: ["/owner"],
     group: "command",
+    permission: "OWNER_VIEW",
     icon: "home",
   },
   {
@@ -50,10 +53,11 @@ const NAV_ITEMS: NavItem[] = [
     icon: "info",
   },
   {
-    label: "Analytics",
+    label: "Analytics & Margin",
     href: "/analytics",
     aliases: ["/performance"],
     group: "command",
+    permission: "OWNER_VIEW",
     icon: "chart",
   },
   {
@@ -61,6 +65,7 @@ const NAV_ITEMS: NavItem[] = [
     href: "/order-injection",
     aliases: ["/dev"],
     group: "operations",
+    permission: "ORDER_INJECT",
     icon: "ticket",
   },
   {
@@ -75,48 +80,56 @@ const NAV_ITEMS: NavItem[] = [
     href: "/kds",
     aliases: ["/cook"],
     group: "operations",
+    permission: "COOK_ORDERS",
     icon: "cook",
   },
   {
     label: "Dispatch",
     href: "/dispatch",
     group: "operations",
+    permission: "DISPATCH_ORDERS",
     icon: "truck",
   },
   {
     label: "Inventory",
     href: "/inventory",
     group: "operations",
+    permission: "INVENTORY_VIEW",
     icon: "box",
   },
   {
-    label: "Brands",
+    label: "Brands & Menus",
     href: "/brands",
     group: "enterprise",
+    permission: "OWNER_VIEW",
     icon: "brand",
   },
   {
     label: "Kitchens",
     href: "/kitchens",
     group: "enterprise",
+    permission: "OWNER_VIEW",
     icon: "home",
   },
   {
-    label: "Staff & access",
+    label: "Staff & Access",
     href: "/staff",
     group: "enterprise",
+    permission: "STAFF_MANAGE",
     icon: "staff",
   },
   {
     label: "File Explorer",
     href: "/explorer",
     group: "enterprise",
+    permission: "OWNER_VIEW",
     icon: "folder",
   },
   {
     label: "Settings",
     href: "/settings",
     group: "enterprise",
+    permission: "OWNER_VIEW",
     icon: "settings",
   },
 ];
@@ -134,14 +147,10 @@ export default function AppShell({
 }) {
   const pathname = usePathname();
   const router = useRouter();
-  const [session, setSession] =
-    useState<SessionData | null>(null);
-  const [mobileMenuOpen, setMobileMenuOpen] =
-    useState(false);
-  const [adrModalOpen, setAdrModalOpen] =
-    useState(false);
-  const [switchingCode, setSwitchingCode] =
-    useState<string | null>(null);
+  const [session, setSession] = useState<SessionData | null>(null);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [adrModalOpen, setAdrModalOpen] = useState(false);
+  const [switchingCode, setSwitchingCode] = useState<string | null>(null);
   const [clock, setClock] = useState<string>("");
 
   const loadSession = useCallback(async () => {
@@ -150,8 +159,7 @@ export default function AppShell({
         cache: "no-store",
       });
       if (res.ok) {
-        const data =
-          (await res.json()) as SessionData;
+        const data = (await res.json()) as SessionData;
         setSession(data);
       }
     } catch {
@@ -163,10 +171,44 @@ export default function AppShell({
     void loadSession();
   }, [loadSession, pathname]);
 
+  // Listen for live settings updates (theme/currency/SLA) emitted by /settings
+  useEffect(() => {
+    const handleSettingsUpdated = (event: Event) => {
+      const custom = event as CustomEvent<SystemSettings>;
+      if (custom.detail) {
+        setSession((prev) =>
+          prev ? { ...prev, settings: custom.detail } : prev,
+        );
+      } else {
+        void loadSession();
+      }
+    };
+    window.addEventListener("darkit:settings-updated", handleSettingsUpdated);
+    return () => {
+      window.removeEventListener(
+        "darkit:settings-updated",
+        handleSettingsUpdated,
+      );
+    };
+  }, [loadSession]);
+
+  // Escape key closes System Details modal or mobile drawer
+  useEffect(() => {
+    if (!adrModalOpen && !mobileMenuOpen) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setAdrModalOpen(false);
+        setMobileMenuOpen(false);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [adrModalOpen, mobileMenuOpen]);
+
   useEffect(() => {
     const updateClock = () => {
       setClock(
-        new Date().toLocaleTimeString([], {
+        new Date().toLocaleTimeString("en-IN", {
           hour: "2-digit",
           minute: "2-digit",
           second: "2-digit",
@@ -174,10 +216,7 @@ export default function AppShell({
       );
     };
     updateClock();
-    const timer = window.setInterval(
-      updateClock,
-      1000,
-    );
+    const timer = window.setInterval(updateClock, 1000);
     return () => window.clearInterval(timer);
   }, []);
 
@@ -213,16 +252,31 @@ export default function AppShell({
 
   const isRouteActive = (item: NavItem) => {
     if (pathname === item.href) return true;
-    if (
-      item.aliases?.some((a) => pathname === a)
-    )
-      return true;
+    if (item.aliases?.some((a) => pathname === a)) return true;
     return false;
   };
 
   const currentEmp = session?.employee;
-  const theme =
-    session?.settings?.theme || "obsidian";
+  const demoSandboxEnabled = session?.demoSandboxEnabled ?? false;
+
+  const visibleNavItems = useMemo(() => {
+    if (!session) return NAV_ITEMS;
+    const permSet = new Set(session.permissions || []);
+    return NAV_ITEMS.filter(
+      (item) => !item.permission || permSet.has(item.permission),
+    );
+  }, [session]);
+
+  const commandItems = visibleNavItems.filter((i) => i.group === "command");
+  const operationsItems = visibleNavItems.filter(
+    (i) => i.group === "operations",
+  );
+  const enterpriseItems = visibleNavItems.filter(
+    (i) => i.group === "enterprise",
+  );
+
+  const theme = session?.settings?.theme || "obsidian";
+  const currency = session?.settings?.currency || "INR";
 
   const themeBg =
     theme === "midnight"
@@ -244,9 +298,7 @@ export default function AppShell({
           <div className="flex items-center gap-3">
             <button
               type="button"
-              onClick={() =>
-                setMobileMenuOpen(!mobileMenuOpen)
-              }
+              onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
               className="flex h-9 w-9 items-center justify-center rounded-lg border border-slate-800 bg-slate-900 text-slate-300 lg:hidden"
               aria-label="Open workspace navigation"
               aria-expanded={mobileMenuOpen}
@@ -255,7 +307,15 @@ export default function AppShell({
             </button>
 
             <Link
-              href="/dashboard"
+              href={
+                session?.permissions?.includes("OWNER_VIEW")
+                  ? "/dashboard"
+                  : session?.permissions?.includes("COOK_ORDERS")
+                    ? "/kds"
+                    : session?.permissions?.includes("DISPATCH_ORDERS")
+                      ? "/dispatch"
+                      : "/live-orders"
+              }
               className="flex items-center gap-2.5 group"
             >
               <span className="grid h-9 w-9 place-items-center rounded-xl border border-cyan-300/20 bg-cyan-300/10 text-cyan-200 transition group-hover:border-cyan-300/45">
@@ -266,47 +326,45 @@ export default function AppShell({
                   DarKit<span className="text-cyan-200">OS</span>
                 </span>
                 <p className="hidden text-[10px] text-slate-400 sm:block">
-                  Cloud kitchen workspace
+                  Cloud kitchen workspace · {currency}
                 </p>
               </div>
             </Link>
           </div>
 
-          {/* Demo roles, technical details, and account */}
+          {/* Demo roles (Sandbox only), System Roadmap details, and account */}
           <div className="flex items-center gap-2 sm:gap-3">
-            <div role="group" aria-label="Demo role" className="hidden lg:flex items-center gap-1 rounded-xl border border-slate-800 bg-slate-900/90 p-1">
-              <span className="px-2 font-mono text-[10px] uppercase tracking-wider text-slate-400">
-                Demo role:
-              </span>
-              {DEMO_ROLES.map((p) => {
-                const active =
-                  currentEmp?.employeeCode ===
-                  p.code;
-                return (
-                  <button
-                    key={p.code}
-                    type="button"
-                    disabled={
-                      switchingCode !== null
-                    }
-                    onClick={() =>
-                      void handleQuickSwitch(
-                        p.code,
-                      )
-                    }
-                    className={`rounded-lg px-2 py-1 font-mono text-[10px] font-bold transition ${
-                      active
-                        ? "bg-sky-500 text-slate-950 shadow-sm"
-                        : "text-slate-300 hover:bg-slate-800 hover:text-white"
-                    }`}
-                    aria-pressed={active}
-                    title={`Switch to ${p.label}`}
-                  >
-                    {p.label}
-                  </button>
-                );
-              })}
-            </div>
+            {demoSandboxEnabled && (
+              <div
+                role="group"
+                aria-label="Demo role"
+                className="hidden lg:flex items-center gap-1 rounded-xl border border-slate-800 bg-slate-900/90 p-1"
+              >
+                <span className="px-2 font-mono text-[10px] uppercase tracking-wider text-slate-400">
+                  Demo role:
+                </span>
+                {DEMO_ROLES.map((p) => {
+                  const active = currentEmp?.employeeCode === p.code;
+                  return (
+                    <button
+                      key={p.code}
+                      type="button"
+                      disabled={switchingCode !== null}
+                      onClick={() => void handleQuickSwitch(p.code)}
+                      className={`rounded-lg px-2 py-1 font-mono text-[10px] font-bold transition ${
+                        active
+                          ? "bg-sky-500 text-slate-950 shadow-sm"
+                          : "text-slate-300 hover:bg-slate-800 hover:text-white"
+                      }`}
+                      aria-pressed={active}
+                      title={`Switch to ${p.label}`}
+                    >
+                      {p.label}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
 
             <button
               type="button"
@@ -323,16 +381,14 @@ export default function AppShell({
                     {currentEmp.name}
                   </p>
                   <p className="mt-0.5 font-mono text-[10px] text-emerald-400">
-                    {DEMO_ROLES.find(({ role }) => role === currentEmp.role)?.label ?? currentEmp.role} •{" "}
-                    {currentEmp.kitchenId ||
-                      "GLOBAL"}
+                    {DEMO_ROLES.find(({ role }) => role === currentEmp.role)
+                      ?.label ?? currentEmp.role}{" "}
+                    • {currentEmp.kitchenId || "GLOBAL"}
                   </p>
                 </div>
                 <button
                   type="button"
-                  onClick={() =>
-                    void handleLogout()
-                  }
+                  onClick={() => void handleLogout()}
                   className="ml-1 rounded-lg border border-slate-700 bg-slate-800 px-2 py-1 font-mono text-[10px] font-semibold text-slate-300 hover:border-red-500/40 hover:bg-red-500/10 hover:text-red-300"
                   title="Sign out of station"
                 >
@@ -350,108 +406,122 @@ export default function AppShell({
         </div>
       </header>
 
-      {/* Main Fluidic Layout: Sidebar + Content */}
+      {/* Main Layout: Role-Filtered Sidebar + Content */}
       <div className="mx-auto flex w-full max-w-[1600px] flex-1">
         {/* Desktop Sidebar */}
         <aside className="hidden lg:flex w-64 shrink-0 flex-col justify-between border-r border-slate-800/80 bg-slate-950/50 p-4">
           <div className="space-y-6">
-            <div>
-              <p className="px-3 font-mono text-[10px] font-bold uppercase tracking-widest text-slate-400">
-                Workspace
-              </p>
-              <nav aria-label="Workspace" className="mt-2 space-y-1">
-                {NAV_ITEMS.filter(
-                  (i) => i.group === "command",
-                ).map((item) => {
-                  const active =
-                    isRouteActive(item);
-                  return (
-                    <Link
-                      key={item.href}
-                      href={item.href}
-                      aria-current={active ? "page" : undefined}
-                      className={`flex items-center justify-between rounded-xl px-3 py-2.5 text-sm font-medium transition-all ${
-                        active
-                          ? "bg-gradient-to-r from-sky-500/20 to-emerald-500/10 text-white border border-sky-500/40 shadow-[0_0_20px_rgba(14,165,233,0.12)]"
-                          : "text-slate-400 hover:bg-slate-900 hover:text-slate-200"
-                      }`}
-                    >
-                      <span className="flex items-center gap-2.5">
-                        <GuideIcon name={item.icon} className="h-4 w-4 shrink-0 text-sky-300" />
-                        {item.label}
-                      </span>
-                    </Link>
-                  );
-                })}
-              </nav>
-            </div>
+            {commandItems.length > 0 && (
+              <div>
+                <p className="px-3 font-mono text-[10px] font-bold uppercase tracking-widest text-slate-400">
+                  Workspace
+                </p>
+                <nav aria-label="Workspace" className="mt-2 space-y-1">
+                  {commandItems.map((item) => {
+                    const active = isRouteActive(item);
+                    return (
+                      <Link
+                        key={item.href}
+                        href={item.href}
+                        aria-current={active ? "page" : undefined}
+                        className={`flex items-center justify-between rounded-xl px-3 py-2.5 text-sm font-medium transition-all ${
+                          active
+                            ? "bg-gradient-to-r from-sky-500/20 to-emerald-500/10 text-white border border-sky-500/40 shadow-[0_0_20px_rgba(14,165,233,0.12)]"
+                            : "text-slate-400 hover:bg-slate-900 hover:text-slate-200"
+                        }`}
+                      >
+                        <span className="flex items-center gap-2.5">
+                          <GuideIcon
+                            name={item.icon}
+                            className="h-4 w-4 shrink-0 text-sky-300"
+                          />
+                          {item.label}
+                        </span>
+                      </Link>
+                    );
+                  })}
+                </nav>
+              </div>
+            )}
 
-            <div>
-              <p className="px-3 font-mono text-[10px] font-bold uppercase tracking-widest text-slate-400">
-                Orders & stock
-              </p>
-              <nav aria-label="Orders and stock" className="mt-2 space-y-1">
-                {NAV_ITEMS.filter(
-                  (i) => i.group === "operations",
-                ).map((item) => {
-                  const active =
-                    isRouteActive(item);
-                  return (
-                    <Link
-                      key={item.href}
-                      href={item.href}
-                      aria-current={active ? "page" : undefined}
-                      className={`flex items-center justify-between rounded-xl px-3 py-2.5 text-sm font-medium transition-all ${
-                        active
-                          ? "bg-gradient-to-r from-sky-500/20 to-emerald-500/10 text-white border border-sky-500/40 shadow-[0_0_20px_rgba(14,165,233,0.12)]"
-                          : "text-slate-400 hover:bg-slate-900 hover:text-slate-200"
-                      }`}
-                    >
-                      <span className="flex items-center gap-2.5">
-                        <GuideIcon name={item.icon} className="h-4 w-4 shrink-0 text-emerald-300" />
-                        {item.label}
-                      </span>
-                    </Link>
-                  );
-                })}
-              </nav>
-            </div>
+            {operationsItems.length > 0 && (
+              <div>
+                <p className="px-3 font-mono text-[10px] font-bold uppercase tracking-widest text-slate-400">
+                  Orders &amp; stock
+                </p>
+                <nav aria-label="Orders and stock" className="mt-2 space-y-1">
+                  {operationsItems.map((item) => {
+                    const active = isRouteActive(item);
+                    return (
+                      <Link
+                        key={item.href}
+                        href={item.href}
+                        aria-current={active ? "page" : undefined}
+                        className={`flex items-center justify-between rounded-xl px-3 py-2.5 text-sm font-medium transition-all ${
+                          active
+                            ? "bg-gradient-to-r from-sky-500/20 to-emerald-500/10 text-white border border-sky-500/40 shadow-[0_0_20px_rgba(14,165,233,0.12)]"
+                            : "text-slate-400 hover:bg-slate-900 hover:text-slate-200"
+                        }`}
+                      >
+                        <span className="flex items-center gap-2.5">
+                          <GuideIcon
+                            name={item.icon}
+                            className="h-4 w-4 shrink-0 text-emerald-300"
+                          />
+                          {item.label}
+                        </span>
+                      </Link>
+                    );
+                  })}
+                </nav>
+              </div>
+            )}
 
-            <div>
-              <p className="px-3 font-mono text-[10px] font-bold uppercase tracking-widest text-slate-400">
-                Team & setup
-              </p>
-              <nav aria-label="Team and setup" className="mt-2 space-y-1">
-                {NAV_ITEMS.filter(
-                  (i) => i.group === "enterprise",
-                ).map((item) => {
-                  const active =
-                    isRouteActive(item);
-                  return (
-                    <Link
-                      key={item.href}
-                      href={item.href}
-                      aria-current={active ? "page" : undefined}
-                      className={`flex items-center justify-between rounded-xl px-3 py-2.5 text-sm font-medium transition-all ${
-                        active
-                          ? "bg-gradient-to-r from-sky-500/20 to-emerald-500/10 text-white border border-sky-500/40 shadow-[0_0_20px_rgba(14,165,233,0.12)]"
-                          : "text-slate-400 hover:bg-slate-900 hover:text-slate-200"
-                      }`}
-                    >
-                      <span className="flex items-center gap-2.5">
-                        <GuideIcon name={item.icon} className="h-4 w-4 shrink-0 text-amber-300" />
-                        {item.label}
-                      </span>
-                    </Link>
-                  );
-                })}
-              </nav>
-            </div>
+            {enterpriseItems.length > 0 && (
+              <div>
+                <p className="px-3 font-mono text-[10px] font-bold uppercase tracking-widest text-slate-400">
+                  Team &amp; setup
+                </p>
+                <nav aria-label="Team and setup" className="mt-2 space-y-1">
+                  {enterpriseItems.map((item) => {
+                    const active = isRouteActive(item);
+                    return (
+                      <Link
+                        key={item.href}
+                        href={item.href}
+                        aria-current={active ? "page" : undefined}
+                        className={`flex items-center justify-between rounded-xl px-3 py-2.5 text-sm font-medium transition-all ${
+                          active
+                            ? "bg-gradient-to-r from-sky-500/20 to-emerald-500/10 text-white border border-sky-500/40 shadow-[0_0_20px_rgba(14,165,233,0.12)]"
+                            : "text-slate-400 hover:bg-slate-900 hover:text-slate-200"
+                        }`}
+                      >
+                        <span className="flex items-center gap-2.5">
+                          <GuideIcon
+                            name={item.icon}
+                            className="h-4 w-4 shrink-0 text-amber-300"
+                          />
+                          {item.label}
+                        </span>
+                      </Link>
+                    );
+                  })}
+                </nav>
+              </div>
+            )}
           </div>
 
           <div className="mt-6 rounded-xl border border-slate-800 bg-slate-900/60 p-3.5">
-            <p className="text-xs font-semibold text-slate-200">Demo workspace</p>
-            <p className="mt-1 text-xs leading-5 text-slate-400">Sample data only. Changes may reset.</p>
+            <p className="text-xs font-semibold text-slate-200">
+              {demoSandboxEnabled
+                ? "Sprint 0 Demo Sandbox"
+                : "DarKitOS Production"}
+            </p>
+            <p className="mt-1 text-xs leading-5 text-slate-400">
+              {demoSandboxEnabled
+                ? "In-memory INR sample store. PostgreSQL persistence ships in Sprint 1."
+                : "Role & kitchen access controls enforced server-side."}
+            </p>
           </div>
         </aside>
 
@@ -460,9 +530,7 @@ export default function AppShell({
           <div className="fixed inset-0 z-50 flex lg:hidden">
             <div
               className="fixed inset-0 bg-black/70 backdrop-blur-sm"
-              onClick={() =>
-                setMobileMenuOpen(false)
-              }
+              onClick={() => setMobileMenuOpen(false)}
             />
             <div className="relative z-10 flex w-72 flex-col justify-between bg-slate-950 p-4 border-r border-slate-800 overflow-y-auto">
               <div>
@@ -472,9 +540,7 @@ export default function AppShell({
                   </span>
                   <button
                     type="button"
-                    onClick={() =>
-                      setMobileMenuOpen(false)
-                    }
+                    onClick={() => setMobileMenuOpen(false)}
                     aria-label="Close workspace navigation"
                     className="rounded-lg border border-slate-800 px-2.5 py-1 text-xs text-slate-400"
                   >
@@ -482,45 +548,44 @@ export default function AppShell({
                   </button>
                 </div>
 
-                {/* Mobile Persona Switcher */}
-                <div role="group" aria-label="Demo role" className="mb-4 rounded-xl border border-slate-800 bg-slate-900 p-2.5">
-                  <p className="mb-2 font-mono text-[10px] uppercase text-slate-400">
-                    Switch demo role
-                  </p>
-                  <div className="grid grid-cols-2 gap-1.5">
-                    {DEMO_ROLES.map((p) => (
-                      <button
-                        key={p.code}
-                        type="button"
-                        disabled={switchingCode !== null}
-                        aria-pressed={currentEmp?.employeeCode === p.code}
-                        onClick={() =>
-                          void handleQuickSwitch(
-                            p.code,
-                          )
-                        }
-                        className={`rounded-lg px-2 py-1.5 font-mono text-[10px] font-bold ${
-                          currentEmp?.employeeCode ===
-                          p.code
-                            ? "bg-sky-500 text-slate-950"
-                            : "bg-slate-800 text-slate-300"
-                        }`}
-                      >
-                        {p.label}
-                      </button>
-                    ))}
+                {/* Mobile Persona Switcher (Sandbox only) */}
+                {demoSandboxEnabled && (
+                  <div
+                    role="group"
+                    aria-label="Demo role"
+                    className="mb-4 rounded-xl border border-slate-800 bg-slate-900 p-2.5"
+                  >
+                    <p className="mb-2 font-mono text-[10px] uppercase text-slate-400">
+                      Switch demo role
+                    </p>
+                    <div className="grid grid-cols-2 gap-1.5">
+                      {DEMO_ROLES.map((p) => (
+                        <button
+                          key={p.code}
+                          type="button"
+                          disabled={switchingCode !== null}
+                          aria-pressed={currentEmp?.employeeCode === p.code}
+                          onClick={() => void handleQuickSwitch(p.code)}
+                          className={`rounded-lg px-2 py-1.5 font-mono text-[10px] font-bold ${
+                            currentEmp?.employeeCode === p.code
+                              ? "bg-sky-500 text-slate-950"
+                              : "bg-slate-800 text-slate-300"
+                          }`}
+                        >
+                          {p.label}
+                        </button>
+                      ))}
+                    </div>
                   </div>
-                </div>
+                )}
 
                 <nav aria-label="Workspace" className="space-y-1">
-                  {NAV_ITEMS.map((item) => (
+                  {visibleNavItems.map((item) => (
                     <Link
                       key={item.href}
                       href={item.href}
                       aria-current={isRouteActive(item) ? "page" : undefined}
-                      onClick={() =>
-                        setMobileMenuOpen(false)
-                      }
+                      onClick={() => setMobileMenuOpen(false)}
                       className={`flex items-center justify-between rounded-xl px-3 py-2.5 text-sm font-medium ${
                         isRouteActive(item)
                           ? "bg-sky-500/20 text-white border border-sky-500/40"
@@ -528,7 +593,10 @@ export default function AppShell({
                       }`}
                     >
                       <span className="flex items-center gap-2">
-                        <GuideIcon name={item.icon} className="h-4 w-4 shrink-0 text-cyan-300" />
+                        <GuideIcon
+                          name={item.icon}
+                          className="h-4 w-4 shrink-0 text-cyan-300"
+                        />
                         {item.label}
                       </span>
                     </Link>
@@ -536,7 +604,10 @@ export default function AppShell({
                 </nav>
                 <button
                   type="button"
-                  onClick={() => { setMobileMenuOpen(false); setAdrModalOpen(true); }}
+                  onClick={() => {
+                    setMobileMenuOpen(false);
+                    setAdrModalOpen(true);
+                  }}
                   className="mt-4 rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-xs font-semibold text-slate-300 sm:hidden"
                 >
                   System details
@@ -560,9 +631,7 @@ export default function AppShell({
                 {title}
               </h1>
               {subtitle && (
-                <p className="mt-1 text-sm text-slate-400">
-                  {subtitle}
-                </p>
+                <p className="mt-1 text-sm text-slate-400">{subtitle}</p>
               )}
             </div>
 
@@ -577,24 +646,33 @@ export default function AppShell({
         </main>
       </div>
 
-      {/* Cloud7 / VerticalForge / DarKIT OS ADR Reference Modal */}
+      {/* Honest Architecture & Roadmap Reference Modal */}
       {adrModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4 backdrop-blur-sm">
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="system-details-modal-title"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4 backdrop-blur-sm"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setAdrModalOpen(false);
+          }}
+        >
           <div className="max-h-[88vh] w-full max-w-4xl overflow-y-auto rounded-2xl border border-slate-700 bg-slate-900 p-6 shadow-2xl">
             <div className="flex items-start justify-between gap-4 border-b border-slate-800 pb-4">
               <div>
                 <span className="font-mono text-xs font-bold uppercase tracking-wider text-sky-400">
-                  Architecture Decision Record (ADR)
+                  Architecture &amp; Production Readiness
                 </span>
-                <h2 className="mt-1 text-xl font-black text-white">
-                  Ecosystem Integration: Cloud7, VerticalForge & DarKIT OS
+                <h2
+                  id="system-details-modal-title"
+                  className="mt-1 text-xl font-black text-white"
+                >
+                  DarKitOS — Sprint 0 Verified Baseline &amp; Rollout Plan
                 </h2>
               </div>
               <button
                 type="button"
-                onClick={() =>
-                  setAdrModalOpen(false)
-                }
+                onClick={() => setAdrModalOpen(false)}
                 className="rounded-lg border border-slate-700 bg-slate-800 px-3 py-1.5 text-xs font-bold text-slate-300 hover:text-white"
               >
                 Close ✕
@@ -602,100 +680,90 @@ export default function AppShell({
             </div>
 
             <div className="mt-5 grid gap-4 md:grid-cols-3">
-              <div className="rounded-xl border border-sky-500/30 bg-sky-500/5 p-4">
-                <p className="font-mono text-xs font-bold uppercase text-sky-400">
-                  Layer 1 • Cloud7
+              <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/5 p-4">
+                <p className="font-mono text-xs font-bold uppercase text-emerald-400">
+                  Active Now • Sprint 0
                 </p>
                 <h3 className="mt-1 font-bold text-white">
-                  Parent Infrastructure & Delivery
+                  INR Showcase &amp; Core Engine
                 </h3>
                 <ul className="mt-2 space-y-1.5 text-xs text-slate-300">
                   <li>
-                    • Shared DB, Shared Schema enforced by PostgreSQL Row-Level Security (RLS).
-                  </li>
-                  <li>
-                    • Transaction-mode PgBouncer pooling with{" "}
-                    <code className="text-sky-300">
-                      set_config(..., is_local=true)
-                    </code>
-                    .
-                  </li>
-                  <li>
-                    • Edge API Gateway with Token Bucket Rate Limiting & Circuit Breaker (
-                    <code className="text-sky-300">
-                      Closed → Open → Half-Open
+                    • Single canonical store boundary (
+                    <code className="text-emerald-300">
+                      UI → /api/* → lib/store.ts
                     </code>
                     ).
                   </li>
                   <li>
-                    • Autonomous Agent Integration (
-                    <code className="text-sky-300">
-                      wshobson/agents
-                    </code>{" "}
-                    200+ specialist agents).
-                  </li>
-                </ul>
-              </div>
-
-              <div className="rounded-xl border border-purple-500/30 bg-purple-500/5 p-4">
-                <p className="font-mono text-xs font-bold uppercase text-purple-400">
-                  Layer 2 • VerticalForge
-                </p>
-                <h3 className="mt-1 font-bold text-white">
-                  Diagnostic & Value Engine
-                </h3>
-                <ul className="mt-2 space-y-1.5 text-xs text-slate-300">
-                  <li>
-                    • Quote-to-Cash Revenue Leakage Engine:{" "}
-                    <code className="text-purple-300">
-                      (Potential − Collected) ÷ Potential × 100
-                    </code>
-                    .
-                  </li>
-                  <li>
-                    • Audits 5 vectors: Failed Payments, Expired Discounts, Unbilled Usage, Contract-to-Billing Drift, Lapsed Renewals.
-                  </li>
-                  <li>
-                    • Food Yield & COGS Variance:{" "}
-                    <code className="text-purple-300">
-                      (Usable Weight ÷ Purchased Weight) × 100
-                    </code>
-                    .
-                  </li>
-                </ul>
-              </div>
-
-              <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/5 p-4">
-                <p className="font-mono text-xs font-bold uppercase text-emerald-400">
-                  Layer 3 • DarKIT OS
-                </p>
-                <h3 className="mt-1 font-bold text-white">
-                  Unified Vertical Operating System
-                </h3>
-                <ul className="mt-2 space-y-1.5 text-xs text-slate-300">
-                  <li>
-                    • Single Canonical Store:{" "}
-                    <code className="text-emerald-300">
-                      UI → API → Domain → Store → Persistence
-                    </code>
-                    .
-                  </li>
-                  <li>
-                    • Many-to-many{" "}
-                    <code className="text-emerald-300">
-                      BrandKitchen
-                    </code>{" "}
-                    validation & two-phase atomic webhook idempotency.
-                  </li>
-                  <li>
-                    • Atomic Inventory Consumption on{" "}
+                    • Atomic recipe depletion on{" "}
                     <code className="text-emerald-300">
                       PENDING → PREPARING
                     </code>
                     .
                   </li>
                   <li>
-                    • Stage-dependent Cancellations (Pre-Prep Restore, Mid-Prep Loss, Post-Pickup Claim).
+                    • Stage-aware cancellations (Pre-Prep, Mid-Prep ₹ Loss,
+                    Post-Pickup Claim).
+                  </li>
+                  <li>
+                    • Signed JWT auth, server-side RBAC, kitchen isolation, and
+                    Owner Brief `.md` export.
+                  </li>
+                </ul>
+              </div>
+
+              <div className="rounded-xl border border-sky-500/30 bg-sky-500/5 p-4">
+                <p className="font-mono text-xs font-bold uppercase text-sky-400">
+                  Next • Sprints 1 &amp; 2
+                </p>
+                <h3 className="mt-1 font-bold text-white">
+                  Database, Auth &amp; Realtime
+                </h3>
+                <ul className="mt-2 space-y-1.5 text-xs text-slate-300">
+                  <li>
+                    • Supabase PostgreSQL (Mumbai{" "}
+                    <code className="text-sky-300">ap-south-1</code>) + Drizzle
+                    ORM.
+                  </li>
+                  <li>
+                    • Per-kitchen{" "}
+                    <code className="text-sky-300">
+                      (kitchenId, ingredientId)
+                    </code>{" "}
+                    ledgers &amp; stock transfers.
+                  </li>
+                  <li>
+                    • Supabase Auth (Email/OTP) + PostgreSQL RLS tenant
+                    isolation.
+                  </li>
+                  <li>
+                    • Supabase Realtime replacing HTTP polling (&lt;500ms KDS
+                    updates).
+                  </li>
+                </ul>
+              </div>
+
+              <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-4">
+                <p className="font-mono text-xs font-bold uppercase text-amber-400">
+                  Go-Live • Sprints 3 &amp; 4
+                </p>
+                <h3 className="mt-1 font-bold text-white">
+                  India GST, Aggregators &amp; AI
+                </h3>
+                <ul className="mt-2 space-y-1.5 text-xs text-slate-300">
+                  <li>
+                    • Sprint 3A: Day-1 GST invoicing (CGST/SGST/FSSAI), Tally
+                    CSV, Razorpay Direct UPI.
+                  </li>
+                  <li>
+                    • Sprint 3B: UrbanPiper Swiggy/Zomato webhooks, Outbox +
+                    Upstash QStash, Interakt WhatsApp alerts.
+                  </li>
+                  <li>
+                    • Sprint 4: 80mm thermal KOT print bridge &amp; Gemini{" "}
+                    <code className="text-amber-300">/api/ai/diagnose</code>{" "}
+                    copilot.
                   </li>
                 </ul>
               </div>
@@ -703,27 +771,23 @@ export default function AppShell({
 
             <div className="mt-5 rounded-xl border border-slate-800 bg-slate-950 p-4">
               <p className="font-mono text-xs font-bold uppercase text-slate-400">
-                Canonical Order Lifecycle & Pipeline
+                Canonical Order Lifecycle
               </p>
               <div className="mt-3 flex flex-wrap items-center gap-2 font-mono text-xs">
                 {[
-                  "LOGIN",
-                  "AUTH & RBAC",
-                  "ORDER INJECTION",
-                  "LIVE ORDERS",
-                  "COOK KDS (PREPARING → READY)",
-                  "DISPATCH (DRIVER → PICKUP → DISPATCHED)",
-                  "INVENTORY LEDGER",
-                  "VERTICALFORGE BI",
+                  "PENDING",
+                  "PREPARING (Deplete Stock)",
+                  "READY_FOR_PICKUP",
+                  "DRIVER_ASSIGNED",
+                  "PICKED_UP",
+                  "DISPATCHED",
                 ].map((step, i, arr) => (
                   <React.Fragment key={step}>
                     <span className="rounded-lg border border-slate-800 bg-slate-900 px-2.5 py-1.5 text-slate-200">
                       {step}
                     </span>
                     {i < arr.length - 1 && (
-                      <span className="text-sky-400">
-                        →
-                      </span>
+                      <span className="text-sky-400">→</span>
                     )}
                   </React.Fragment>
                 ))}

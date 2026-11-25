@@ -1,3 +1,4 @@
+import { formatCurrency } from "@/lib/currency";
 import {
   BRANDS_DB,
   BRAND_KITCHENS_DB,
@@ -18,6 +19,7 @@ import {
   type CancellationStage,
   type DbaBrand,
   type Employee,
+  type EmployeeRole,
   type InventoryDecision,
   type InventoryItem,
   type InventoryMovement,
@@ -40,6 +42,19 @@ import {
 
 export type { Order, InventoryItem };
 
+export const MID_PREP_LABOR_ALLOWANCE_INR = 75;
+
+const ALLOWED_EMPLOYEE_ROLES = new Set<EmployeeRole>([
+  "OWNER",
+  "MANAGER",
+  "LINE_COOK",
+  "DISPATCH",
+]);
+
+const ALLOWED_LEAKAGE_STATUSES = new Set<
+  RevenueLeakageVector["status"]
+>(["DETECTED", "AUDITING", "RECOVERED"]);
+
 export interface KitchenState {
   orders: Order[];
   inventory: InventoryItem[];
@@ -61,11 +76,11 @@ export interface KitchenState {
 export interface StoreSnapshot extends KitchenState {}
 
 const DEFAULT_SETTINGS: SystemSettings = {
-  currency: "USD",
+  currency: "INR",
   timezone: "Asia/Kolkata",
   theme: "obsidian",
   fluidAnimations: true,
-  syncMode: "WEBSOCKET",
+  syncMode: "HTTP_POLLING",
   autoAcceptOrders: true,
   lowStockMultiplier: 1.0,
   prepSlaMinutes: 12,
@@ -78,67 +93,67 @@ const DEFAULT_SETTINGS: SystemSettings = {
 const INITIAL_LEAKAGE_VECTORS: RevenueLeakageVector[] = [
   {
     id: "LEAK-01",
-    vector: "Failed Payments",
+    vector: "Aggregator Payout Discrepancies",
     signature:
-      "Open invoices with payment_failed status lacking automated dunning follow-ups.",
+      "Swiggy & Zomato weekly settlements showing unexplained commission or penalty deductions without dispute tickets.",
     impactLevel: "Severe",
-    impactNote: "Severe (20-40% of churned MRR)",
-    potentialRevenue: 48500,
-    actualCollected: 45120,
-    leakedAmount: 3380,
+    impactNote: "Severe (2–4% of monthly aggregator GMV)",
+    potentialRevenue: 485000,
+    actualCollected: 451200,
+    leakedAmount: 33800,
     affectedAccounts: 14,
     status: "DETECTED",
   },
   {
     id: "LEAK-02",
-    vector: "Expired Discounts",
+    vector: "Unclaimed Post-Pickup Cancellations",
     signature:
-      "Active subscriptions where promotional coupons surpassed intended end dates without nullifiers.",
-    impactLevel: "Moderate",
-    impactNote: "Moderate (Compounds significantly over time)",
-    potentialRevenue: 36200,
-    actualCollected: 34490,
-    leakedAmount: 1710,
+      "Orders cancelled after courier handoff where kitchen evidence exists but aggregator claim was never filed.",
+    impactLevel: "High",
+    impactNote: "High (100% food & packaging loss if unclaimed)",
+    potentialRevenue: 362000,
+    actualCollected: 344900,
+    leakedAmount: 17100,
     affectedAccounts: 23,
     status: "AUDITING",
   },
   {
     id: "LEAK-03",
-    vector: "Unbilled Usage",
+    vector: "Expired Promo & Discount Burn",
     signature:
-      "Active kitchen terminal sessions & metered order volume exceeding invoiced tier quantities.",
+      "Aggregator campaign discounts continuing past peak-hour windows across multiple virtual brands.",
     impactLevel: "Moderate",
-    impactNote: "Moderate (Overage drift across multi-brand hubs)",
-    potentialRevenue: 29400,
-    actualCollected: 27980,
-    leakedAmount: 1420,
+    impactNote: "Moderate (Compounds quietly across weekend surges)",
+    potentialRevenue: 294000,
+    actualCollected: 279800,
+    leakedAmount: 14200,
     affectedAccounts: 9,
     status: "DETECTED",
   },
   {
     id: "LEAK-04",
-    vector: "Contract-to-Billing Drift",
+    vector: "Menu & Packaging Add-On Drift",
     signature:
-      "Manual brand expansion upgrades executed in CRM failing to trigger billing tier increments.",
+      "Menu price revisions updated in kitchen POS but out of sync on one or more delivery channels.",
     impactLevel: "Moderate",
-    impactNote: "Moderate (Sync gap between CRM & Billing)",
-    potentialRevenue: 41000,
-    actualCollected: 39150,
-    leakedAmount: 1850,
+    impactNote: "Moderate (Direct margin erosion per ticket)",
+    potentialRevenue: 410000,
+    actualCollected: 391500,
+    leakedAmount: 18500,
     affectedAccounts: 6,
     status: "AUDITING",
   },
   {
     id: "LEAK-05",
-    vector: "Lapsed Renewals",
+    vector: "Failed Direct UPI / Card Captures",
     signature:
-      "Annual enterprise kitchen contracts reaching end date without triggering renewal invoice.",
+      "Direct Web checkout intents where payment capture timed out without automated retry links.",
     impactLevel: "High",
-    impactNote: "High (Rare but massive per incident)",
-    potentialRevenue: 64000,
-    actualCollected: 61600,
-    leakedAmount: 2400,
-    affectedAccounts: 2,
+    impactNote: "High (Zero-commission direct orders lost)",
+    potentialRevenue: 640000,
+    actualCollected: 616000,
+    leakedAmount: 24000,
+    affectedAccounts: 12,
     status: "RECOVERED",
   },
 ];
@@ -146,15 +161,15 @@ const INITIAL_LEAKAGE_VECTORS: RevenueLeakageVector[] = [
 const INITIAL_FILES: VirtualFileAsset[] = [
   {
     id: "FILE-ADR-001",
-    name: "Cloud7_VerticalForge_DarKITOS_ADR.md",
+    name: "DarKitOS_Build_Status_and_Production_Roadmap.md",
     category: "Architecture ADR",
-    size: "42.8 KB",
+    size: "16.4 KB",
     mimeType: "text/markdown",
     kitchenId: "K1",
     uploadedBy: "Patric Revuelto (OWNER-01)",
-    updatedAt: "2026-10-11T05:30:00.000Z",
+    updatedAt: "2026-11-25T05:30:00.000Z",
     status: "VERIFIED",
-    content: `# Architecture Decision Record: Cloud7, VerticalForge & DarKIT OS\n\n## Layer 1: Cloud7 Infrastructure\n- Shared Database, Shared Schema enforced by PostgreSQL Row-Level Security (RLS).\n- Transaction-mode PgBouncer pooling using \`set_config('app.current_tenant', tenant_id, true)\` (\`is_local = true\`).\n- Edge API Gateway with Sliding-Window Token Bucket Rate Limiting and Circuit Breaker (\`CLOSED -> OPEN -> HALF_OPEN\`).\n- Autonomous Agent Integration via \`wshobson/agents\` (200+ specialist agents).\n\n## Layer 2: VerticalForge Diagnostic Engine\n- Revenue Leakage Formula: \`(Total Potential Revenue - Actual Collected Revenue) / Total Potential Revenue * 100\`.\n- Physical Food Yield Formula: \`(Usable Edible Product Weight / As Purchased Weight) * 100\`.\n\n## Layer 3: DarKIT OS\n- Single Canonical Store & State Machine (\`PENDING -> PREPARING -> READY_FOR_PICKUP -> DRIVER_ASSIGNED -> PICKED_UP -> DISPATCHED\`).\n- Atomic Inventory Consumption on \`PENDING -> PREPARING\`.\n- Stage-Aware Cancellations: Pre-Prep Restoration, Mid-Prep Food/Labor Loss, Post-Pickup Aggregator Accounting Claim.`,
+    content: `# DarKitOS — Current Build Status & Production Roadmap\n\n## Current Stage: Sprint 0 (Verified INR Prototype)\n- INR (₹) native pricing, COGS, wastage loss, and en-IN formatting across all screens.\n- Single canonical store boundary (\`lib/store.ts\`) & client-safe domain contract (\`lib/db.ts\`).\n- End-to-end kitchen flow: Order Intake → Live Orders → Cook KDS → Dispatch → Atomic Recipe Stock Deduction → Stage-Aware Cancellations.\n- Owner Showcase + Downloadable \`.md\` Bottleneck Brief Generator for Gemini / Dev AI.\n- Hardened session JWT auth, strict RBAC guards, and Vitest domain/API test baseline.\n\n## Locked Production Stack (Sprints 1–4)\n- **Sprint 1:** Supabase PostgreSQL (Mumbai \`ap-south-1\`) + Drizzle ORM (\`db/schema.ts\`, \`lib/db-client.ts\`), async \`lib/store.ts\`, per-kitchen isolated inventory ledgers, and GitHub Actions CI.\n- **Sprint 2:** Supabase Auth (Email/Phone OTP), kitchen-scoped RBAC middleware, and Supabase Realtime sub-second KDS sync.\n- **Sprint 3A:** Indian GST invoicing (CGST/SGST/IGST, FSSAI/GSTIN, Tally/Zoho export) + Razorpay UPI checkout/webhooks.\n- **Sprint 3B:** UrbanPiper Swiggy/Zomato webhooks + PostgreSQL Outbox/Upstash QStash + Interakt/Gupshup WhatsApp alerts.\n- **Sprint 4:** 80mm ESC-POS KOT print bridge, audio SLA alerts, and server-side Gemini API operational copilot (\`/api/ai/diagnose\`).`,
   },
   {
     id: "FILE-SOP-002",
@@ -179,7 +194,7 @@ const INITIAL_FILES: VirtualFileAsset[] = [
     uploadedBy: "Priya Sharma (0001)",
     updatedAt: "2026-10-09T09:15:00.000Z",
     status: "VERIFIED",
-    content: `# Standard Operating Procedure: Grill & Fryer Station\n1. Verify core patty temperature reaches 74°C (165°F) prior to assembly.\n2. Log Ghost Pepper Glaze batch weight every 4 hours for VerticalForge yield reconciliation.\n3. Seal all Direct Web and Swiggy bags with tamper-evident thermal tape before marking READY_FOR_PICKUP.`,
+    content: `# Standard Operating Procedure: Grill & Fryer Station\n1. Verify core patty temperature reaches 74°C prior to assembly.\n2. Log Ghost Pepper Glaze batch volume (ml) every 4 hours for yield reconciliation.\n3. Seal all Direct Web, Swiggy, and Zomato bags with tamper-evident thermal tape before marking READY_FOR_PICKUP.`,
   },
   {
     id: "FILE-REC-004",
@@ -192,7 +207,7 @@ const INITIAL_FILES: VirtualFileAsset[] = [
     uploadedBy: "Rajesh Kumar (2001)",
     updatedAt: "2026-10-10T18:45:00.000Z",
     status: "VERIFIED",
-    content: `{\n  "menuItemId": "MENU-TM-01",\n  "name": "Birria Taco Trio",\n  "asPurchasedWeightLb": 0.625,\n  "usableEdibleWeightLb": 0.50,\n  "targetYieldPct": 80.0,\n  "ingredients": [\n    { "sku": "BIRRIA-01", "qty": 0.5, "unit": "lbs" },\n    { "sku": "TORT-01", "qty": 3, "unit": "units" }\n  ]\n}`,
+    content: `{\n  "menuItemId": "MENU-TM-01",\n  "name": "Birria Taco Trio",\n  "asPurchasedWeightKg": 0.3125,\n  "usableEdibleWeightKg": 0.25,\n  "targetYieldPct": 80.0,\n  "ingredients": [\n    { "sku": "BIRRIA-01", "qty": 0.25, "unit": "kg" },\n    { "sku": "TORT-01", "qty": 3, "unit": "units" }\n  ]\n}`,
   },
   {
     id: "FILE-IMG-005",
@@ -205,11 +220,11 @@ const INITIAL_FILES: VirtualFileAsset[] = [
     uploadedBy: "Patric Revuelto (OWNER-01)",
     updatedAt: "2026-10-08T11:00:00.000Z",
     status: "VERIFIED",
-    content: `High-Resolution Aggregator Asset (Swiggy / Zomato / UberEats Approved)\nResolution: 3840x2160px • Color Profile: sRGB\nBrand: BurgerForge (BF) • Item: MENU-BF-01 Double Smash Burger\nLighting: Rim-lit caramelized crust, melted sharp cheddar, toasted brioche bun.`,
+    content: `High-Resolution Aggregator Asset (Swiggy / Zomato Approved)\nResolution: 3840x2160px • Color Profile: sRGB\nBrand: BurgerForge (BF) • Item: MENU-BF-01 Double Smash Burger\nLighting: Rim-lit caramelized crust, melted sharp cheddar, toasted brioche bun.`,
   },
   {
     id: "FILE-AUD-006",
-    name: "VerticalForge_Q4_Variance_Audit.csv",
+    name: "Kitchen_Q4_Food_Yield_Variance_Audit.csv",
     category: "Financial Audit",
     size: "64.1 KB",
     mimeType: "text/csv",
@@ -238,7 +253,7 @@ function buildInitialSeedState(): KitchenState {
       status: "PENDING",
       priority: "RUSH",
       customerName: "Aarav Khanna",
-      totalAmount: 32.47,
+      totalAmount: 887,
       itemCount: 3,
       createdAt: minAgo(6),
       updatedAt: minAgo(6),
@@ -252,7 +267,7 @@ function buildInitialSeedState(): KitchenState {
           menuItemId: "MENU-BF-01",
           name: "Double Smash Burger",
           quantity: 2,
-          price: 12.99,
+          price: 349,
           station: "Grill",
           notes: "Extra crispy edges, no pickles",
         },
@@ -261,7 +276,7 @@ function buildInitialSeedState(): KitchenState {
           menuItemId: "MENU-BF-02",
           name: "Truffle Fries",
           quantity: 1,
-          price: 6.49,
+          price: 189,
           station: "Fryer",
         },
       ],
@@ -293,7 +308,7 @@ function buildInitialSeedState(): KitchenState {
       status: "PENDING",
       priority: "NORMAL",
       customerName: "Meera Nair",
-      totalAmount: 30.49,
+      totalAmount: 848,
       itemCount: 2,
       createdAt: minAgo(4),
       updatedAt: minAgo(4),
@@ -306,7 +321,7 @@ function buildInitialSeedState(): KitchenState {
           menuItemId: "MENU-TM-01",
           name: "Birria Taco Trio",
           quantity: 1,
-          price: 14.5,
+          price: 399,
           station: "Assembly",
           notes: "Extra consomme cup",
         },
@@ -315,7 +330,7 @@ function buildInitialSeedState(): KitchenState {
           menuItemId: "MENU-TM-02",
           name: "Avocado Quesabirria Vampiro",
           quantity: 1,
-          price: 15.99,
+          price: 449,
           station: "Assembly",
         },
       ],
@@ -331,16 +346,16 @@ function buildInitialSeedState(): KitchenState {
     },
     {
       id: "ORD-903",
-      externalOrderId: "UE-771039",
-      idempotencyKey: "idem-ue-771039",
+      externalOrderId: "ZMT-771039",
+      idempotencyKey: "idem-zmt-771039",
       brandId: "WingProtocol",
       kitchenId: "K1",
-      channel: "UberEats",
-      source: "UBEREATS",
+      channel: "Zomato",
+      source: "ZOMATO",
       status: "PREPARING",
       priority: "RUSH",
       customerName: "Kabir Bedi",
-      totalAmount: 16.99,
+      totalAmount: 469,
       itemCount: 1,
       createdAt: minAgo(14),
       updatedAt: minAgo(9),
@@ -355,7 +370,7 @@ function buildInitialSeedState(): KitchenState {
           menuItemId: "MENU-WP-01",
           name: "12pc Ghost Pepper Wings",
           quantity: 1,
-          price: 16.99,
+          price: 469,
           station: "Fryer",
           notes: "All flats if possible",
         },
@@ -365,15 +380,15 @@ function buildInitialSeedState(): KitchenState {
           id: "EVT-903-1",
           type: "RECEIVED",
           timestamp: minAgo(14),
-          actor: "UBEREATS_WEBHOOK",
-          details: "Order received via UberEats.",
+          actor: "ZOMATO_WEBHOOK",
+          details: "Order received via Zomato.",
         },
         {
           id: "EVT-903-2",
           type: "PREPARING",
           timestamp: minAgo(9),
           actor: "2001 (Rajesh Kumar)",
-          details: "Line cook started preparation. Atomic recipe depletion executed (12 Jumbo Chicken Wings, 4 oz Ghost Pepper Glaze).",
+          details: "Line cook started preparation. Atomic recipe depletion executed (12 Jumbo Chicken Wings, 120 ml Ghost Pepper Glaze).",
         },
       ],
     },
@@ -388,7 +403,7 @@ function buildInitialSeedState(): KitchenState {
       status: "READY_FOR_PICKUP",
       priority: "VIP",
       customerName: "Ananya Sen",
-      totalAmount: 34.5,
+      totalAmount: 1058,
       itemCount: 2,
       createdAt: minAgo(22),
       updatedAt: minAgo(7),
@@ -404,7 +419,7 @@ function buildInitialSeedState(): KitchenState {
           menuItemId: "MENU-GB-01",
           name: "Ahi Tuna Poke Bowl",
           quantity: 2,
-          price: 17.25,
+          price: 529,
           station: "Cold Prep",
         },
       ],
@@ -434,18 +449,18 @@ function buildInitialSeedState(): KitchenState {
     },
     {
       id: "ORD-905",
-      externalOrderId: "DD-339104",
-      idempotencyKey: "idem-dd-339104",
+      externalOrderId: "SWG-339104",
+      idempotencyKey: "idem-swg-339104",
       brandId: "BurgerForge",
       kitchenId: "K2",
-      channel: "DoorDash",
-      source: "DOORDASH",
+      channel: "Swiggy",
+      source: "SWIGGY",
       status: "DRIVER_ASSIGNED",
       priority: "NORMAL",
       customerName: "Siddharth Jain",
       driverName: "Deepak Yadav",
       courierEtaMins: 6,
-      totalAmount: 27.48,
+      totalAmount: 738,
       itemCount: 2,
       createdAt: minAgo(28),
       updatedAt: minAgo(4),
@@ -462,7 +477,7 @@ function buildInitialSeedState(): KitchenState {
           menuItemId: "MENU-BF-03",
           name: "Oklahoma Onion Melt",
           quantity: 1,
-          price: 14.49,
+          price: 389,
           station: "Grill",
         },
         {
@@ -470,7 +485,7 @@ function buildInitialSeedState(): KitchenState {
           menuItemId: "MENU-BF-01",
           name: "Double Smash Burger",
           quantity: 1,
-          price: 12.99,
+          price: 349,
           station: "Grill",
         },
       ],
@@ -479,7 +494,7 @@ function buildInitialSeedState(): KitchenState {
           id: "EVT-905-1",
           type: "RECEIVED",
           timestamp: minAgo(28),
-          actor: "DOORDASH_WEBHOOK",
+          actor: "SWIGGY_WEBHOOK",
           details: "Order injected for K2 Noida hub.",
         },
         {
@@ -518,7 +533,7 @@ function buildInitialSeedState(): KitchenState {
       customerName: "Riya Kapoor",
       driverName: "Suresh Solanki",
       courierEtaMins: 3,
-      totalAmount: 29.0,
+      totalAmount: 798,
       itemCount: 2,
       createdAt: minAgo(35),
       updatedAt: minAgo(2),
@@ -536,7 +551,7 @@ function buildInitialSeedState(): KitchenState {
           menuItemId: "MENU-TM-01",
           name: "Birria Taco Trio",
           quantity: 2,
-          price: 14.5,
+          price: 399,
           station: "Assembly",
         },
       ],
@@ -588,7 +603,7 @@ function buildInitialSeedState(): KitchenState {
       customerName: "Devansh Arora",
       driverName: "Manoj Tiwari",
       courierEtaMins: 0,
-      totalAmount: 26.98,
+      totalAmount: 738,
       itemCount: 2,
       createdAt: minAgo(52),
       updatedAt: minAgo(18),
@@ -607,7 +622,7 @@ function buildInitialSeedState(): KitchenState {
           menuItemId: "MENU-WP-01",
           name: "12pc Ghost Pepper Wings",
           quantity: 1,
-          price: 16.99,
+          price: 469,
           station: "Fryer",
         },
         {
@@ -615,7 +630,7 @@ function buildInitialSeedState(): KitchenState {
           menuItemId: "MENU-WP-02",
           name: "6pc Tactical Fire Wings",
           quantity: 1,
-          price: 9.99,
+          price: 269,
           station: "Fryer",
         },
       ],
@@ -661,16 +676,16 @@ function buildInitialSeedState(): KitchenState {
     },
     {
       id: "ORD-908",
-      externalOrderId: "GH-662011",
-      idempotencyKey: "idem-gh-662011",
+      externalOrderId: "ZMT-662011",
+      idempotencyKey: "idem-zmt-662011",
       brandId: "BurgerForge",
       kitchenId: "K1",
-      channel: "GrubHub",
-      source: "GRUBHUB",
+      channel: "Zomato",
+      source: "ZOMATO",
       status: "CANCELLED",
       priority: "NORMAL",
       customerName: "Vikrant Massey",
-      totalAmount: 12.99,
+      totalAmount: 349,
       itemCount: 1,
       createdAt: minAgo(40),
       updatedAt: minAgo(29),
@@ -682,7 +697,7 @@ function buildInitialSeedState(): KitchenState {
       cancelledBy: "0001 (Priya Sharma)",
       cancellationStage: "DURING_OR_AFTER_PREP",
       cancellationResolution: "FOOD_AND_LABOR_LOSS",
-      lossAmount: 2.8,
+      lossAmount: 273,
       claimAmount: 0,
       inventoryDecision: "AVAILABLE",
       inventoryConsumed: true,
@@ -692,7 +707,7 @@ function buildInitialSeedState(): KitchenState {
           menuItemId: "MENU-BF-01",
           name: "Double Smash Burger",
           quantity: 1,
-          price: 12.99,
+          price: 349,
           station: "Grill",
         },
       ],
@@ -701,7 +716,7 @@ function buildInitialSeedState(): KitchenState {
           id: "EVT-908-1",
           type: "RECEIVED",
           timestamp: minAgo(40),
-          actor: "GRUBHUB_WEBHOOK",
+          actor: "ZOMATO_WEBHOOK",
         },
         {
           id: "EVT-908-2",
@@ -715,7 +730,7 @@ function buildInitialSeedState(): KitchenState {
           type: "CANCELLED",
           timestamp: minAgo(29),
           actor: "0001 (Priya Sharma)",
-          details: "Mid-prep cancellation logged as Food & Labor Loss ($2.80 COGS).",
+          details: "Mid-prep cancellation logged as Food & Labor Loss (₹273 total: ₹198 COGS + ₹75 labor).",
         },
       ],
     },
@@ -733,7 +748,7 @@ function buildInitialSeedState(): KitchenState {
       previousStock: 362,
       newStock: 350,
       unit: "units",
-      costImpact: 6.6,
+      costImpact: 216,
       orderId: "ORD-903",
       actor: "2001 (Rajesh Kumar)",
       reason: "Recipe consumption for ORD-903 (12pc Ghost Pepper Wings)",
@@ -746,11 +761,11 @@ function buildInitialSeedState(): KitchenState {
       sku: "GHOST-01",
       kitchenId: "K1",
       type: "SALE_CONSUMPTION",
-      quantity: -4,
-      previousStock: 16,
-      newStock: 12,
-      unit: "oz",
-      costImpact: 3.4,
+      quantity: -120,
+      previousStock: 480,
+      newStock: 360,
+      unit: "ml",
+      costImpact: 60,
       orderId: "ORD-903",
       actor: "2001 (Rajesh Kumar)",
       reason: "Recipe consumption for ORD-903 (low-stock threshold breached)",
@@ -763,11 +778,11 @@ function buildInitialSeedState(): KitchenState {
       sku: "TUNA-01",
       kitchenId: "K1",
       type: "SALE_CONSUMPTION",
-      quantity: -0.8,
-      previousStock: 28.8,
-      newStock: 28,
-      unit: "lbs",
-      costImpact: 9.6,
+      quantity: -0.4,
+      previousStock: 14.4,
+      newStock: 14,
+      unit: "kg",
+      costImpact: 480,
       orderId: "ORD-904",
       actor: "2001 (Rajesh Kumar)",
       reason: "Recipe consumption for ORD-904 (2x Ahi Tuna Poke Bowl)",
@@ -784,7 +799,7 @@ function buildInitialSeedState(): KitchenState {
       previousStock: 142,
       newStock: 140,
       unit: "units",
-      costImpact: 2.4,
+      costImpact: 170,
       orderId: "ORD-908",
       actor: "0001 (Priya Sharma)",
       reason: "Mid-prep cancellation food loss on ORD-908 (unrecoverable cooked protein)",
@@ -798,7 +813,7 @@ function buildInitialSeedState(): KitchenState {
       orderId: "ORD-908",
       brandId: "BurgerForge",
       kitchenId: "K1",
-      channel: "GrubHub",
+      channel: "Zomato",
       stage: "DURING_OR_AFTER_PREP",
       previousStatus: "PREPARING",
       resolution: "FOOD_AND_LABOR_LOSS",
@@ -806,7 +821,7 @@ function buildInitialSeedState(): KitchenState {
       reason: "Customer cancelled mid-preparation on aggregator app",
       actor: "0001 (Priya Sharma)",
       timestamp: minAgo(29),
-      financialLoss: 2.8,
+      financialLoss: 273,
       claimAmount: 0,
       restoredIngredients: [],
       lostIngredients: [
@@ -861,7 +876,7 @@ function buildInitialSeedState(): KitchenState {
       type: "INVENTORY_WARNING",
       category: "INVENTORY",
       title: "Low Stock Alert: Brioche Buns & Ghost Pepper Glaze",
-      details: "Brioche Buns (18 units) and Ghost Pepper Glaze (12 oz) below reorder threshold.",
+      details: "Brioche Buns (18 units) and Ghost Pepper Glaze (360 ml) below reorder threshold.",
       actor: "SYSTEM",
       orderId: "ORD-901",
       kitchenId: "K1",
@@ -887,7 +902,7 @@ function buildInitialSeedState(): KitchenState {
       type: "INVENTORY_DEPLETED",
       category: "INVENTORY",
       title: "Atomic Recipe Depletion (ORD-903)",
-      details: "Deducted 12 Jumbo Chicken Wings and 4 oz Ghost Pepper Glaze on PENDING -> PREPARING.",
+      details: "Deducted 12 Jumbo Chicken Wings and 120 ml Ghost Pepper Glaze on PENDING -> PREPARING.",
       actor: "2001 (Rajesh Kumar)",
       orderId: "ORD-903",
       kitchenId: "K1",
@@ -900,7 +915,7 @@ function buildInitialSeedState(): KitchenState {
       type: "LOSS_RECORDED",
       category: "CANCELLATION",
       title: "Mid-Prep Cancellation Loss (ORD-908)",
-      details: "Logged $2.80 Food & Labor Loss; prepared ingredients blocked from inventory return.",
+      details: "Logged ₹273 Food & Labor Loss; prepared ingredients blocked from inventory return.",
       actor: "0001 (Priya Sharma)",
       orderId: "ORD-908",
       kitchenId: "K1",
@@ -917,7 +932,7 @@ function buildInitialSeedState(): KitchenState {
     channel: o.channel,
     brandId: o.brandId,
     kitchenId: o.kitchenId,
-    payloadSummary: `${o.brandId} • ${o.items.length} item(s) • $${(o.totalAmount ?? 0).toFixed(2)}`,
+    payloadSummary: `${o.brandId} • ${o.items.length} item(s) • ${formatCurrency(o.totalAmount ?? 0, "INR")}`,
     createdAt: o.createdAt,
     hitCount: 1,
   }));
@@ -938,7 +953,7 @@ function buildInitialSeedState(): KitchenState {
       id: "OUT-502",
       eventType: "kds.inventory.low_stock_alert",
       aggregateId: "INV-006",
-      payload: JSON.stringify({ sku: "GHOST-01", stock: 12, threshold: 20 }),
+      payload: JSON.stringify({ sku: "GHOST-01", stock: 360, threshold: 600 }),
       attempt: 2,
       maxAttempts: 6,
       backoffSchedule: "+10 seconds",
@@ -947,9 +962,9 @@ function buildInitialSeedState(): KitchenState {
     },
     {
       id: "OUT-503",
-      eventType: "verticalforge.variance.loss_logged",
+      eventType: "kitchen.variance.loss_logged",
       aggregateId: "ORD-908",
-      payload: JSON.stringify({ orderId: "ORD-908", stage: "DURING_OR_AFTER_PREP", lossUsd: 2.8 }),
+      payload: JSON.stringify({ orderId: "ORD-908", stage: "DURING_OR_AFTER_PREP", lossInr: 273 }),
       attempt: 1,
       maxAttempts: 6,
       backoffSchedule: "Immediate (0s)",
@@ -1053,7 +1068,14 @@ export function getInventoryMovements(): InventoryMovement[] {
 }
 
 export function getCancellations(): CancellationRecord[] {
-  return getGlobalState().cancellations.map((c) => ({ ...c }));
+  return getGlobalState().cancellations.map((c) => ({
+    ...c,
+    restoredIngredients: c.restoredIngredients.map((r) => ({ ...r })),
+    lostIngredients: c.lostIngredients.map((l) => ({ ...l })),
+    dispatchEvidence: c.dispatchEvidence
+      ? { ...c.dispatchEvidence }
+      : undefined,
+  }));
 }
 
 export function getActivities(): OperationalActivity[] {
@@ -1184,12 +1206,15 @@ export function clearOrdersStore(): void {
   const state = getGlobalState();
   state.orders = [];
   state.cancellations = [];
+  state.webhookEvents = [];
+  state.outboxEvents = [];
   state.activities.unshift({
     id: `ACT-${Date.now()}`,
     type: "STORE_CLEARED",
     category: "SYSTEM",
     title: "Active Order Queue Cleared",
-    details: "All orders cleared to demonstrate honest empty states across stations.",
+    details:
+      "All orders, cancellations, webhook receipts, and outbox items cleared to demonstrate honest empty states across stations.",
     actor: "SYSTEM",
     timestamp: new Date().toISOString(),
     severity: "warning",
@@ -1333,9 +1358,22 @@ export function injectCanonicalOrder(
       throw new Error("Order must contain at least one menu item.");
     }
 
-    const orderId =
-      input.id?.trim() ||
-      `ORD-${Math.floor(1000 + Math.random() * 9000)}`;
+    let orderId = input.id?.trim();
+    if (orderId) {
+      if (state.orders.some((o) => o.id === orderId)) {
+        throw new Error(`Order ID already exists: ${orderId}`);
+      }
+    } else {
+      let attempts = 0;
+      do {
+        const suffix = Math.floor(1000 + Math.random() * 9000);
+        orderId =
+          attempts < 20
+            ? `ORD-${suffix}`
+            : `ORD-${Date.now().toString().slice(-6)}-${suffix}`;
+        attempts += 1;
+      } while (state.orders.some((o) => o.id === orderId));
+    }
 
     const resolvedItems: OrderItem[] = input.items.map(
       (raw, idx) => {
@@ -1477,7 +1515,7 @@ export function injectCanonicalOrder(
       channel: draftOrder.channel,
       brandId: draftOrder.brandId,
       kitchenId: draftOrder.kitchenId,
-      payloadSummary: `${draftOrder.brandId} • ${itemCount} item(s) • $${totalAmount.toFixed(2)}`,
+      payloadSummary: `${draftOrder.brandId} • ${itemCount} item(s) • ${formatCurrency(totalAmount, state.settings.currency)}`,
       createdAt: now,
       hitCount: 1,
     });
@@ -1503,7 +1541,7 @@ export function injectCanonicalOrder(
       type: "ORDER_CREATED",
       category: "ORDER",
       title: `Order ${draftOrder.id} Injected (${draftOrder.brandId})`,
-      details: `${itemCount} item(s) ($${totalAmount.toFixed(2)}) via ${draftOrder.channel} → ${kitchen.name} (${evaluation.inventoryDecision}).`,
+      details: `${itemCount} item(s) (${formatCurrency(totalAmount, state.settings.currency)}) via ${draftOrder.channel} → ${kitchen.name} (${evaluation.inventoryDecision}).`,
       actor: input.actor,
       orderId: draftOrder.id,
       kitchenId: draftOrder.kitchenId,
@@ -1559,7 +1597,9 @@ export interface TransitionOrderResult {
 export function transitionCanonicalOrder(
   input: TransitionOrderInput,
 ): TransitionOrderResult {
-  return transaction((state) => {
+  let blockedInsufficientStock: string[] | null = null;
+
+  const result = transaction((state) => {
     const index = state.orders.findIndex(
       (o) => o.id === input.orderId,
     );
@@ -1623,9 +1663,12 @@ export function transitionCanonicalOrder(
           depletion.inventoryDecision ===
           "INSUFFICIENT_STOCK"
         ) {
+          // Persist the audit event & inventoryDecision cleanly while keeping stock untouched,
+          // then throw AFTER the transaction commits so the audit trail is NOT rolled back.
           currentOrder.inventoryDecision = "INSUFFICIENT_STOCK";
           currentOrder.inventoryUnavailable =
             depletion.insufficientStockItems;
+          currentOrder.updatedAt = now;
           currentOrder.events.push({
             id: `${currentOrder.id}-EVT-${Date.now()}`,
             type: "INVENTORY_UNAVAILABLE",
@@ -1634,9 +1677,23 @@ export function transitionCanonicalOrder(
             details: `Preparation blocked due to insufficient stock: ${depletion.insufficientStockItems.join(", ")}`,
           });
           state.orders[index] = cloneOrder(currentOrder);
-          throw new Error(
-            `Insufficient inventory for preparation: ${depletion.insufficientStockItems.join(", ")}`,
-          );
+          recordActivity({
+            type: "INVENTORY_BLOCKED",
+            category: "INVENTORY",
+            title: `${currentOrder.id} Prep Blocked (Out of Stock)`,
+            details: `Insufficient inventory prevented PENDING -> PREPARING: ${depletion.insufficientStockItems.join(", ")}.`,
+            actor: input.actor,
+            orderId: currentOrder.id,
+            kitchenId: currentOrder.kitchenId,
+            brandId: currentOrder.brandId,
+            timestamp: now,
+            severity: "error",
+          });
+          blockedInsufficientStock = depletion.insufficientStockItems;
+          return {
+            order: cloneOrder(currentOrder),
+            idempotentReplay: false,
+          };
         }
 
         // Record inventory movements for each ingredient consumed
@@ -1784,6 +1841,14 @@ export function transitionCanonicalOrder(
       lowStockAlerts,
     };
   });
+
+  if (blockedInsufficientStock !== null) {
+    throw new Error(
+      `Insufficient inventory for preparation: ${(blockedInsufficientStock as string[]).join(", ")}`,
+    );
+  }
+
+  return result;
 }
 
 function executeStageAwareCancellation(
@@ -1881,25 +1946,10 @@ function executeStageAwareCancellation(
         }
       }
     } else {
-      // Stock was never deducted (canonical PENDING state before prep)
-      if (shouldRestorePrePrep) {
-        resolution = "INVENTORY_RESTORED";
-        for (const [invId, qty] of requirements) {
-          const item = state.inventory.find(
-            (i) => i.id === invId,
-          );
-          if (item && qty > 0) {
-            restoredIngredients.push({
-              inventoryItemId: item.id,
-              name: item.name,
-              quantity: qty,
-            });
-          }
-        }
-      } else {
-        resolution = "UNAVOIDABLE_LOSS";
-        financialLoss = recipeCost;
-      }
+      // Stock is only deducted on PENDING -> PREPARING. Because inventoryConsumed is false,
+      // no ingredients were removed and no food loss occurred (restoredIngredients stays empty).
+      resolution = "INVENTORY_RESTORED";
+      financialLoss = 0;
     }
   } else if (
     previousStatus === "PREPARING" ||
@@ -1909,7 +1959,9 @@ function executeStageAwareCancellation(
     // Mid-production or post-prep cancellation: DO NOT return cooked food to usable inventory!
     stage = "DURING_OR_AFTER_PREP";
     resolution = "FOOD_AND_LABOR_LOSS";
-    financialLoss = Number((recipeCost + 1.5).toFixed(2)); // COGS + station labor allocation
+    financialLoss = Number(
+      (recipeCost + MID_PREP_LABOR_ALLOWANCE_INR).toFixed(2),
+    ); // COGS + ₹75 station labor allocation
 
     for (const [invId, qty] of requirements) {
       const item = state.inventory.find(
@@ -1980,12 +2032,21 @@ function executeStageAwareCancellation(
   currentOrder.lossAmount = financialLoss;
   currentOrder.claimAmount = claimAmount;
 
+  const formattedLoss = formatCurrency(
+    financialLoss,
+    state.settings.currency,
+  );
+  const formattedClaim = formatCurrency(
+    claimAmount,
+    state.settings.currency,
+  );
+
   currentOrder.events.push({
     id: `${currentOrder.id}-EVT-CANCEL-${Date.now()}`,
     type: "CANCELLED",
     timestamp: now,
     actor: input.actor,
-    details: `Order cancelled at ${previousStatus} (${stage}) -> ${resolution}. Loss: $${financialLoss.toFixed(2)}, Claim: $${claimAmount.toFixed(2)}.`,
+    details: `Order cancelled at ${previousStatus} (${stage}) -> ${resolution}. Loss: ${formattedLoss}, Claim: ${formattedClaim}.`,
   });
 
   const cancellationRecord: CancellationRecord = {
@@ -2027,7 +2088,7 @@ function executeStageAwareCancellation(
     type: "ORDER_CANCELLED",
     category: "CANCELLATION",
     title: `${currentOrder.id} Cancelled (${stage.replaceAll("_", " ")})`,
-    details: `Resolution: ${resolution.replaceAll("_", " ")} • Loss: $${financialLoss.toFixed(2)} • Claim: $${claimAmount.toFixed(2)}.`,
+    details: `Resolution: ${resolution.replaceAll("_", " ")} • Loss: ${formattedLoss} • Claim: ${formattedClaim}.`,
     actor: input.actor,
     orderId: currentOrder.id,
     kitchenId: currentOrder.kitchenId,
@@ -2085,10 +2146,12 @@ export function mutateCanonicalInventory(
       "MANUAL_ADJUSTMENT";
     let delta = 0;
 
-    if (
-      input.action === "SET_STOCK" ||
-      typeof input.currentStock === "number"
-    ) {
+    if (input.action === "SET_STOCK") {
+      if (typeof input.currentStock !== "number" || !Number.isFinite(input.currentStock)) {
+        throw new Error(
+          "SET_STOCK requires a finite numeric currentStock value.",
+        );
+      }
       nextStock = Number(input.currentStock);
       delta = Number(
         (nextStock - previousStock).toFixed(4),
@@ -2179,7 +2242,7 @@ export function mutateCanonicalInventory(
       type: `INVENTORY_${movementType}`,
       category: "INVENTORY",
       title: `${updatedItem.name}: ${previousStock} → ${nextStock} ${updatedItem.unit}`,
-      details: `${movement.reason} (Cost impact: $${movement.costImpact.toFixed(2)})`,
+      details: `${movement.reason} (Cost impact: ${formatCurrency(movement.costImpact, state.settings.currency)})`,
       actor: input.actor,
       kitchenId: movement.kitchenId,
       timestamp: now,
@@ -2247,36 +2310,91 @@ export function updateMenuCatalogItem(
   actor: string,
 ): MenuItem[] {
   return transaction((state) => {
+    if (!item || typeof item.id !== "string" || !item.id.trim()) {
+      throw new Error("Menu item id is required.");
+    }
+    const cleanId = item.id.trim();
     const idx = state.menuCatalog.findIndex(
-      (m) => m.id === item.id,
+      (m) => m.id === cleanId,
     );
     if (idx !== -1) {
+      const existing = state.menuCatalog[idx];
+      const nextPrice =
+        typeof item.price === "number" &&
+        Number.isFinite(item.price) &&
+        item.price > 0
+          ? Number(item.price.toFixed(2))
+          : existing.price;
+      const nextPrep =
+        typeof item.prepTimeMins === "number" &&
+        Number.isFinite(item.prepTimeMins) &&
+        item.prepTimeMins >= 1
+          ? Math.round(item.prepTimeMins)
+          : existing.prepTimeMins;
+
       state.menuCatalog[idx] = {
-        ...state.menuCatalog[idx],
-        ...item,
-        price:
-          typeof item.price === "number" && item.price > 0
-            ? item.price
-            : state.menuCatalog[idx].price,
+        ...existing,
+        name:
+          typeof item.name === "string" && item.name.trim()
+            ? item.name.trim()
+            : existing.name,
+        price: nextPrice,
+        station:
+          typeof item.station === "string" && item.station.trim()
+            ? (item.station as MenuItem["station"])
+            : existing.station,
+        active:
+          typeof item.active === "boolean"
+            ? item.active
+            : existing.active,
+        prepTimeMins: nextPrep,
+        recipe: Array.isArray(item.recipe)
+          ? item.recipe
+              .filter(
+                (r) =>
+                  r &&
+                  typeof r.inventoryItemId === "string" &&
+                  typeof r.quantityRequired === "number" &&
+                  Number.isFinite(r.quantityRequired) &&
+                  r.quantityRequired > 0,
+              )
+              .map((r) => ({
+                inventoryItemId: r.inventoryItemId,
+                quantityRequired: r.quantityRequired,
+              }))
+          : existing.recipe,
       };
     } else if (item.brandId && item.name && item.station) {
+      const price =
+        typeof item.price === "number" &&
+        Number.isFinite(item.price) &&
+        item.price > 0
+          ? Number(item.price.toFixed(2))
+          : 299;
       state.menuCatalog.push({
-        id: item.id,
+        id: cleanId,
         brandId: item.brandId,
-        name: item.name,
-        price: Number(item.price) || 12.99,
+        name: item.name.trim(),
+        price,
         station: item.station,
-        active: item.active ?? true,
-        prepTimeMins: item.prepTimeMins ?? 8,
-        recipe: item.recipe ?? [],
+        active: typeof item.active === "boolean" ? item.active : true,
+        prepTimeMins:
+          typeof item.prepTimeMins === "number" && item.prepTimeMins >= 1
+            ? Math.round(item.prepTimeMins)
+            : 8,
+        recipe: Array.isArray(item.recipe) ? item.recipe : [],
       });
+    } else {
+      throw new Error(
+        `Menu item ${cleanId} not found and missing required brandId, name, or station.`,
+      );
     }
 
     recordActivity({
       type: "MENU_UPDATED",
       category: "SYSTEM",
-      title: `Menu Catalog Updated (${item.id})`,
-      details: `Menu item ${item.name || item.id} updated by ${actor}.`,
+      title: `Menu Catalog Updated (${cleanId})`,
+      details: `Menu item ${item.name || cleanId} updated by ${actor}.`,
       actor,
       brandId: item.brandId,
       severity: "info",
@@ -2321,37 +2439,71 @@ export function upsertCanonicalEmployee(
   actor: string,
 ): Employee[] {
   return transaction((state) => {
+    if (
+      !employee ||
+      typeof employee.employeeCode !== "string" ||
+      !employee.employeeCode.trim()
+    ) {
+      throw new Error("employeeCode is required.");
+    }
+    const cleanCode = employee.employeeCode.trim().toUpperCase();
+    if (
+      employee.role !== undefined &&
+      !ALLOWED_EMPLOYEE_ROLES.has(employee.role)
+    ) {
+      throw new Error(`Invalid employee role: ${String(employee.role)}`);
+    }
+
     const idx = state.employees.findIndex(
       (e) =>
-        e.id === employee.id ||
-        e.employeeCode.toLowerCase() ===
-          employee.employeeCode.toLowerCase(),
+        (employee.id && e.id === employee.id) ||
+        e.employeeCode.toLowerCase() === cleanCode.toLowerCase(),
     );
+
     if (idx !== -1) {
+      const existing = state.employees[idx];
       state.employees[idx] = {
-        ...state.employees[idx],
-        ...employee,
+        id: existing.id,
+        employeeCode: cleanCode,
+        name:
+          typeof employee.name === "string" && employee.name.trim()
+            ? employee.name.trim()
+            : existing.name,
+        role: employee.role ?? existing.role,
+        kitchenId:
+          typeof employee.kitchenId === "string" && employee.kitchenId.trim()
+            ? employee.kitchenId.trim()
+            : existing.kitchenId,
+        active:
+          typeof employee.active === "boolean"
+            ? employee.active
+            : existing.active,
       };
     } else {
       state.employees.push({
         id:
-          employee.id ||
-          `EMP-${Date.now().toString().slice(-4)}`,
-        employeeCode: employee.employeeCode
-          .trim()
-          .toUpperCase(),
-        name: employee.name?.trim() || "New Operator",
-        role: employee.role || "LINE_COOK",
-        kitchenId: employee.kitchenId || "K1",
-        active: employee.active ?? true,
+          typeof employee.id === "string" && employee.id.trim()
+            ? employee.id.trim()
+            : `EMP-${Date.now().toString().slice(-4)}`,
+        employeeCode: cleanCode,
+        name:
+          typeof employee.name === "string" && employee.name.trim()
+            ? employee.name.trim()
+            : "New Operator",
+        role: employee.role ?? "LINE_COOK",
+        kitchenId:
+          typeof employee.kitchenId === "string" && employee.kitchenId.trim()
+            ? employee.kitchenId.trim()
+            : "K1",
+        active: typeof employee.active === "boolean" ? employee.active : true,
       });
     }
 
     recordActivity({
       type: "STAFF_UPDATED",
       category: "AUTH",
-      title: `Staff Record Updated (${employee.employeeCode})`,
-      details: `Employee ${employee.name || employee.employeeCode} updated by ${actor}.`,
+      title: `Staff Record Updated (${cleanCode})`,
+      details: `Employee ${employee.name || cleanCode} updated by ${actor}.`,
       actor,
       kitchenId: employee.kitchenId,
       severity: "info",
@@ -2361,44 +2513,105 @@ export function upsertCanonicalEmployee(
   });
 }
 
+const ALLOWED_FILE_CATEGORIES: VirtualFileAsset["category"][] = [
+  "Owner Brief",
+  "Health Certificate",
+  "SOP Manual",
+  "Menu Photography",
+  "Recipe Card",
+  "Architecture ADR",
+  "Financial Audit",
+];
+
+const ALLOWED_FILE_STATUSES: VirtualFileAsset["status"][] = [
+  "VERIFIED",
+  "PENDING_REVIEW",
+  "ARCHIVED",
+];
+
 export function upsertVirtualFile(
   file: Partial<VirtualFileAsset> & { name: string },
   actor: string,
 ): VirtualFileAsset[] {
   return transaction((state) => {
+    if (!file || typeof file.name !== "string" || !file.name.trim()) {
+      throw new Error("File name is required and must be a non-empty string.");
+    }
+    const cleanName = file.name.trim();
+    const safeCategory =
+      file.category && ALLOWED_FILE_CATEGORIES.includes(file.category)
+        ? file.category
+        : "SOP Manual";
+    const safeStatus =
+      file.status && ALLOWED_FILE_STATUSES.includes(file.status)
+        ? file.status
+        : "VERIFIED";
+
     const now = new Date().toISOString();
     const idx = file.id
       ? state.files.findIndex((f) => f.id === file.id)
       : -1;
     if (idx !== -1) {
+      const existing = state.files[idx];
       state.files[idx] = {
-        ...state.files[idx],
-        ...file,
+        ...existing,
+        name: cleanName,
+        category: file.category ? safeCategory : existing.category,
+        size:
+          typeof file.size === "string" && file.size.trim()
+            ? file.size.trim()
+            : existing.size,
+        mimeType:
+          typeof file.mimeType === "string" && file.mimeType.trim()
+            ? file.mimeType.trim()
+            : existing.mimeType,
+        kitchenId:
+          typeof file.kitchenId === "string" && file.kitchenId.trim()
+            ? file.kitchenId.trim()
+            : existing.kitchenId,
+        brandId: file.brandId ?? existing.brandId,
+        status: file.status ? safeStatus : existing.status,
+        content:
+          typeof file.content === "string"
+            ? file.content
+            : existing.content,
         updatedAt: now,
       };
     } else {
+      const content =
+        typeof file.content === "string" && file.content.trim()
+          ? file.content
+          : `# ${cleanName}\nUploaded to DarKIT OS Virtual File Explorer by ${actor}.`;
+      const computedSize =
+        typeof file.size === "string" && file.size.trim()
+          ? file.size.trim()
+          : `${Math.max(0.2, content.length / 1024).toFixed(1)} KB`;
       state.files.unshift({
         id: `FILE-${Date.now().toString().slice(-5)}`,
-        name: file.name.trim(),
-        category: file.category || "SOP Manual",
-        size: file.size || "14.2 KB",
-        mimeType: file.mimeType || "text/markdown",
-        kitchenId: file.kitchenId || "K1",
+        name: cleanName,
+        category: safeCategory,
+        size: computedSize,
+        mimeType:
+          typeof file.mimeType === "string" && file.mimeType.trim()
+            ? file.mimeType.trim()
+            : "text/markdown",
+        kitchenId:
+          typeof file.kitchenId === "string" && file.kitchenId.trim()
+            ? file.kitchenId.trim()
+            : "K1",
         brandId: file.brandId,
         uploadedBy: actor,
         updatedAt: now,
-        status: file.status || "VERIFIED",
-        content:
-          file.content ||
-          `# ${file.name}\nUploaded to DarKIT OS Virtual File Explorer by ${actor}.`,
+        status: safeStatus,
+        content,
       });
     }
 
     recordActivity({
       type: "FILE_ASSET_SAVED",
       category: "SYSTEM",
-      title: `Virtual Explorer Asset Saved: ${file.name}`,
-      details: `Category: ${file.category || "SOP Manual"} • Kitchen: ${file.kitchenId || "GLOBAL"}.`,
+      title: `Virtual Explorer Asset Saved: ${cleanName}`,
+      details: `Category: ${safeCategory} • Kitchen: ${file.kitchenId || "GLOBAL"}.`,
       actor,
       kitchenId: file.kitchenId,
       brandId: file.brandId,
@@ -2414,6 +2627,9 @@ export function deleteVirtualFile(
   actor: string,
 ): VirtualFileAsset[] {
   return transaction((state) => {
+    if (!fileId || typeof fileId !== "string") {
+      throw new Error("fileId is required.");
+    }
     const target = state.files.find((f) => f.id === fileId);
     state.files = state.files.filter((f) => f.id !== fileId);
     if (target) {
@@ -2430,12 +2646,37 @@ export function deleteVirtualFile(
   });
 }
 
+const ALLOWED_THEMES: SystemSettings["theme"][] = [
+  "obsidian",
+  "midnight",
+  "cyber-emerald",
+  "titanium",
+];
+const ALLOWED_CURRENCIES: SystemSettings["currency"][] = [
+  "INR",
+  "USD",
+  "EUR",
+];
+const ALLOWED_SYNC_MODES: SystemSettings["syncMode"][] = [
+  "WEBSOCKET",
+  "SSE",
+  "HTTP_POLLING",
+];
+const ALLOWED_RLS_MODES: SystemSettings["rlsEnforcement"][] = [
+  "STRICT_LOCAL_TX",
+  "SESSION",
+];
+const ALLOWED_CIRCUIT_STATES: SystemSettings["circuitBreakerState"][] = [
+  "CLOSED",
+  "HALF_OPEN",
+  "OPEN",
+];
+
 export function updateSystemSettings(
   partial: Partial<SystemSettings>,
   actor: string,
 ): SystemSettings {
   return transaction((state) => {
-    // Self-healing fallback sanitation for malformed configuration values
     const safeLowStockMultiplier =
       typeof partial.lowStockMultiplier === "number" &&
       Number.isFinite(partial.lowStockMultiplier) &&
@@ -2469,19 +2710,51 @@ export function updateSystemSettings(
         : state.settings.rateLimitRps;
 
     state.settings = {
-      ...state.settings,
-      ...partial,
+      currency:
+        partial.currency && ALLOWED_CURRENCIES.includes(partial.currency)
+          ? partial.currency
+          : state.settings.currency,
+      timezone:
+        typeof partial.timezone === "string" && partial.timezone.trim()
+          ? partial.timezone.trim()
+          : state.settings.timezone,
+      theme:
+        partial.theme && ALLOWED_THEMES.includes(partial.theme)
+          ? partial.theme
+          : state.settings.theme,
+      fluidAnimations:
+        typeof partial.fluidAnimations === "boolean"
+          ? partial.fluidAnimations
+          : state.settings.fluidAnimations,
+      syncMode:
+        partial.syncMode && ALLOWED_SYNC_MODES.includes(partial.syncMode)
+          ? partial.syncMode
+          : state.settings.syncMode,
+      autoAcceptOrders:
+        typeof partial.autoAcceptOrders === "boolean"
+          ? partial.autoAcceptOrders
+          : state.settings.autoAcceptOrders,
       lowStockMultiplier: safeLowStockMultiplier,
       prepSlaMinutes: safePrepSla,
       dispatchSlaMinutes: safeDispatchSla,
+      rlsEnforcement:
+        partial.rlsEnforcement &&
+        ALLOWED_RLS_MODES.includes(partial.rlsEnforcement)
+          ? partial.rlsEnforcement
+          : state.settings.rlsEnforcement,
+      circuitBreakerState:
+        partial.circuitBreakerState &&
+        ALLOWED_CIRCUIT_STATES.includes(partial.circuitBreakerState)
+          ? partial.circuitBreakerState
+          : state.settings.circuitBreakerState,
       rateLimitRps: safeRateLimit,
     };
 
     recordActivity({
       type: "SETTINGS_UPDATED",
       category: "SYSTEM",
-      title: "System Personalization & Cloud7 Parameters Updated",
-      details: `Theme: ${state.settings.theme} • Sync: ${state.settings.syncMode} • RLS: ${state.settings.rlsEnforcement} • Circuit: ${state.settings.circuitBreakerState}.`,
+      title: "System Preferences Updated",
+      details: `Currency: ${state.settings.currency} • Theme: ${state.settings.theme} • Sync: ${state.settings.syncMode} • Prep SLA: ${state.settings.prepSlaMinutes}m.`,
       actor,
       severity: "info",
     });
@@ -2496,25 +2769,29 @@ export function updateLeakageVectorStatus(
   actor: string,
 ): RevenueLeakageVector[] {
   return transaction((state) => {
+    if (!ALLOWED_LEAKAGE_STATUSES.has(status)) {
+      throw new Error(`Invalid leakage status: ${String(status)}`);
+    }
     const vector = state.leakageVectors.find(
       (v) => v.id === id,
     );
-    if (vector) {
-      vector.status = status;
-      if (status === "RECOVERED") {
-        vector.actualCollected = vector.potentialRevenue;
-        vector.leakedAmount = 0;
-      }
-      recordActivity({
-        type: "VERTICALFORGE_AUDIT",
-        category: "CLOUD7",
-        title: `VerticalForge Leakage Vector ${vector.vector}: ${status}`,
-        details: `Quote-to-cash diagnostic updated by ${actor}.`,
-        actor,
-        severity:
-          status === "RECOVERED" ? "success" : "info",
-      });
+    if (!vector) {
+      throw new Error(`Leakage vector not found: ${id}`);
     }
+    vector.status = status;
+    if (status === "RECOVERED") {
+      vector.actualCollected = vector.potentialRevenue;
+      vector.leakedAmount = 0;
+    }
+    recordActivity({
+      type: "LEAKAGE_AUDIT",
+      category: "CLOUD7",
+      title: `Revenue Leakage Audit (${vector.vector}): ${status}`,
+      details: `Cloud-kitchen revenue recovery status updated by ${actor}.`,
+      actor,
+      severity:
+        status === "RECOVERED" ? "success" : "info",
+    });
     return state.leakageVectors.map((l) => ({ ...l }));
   });
 }
