@@ -1,351 +1,503 @@
 "use client";
 
-import { useEffect, useState, type FormEvent } from "react";
+import { useState } from "react";
 import { useRouter } from "next/navigation";
-import GuideIcon from "@/components/GuideIcon";
-import type { Employee } from "@/lib/db";
-import { DEMO_ROLES } from "@/lib/getting-started";
 
-type SignInSource = "staff" | "demo";
-
-const buttonFocus =
-  "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-300";
-
-function isInternalPath(value: unknown): value is string {
-  if (
-    typeof value !== "string" ||
-    !value.startsWith("/") ||
-    value.startsWith("//")
-  ) {
-    return false;
-  }
-  try {
-    return (
-      new URL(value, window.location.origin).origin === window.location.origin
-    );
-  } catch {
-    return false;
-  }
+interface LoginFormProps {
+  redirect?: string;
+  demoSandboxEnabled?: boolean;
+  supabaseConfigured?: boolean;
+  initialErrorCode?: string;
 }
 
-export default function LoginForm({ redirectTo }: { redirectTo?: string }) {
+const DEMO_ACCOUNTS = [
+  {
+    code: "OWNER-01",
+    label: "Owner — Patric Revuelto",
+    role: "OWNER",
+    scope: "Global (ORG-001 • K1–K4)",
+    accent:
+      "border-amber-500/40 bg-amber-500/10 text-amber-300 hover:bg-amber-500/20",
+  },
+  {
+    code: "0001",
+    label: "Manager — Priya Sharma",
+    role: "MANAGER",
+    scope: "K1 Gurugram Central Hub",
+    accent:
+      "border-emerald-500/40 bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/20",
+  },
+  {
+    code: "2001",
+    label: "Line Cook — Rajesh Kumar",
+    role: "LINE_COOK",
+    scope: "K1 KDS Station",
+    accent:
+      "border-sky-500/40 bg-sky-500/10 text-sky-300 hover:bg-sky-500/20",
+  },
+  {
+    code: "3001",
+    label: "Dispatch — Arjun Mehta",
+    role: "DISPATCH",
+    scope: "K1 Courier Staging",
+    accent:
+      "border-purple-500/40 bg-purple-500/10 text-purple-300 hover:bg-purple-500/20",
+  },
+];
+
+const ERROR_MESSAGES: Record<string, string> = {
+  not_provisioned:
+    "Your account is not provisioned for any kitchen organization. Ask your owner to add your email or phone in Staff & Access.",
+  deactivated:
+    "Your employee profile is deactivated. Contact your kitchen manager or organization owner.",
+  auth_provider_not_configured:
+    "Authentication provider is not configured on this deployment.",
+  invalid_or_expired_link:
+    "Your sign-in link has expired or is invalid. Please request a fresh OTP or magic link.",
+  missing_code: "Sign-in callback was missing an authorization code.",
+};
+
+type LoginTab = "password" | "otp" | "demo";
+
+export default function LoginForm({
+  redirect = "",
+  demoSandboxEnabled = false,
+  supabaseConfigured = false,
+  initialErrorCode = "",
+}: LoginFormProps) {
   const router = useRouter();
-  const [mode, setMode] = useState<"code" | "pin">("code");
+
+  const defaultTab: LoginTab = supabaseConfigured
+    ? "password"
+    : demoSandboxEnabled
+      ? "demo"
+      : "password";
+
+  const [activeTab, setActiveTab] = useState<LoginTab>(defaultTab);
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [otpChannel, setOtpChannel] = useState<"email" | "phone">("email");
+  const [phone, setPhone] = useState("");
+  const [otpToken, setOtpToken] = useState("");
+  const [otpRequested, setOtpRequested] = useState(false);
+
   const [employeeCode, setEmployeeCode] = useState("");
-  const [pin, setPin] = useState("");
-  const [pending, setPending] = useState<SignInSource | null>(null);
-  const [failure, setFailure] = useState<{
-    source: SignInSource;
-    message: string;
-  } | null>(null);
-  const [demoSandboxEnabled, setDemoSandboxEnabled] = useState<boolean>(true);
-  const [demoEmployees, setDemoEmployees] = useState<Employee[]>([]);
-
-  useEffect(() => {
-    let active = true;
-    fetch("/api/session", { cache: "no-store" })
-      .then((res) => (res.ok ? res.json() : null))
-      .then((data) => {
-        if (!active || !data) return;
-        setDemoSandboxEnabled(Boolean(data.demoSandboxEnabled));
-        if (Array.isArray(data.employees)) {
-          setDemoEmployees(data.employees);
-        }
-      })
-      .catch(() => {
-        // Ignore transient errors on initial load
-      });
-    return () => {
-      active = false;
-    };
-  }, []);
-
-  const otherDemoAccounts = demoEmployees.filter(
-    (employee) =>
-      employee.active &&
-      !DEMO_ROLES.some(({ code }) => code === employee.employeeCode),
+  const [submitting, setSubmitting] = useState(false);
+  const [notice, setNotice] = useState("");
+  const [error, setError] = useState(
+    initialErrorCode ? ERROR_MESSAGES[initialErrorCode] || initialErrorCode : "",
   );
 
-  async function signIn(value: string, source: SignInSource) {
-    const code = value.trim();
-    if (pending) return;
-    if (!code) {
-      setFailure({
-        source,
-        message: "Enter your employee code or shift PIN.",
-      });
-      return;
-    }
+  async function completeLogin(payload: Record<string, unknown>) {
+    setSubmitting(true);
+    setError("");
+    setNotice("");
 
-    setPending(source);
-    setFailure(null);
     try {
       const response = await fetch("/api/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          employeeCode: code,
-          redirect:
-            source === "staff" && isInternalPath(redirectTo)
-              ? redirectTo
-              : undefined,
+          ...payload,
+          ...(redirect ? { redirect } : {}),
         }),
       });
+
       const data = await response.json();
+
       if (!response.ok) {
-        setFailure({
-          source,
-          message:
-            response.status === 401 && source === "staff"
-              ? "That code or PIN wasn’t recognized. Please check it and try again."
-              : data.error || "Couldn’t sign in. Please try again.",
-        });
-        if (source === "staff") setPin("");
+        throw new Error(data.error || "Sign-in failed.");
+      }
+
+      if (data.otpSent) {
+        setOtpRequested(true);
+        setNotice(data.message || "Verification code sent.");
         return;
       }
-      router.replace(
-        isInternalPath(data.redirectTo) ? data.redirectTo : "/dashboard",
-      );
+
+      const destination =
+        typeof data.redirectTo === "string" && data.redirectTo.startsWith("/")
+          ? data.redirectTo
+          : "/dashboard";
+
+      router.push(destination);
       router.refresh();
-    } catch {
-      setFailure({
-        source,
-        message: "Couldn’t connect to DarKitOS. Please try again.",
-      });
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "Unable to complete login.",
+      );
     } finally {
-      setPending(null);
+      setSubmitting(false);
     }
   }
 
-  function handleSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    void signIn(mode === "code" ? employeeCode : pin, "staff");
+  function handlePasswordSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    void completeLogin({
+      mode: "password",
+      email: email.trim(),
+      password,
+    });
   }
 
-  function pressKey(key: string) {
-    setFailure(null);
-    if (key === "Clear") {
-      setPin("");
-    } else if (key === "Delete") {
-      setPin((current) => current.slice(0, -1));
-    } else if (pin.length < 4) {
-      const next = pin + key;
-      setPin(next);
-      if (next.length === 4) void signIn(next, "staff");
-    }
+  function handleOtpRequest(e: React.FormEvent) {
+    e.preventDefault();
+    void completeLogin({
+      mode: "otp_request",
+      ...(otpChannel === "email"
+        ? { email: email.trim() }
+        : { phone: phone.trim() }),
+    });
   }
 
-  const isPin = mode === "pin";
+  function handleOtpVerify(e: React.FormEvent) {
+    e.preventDefault();
+    void completeLogin({
+      mode: "otp_verify",
+      ...(otpChannel === "email"
+        ? { email: email.trim() }
+        : { phone: phone.trim() }),
+      token: otpToken.trim(),
+    });
+  }
+
+  function handleDemoSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!demoSandboxEnabled || !employeeCode.trim()) return;
+    void completeLogin({ employeeCode: employeeCode.trim() });
+  }
 
   return (
-    <div
-      className={`mt-7 grid items-start gap-5 ${
-        demoSandboxEnabled
-          ? "lg:grid-cols-[0.85fr_1.15fr]"
-          : "max-w-lg mx-auto"
-      }`}
-    >
-      <section
-        aria-labelledby="staff-sign-in"
-        className="rounded-2xl border border-slate-800 bg-slate-900/55 p-5 sm:p-6"
-      >
-        <h2 id="staff-sign-in" className="text-xl font-bold text-white">
-          Employee sign-in
-        </h2>
-        <p className="mt-1 text-sm leading-6 text-slate-300">
-          Use the code or PIN provided for your station.
-        </p>
-        <div
-          role="group"
-          aria-label="Sign-in method"
-          className="mt-5 grid grid-cols-2 gap-1 rounded-xl border border-slate-800 bg-slate-950 p-1"
-        >
-          {(["code", "pin"] as const).map((option) => (
+    <div className="flex min-h-screen items-center justify-center bg-[#090d14] px-4 py-12 text-slate-100">
+      <div className="w-full max-w-lg rounded-2xl border border-slate-800 bg-[#111622] p-7 shadow-2xl">
+        {/* Header */}
+        <div className="mb-6 flex items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-amber-500 text-lg font-black text-slate-950">
+              DK
+            </div>
+            <div>
+              <h1 className="text-xl font-bold tracking-tight text-white">
+                DarKitOS Station Sign-In
+              </h1>
+              <p className="text-xs text-slate-400">
+                Multi-Tenant Cloud Kitchen RBAC &amp; Realtime KDS
+              </p>
+            </div>
+          </div>
+
+          <span
+            className={`rounded-full border px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider ${
+              supabaseConfigured
+                ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-300"
+                : demoSandboxEnabled
+                  ? "border-amber-500/40 bg-amber-500/10 text-amber-300"
+                  : "border-red-500/40 bg-red-500/10 text-red-300"
+            }`}
+          >
+            {supabaseConfigured
+              ? "Supabase Auth"
+              : demoSandboxEnabled
+                ? "Demo Sandbox"
+                : "Provider Unset"}
+          </span>
+        </div>
+
+        {/* Strict Production Missing Provider Banner */}
+        {!supabaseConfigured && !demoSandboxEnabled ? (
+          <div className="mb-5 rounded-xl border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-xs text-amber-200">
+            Authentication provider is not configured on this production
+            deployment. Configure{" "}
+            <code className="font-mono text-amber-100">
+              NEXT_PUBLIC_SUPABASE_URL
+            </code>{" "}
+            and{" "}
+            <code className="font-mono text-amber-100">
+              NEXT_PUBLIC_SUPABASE_ANON_KEY
+            </code>{" "}
+            to enable Email/Password and OTP login.
+          </div>
+        ) : null}
+
+        {/* Auth Method Tabs */}
+        <div className="mb-5 grid grid-cols-2 gap-2 rounded-xl border border-slate-800 bg-[#0b0f17] p-1 sm:flex">
+          <button
+            type="button"
+            onClick={() => {
+              setActiveTab("password");
+              setError("");
+              setNotice("");
+            }}
+            className={`flex-1 rounded-lg px-3 py-2 text-xs font-semibold transition ${
+              activeTab === "password"
+                ? "bg-amber-500 text-slate-950"
+                : "text-slate-400 hover:text-white"
+            }`}
+          >
+            Email &amp; Password
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setActiveTab("otp");
+              setError("");
+              setNotice("");
+            }}
+            className={`flex-1 rounded-lg px-3 py-2 text-xs font-semibold transition ${
+              activeTab === "otp"
+                ? "bg-amber-500 text-slate-950"
+                : "text-slate-400 hover:text-white"
+            }`}
+          >
+            Email / Phone OTP
+          </button>
+          {demoSandboxEnabled ? (
             <button
-              key={option}
               type="button"
-              aria-pressed={mode === option}
-              disabled={pending !== null}
               onClick={() => {
-                setMode(option);
-                setPin("");
-                setFailure(null);
+                setActiveTab("demo");
+                setError("");
+                setNotice("");
               }}
-              className={`min-h-10 rounded-lg px-2 text-sm font-semibold ${buttonFocus} ${
-                mode === option
-                  ? "bg-slate-700 text-white"
-                  : "text-slate-300 hover:text-white"
+              className={`col-span-2 flex-1 rounded-lg px-3 py-2 text-xs font-semibold transition sm:col-span-1 ${
+                activeTab === "demo"
+                  ? "bg-emerald-500 text-slate-950"
+                  : "text-slate-400 hover:text-white"
               }`}
             >
-              {option === "code" ? "Employee code" : "Shift PIN"}
+              Demo Sandbox
             </button>
-          ))}
+          ) : null}
         </div>
-        <form onSubmit={handleSubmit} className="mt-5 space-y-3.5">
-          <div>
-            <label
-              htmlFor="sign-in-value"
-              className="block text-sm font-medium text-slate-200"
-            >
-              {isPin ? "4-digit shift PIN" : "Employee code"}
-            </label>
-            <input
-              key={mode}
-              id="sign-in-value"
-              name={isPin ? "pin" : "employeeCode"}
-              type={isPin ? "password" : "text"}
-              inputMode={isPin ? "numeric" : "text"}
-              autoComplete={isPin ? "current-password" : "username"}
-              autoCapitalize={isPin ? "off" : "characters"}
-              spellCheck={false}
-              pattern={isPin ? "[0-9]{4}" : undefined}
-              maxLength={isPin ? 4 : undefined}
-              value={isPin ? pin : employeeCode}
-              onChange={(event) =>
-                isPin
-                  ? setPin(event.target.value.replace(/\D/g, ""))
-                  : setEmployeeCode(event.target.value)
-              }
-              required
-              disabled={pending !== null}
-              className="mt-1.5 w-full rounded-xl border border-slate-700 bg-slate-950 px-3.5 py-3 text-base text-white focus:border-cyan-300 focus:outline-none focus:ring-2 focus:ring-cyan-300/20"
-            />
+
+        {/* Alerts */}
+        {error ? (
+          <div className="mb-4 rounded-xl border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-200">
+            {error}
           </div>
-          {isPin && (
-            <div
-              role="group"
-              aria-label="Shift PIN keypad"
-              className="grid grid-cols-3 gap-2"
+        ) : null}
+
+        {notice ? (
+          <div className="mb-4 rounded-xl border border-emerald-500/40 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-200">
+            {notice}
+          </div>
+        ) : null}
+
+        {/* Tab 1: Email + Password */}
+        {activeTab === "password" ? (
+          <form onSubmit={handlePasswordSubmit} className="space-y-4">
+            <div>
+              <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-slate-400">
+                Work Email
+              </label>
+              <input
+                type="email"
+                required
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="priya.k1@darkit.in"
+                className="w-full rounded-xl border border-slate-700 bg-[#0b0f17] px-3.5 py-2.5 text-sm text-white placeholder-slate-500 outline-none focus:border-amber-500"
+              />
+            </div>
+
+            <div>
+              <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-slate-400">
+                Password
+              </label>
+              <input
+                type="password"
+                required
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="••••••••••••"
+                className="w-full rounded-xl border border-slate-700 bg-[#0b0f17] px-3.5 py-2.5 text-sm text-white placeholder-slate-500 outline-none focus:border-amber-500"
+              />
+            </div>
+
+            <button
+              type="submit"
+              disabled={submitting}
+              className="w-full rounded-xl bg-amber-500 py-2.5 text-sm font-bold text-slate-950 transition hover:bg-amber-400 disabled:opacity-50"
             >
-              {[
-                "1",
-                "2",
-                "3",
-                "4",
-                "5",
-                "6",
-                "7",
-                "8",
-                "9",
-                "Clear",
-                "0",
-                "Delete",
-              ].map((key) => (
+              {submitting ? "Signing in..." : "Sign In to Kitchen OS"}
+            </button>
+          </form>
+        ) : null}
+
+        {/* Tab 2: Email / Phone OTP */}
+        {activeTab === "otp" ? (
+          <div className="space-y-4">
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setOtpChannel("email");
+                  setOtpRequested(false);
+                }}
+                className={`flex-1 rounded-lg border px-3 py-1.5 text-xs font-semibold ${
+                  otpChannel === "email"
+                    ? "border-amber-500/50 bg-amber-500/15 text-amber-200"
+                    : "border-slate-700 bg-[#0b0f17] text-slate-400"
+                }`}
+              >
+                Email OTP / Magic Link
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setOtpChannel("phone");
+                  setOtpRequested(false);
+                }}
+                className={`flex-1 rounded-lg border px-3 py-1.5 text-xs font-semibold ${
+                  otpChannel === "phone"
+                    ? "border-amber-500/50 bg-amber-500/15 text-amber-200"
+                    : "border-slate-700 bg-[#0b0f17] text-slate-400"
+                }`}
+              >
+                Phone SMS OTP
+              </button>
+            </div>
+
+            <form
+              onSubmit={otpRequested ? handleOtpVerify : handleOtpRequest}
+              className="space-y-4"
+            >
+              {otpChannel === "email" ? (
+                <div>
+                  <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-slate-400">
+                    Provisioned Staff Email
+                  </label>
+                  <input
+                    type="email"
+                    required
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    placeholder="rajesh.k1@darkit.in"
+                    className="w-full rounded-xl border border-slate-700 bg-[#0b0f17] px-3.5 py-2.5 text-sm text-white placeholder-slate-500 outline-none focus:border-amber-500"
+                  />
+                </div>
+              ) : (
+                <div>
+                  <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-slate-400">
+                    Provisioned Phone (E.164)
+                  </label>
+                  <input
+                    type="tel"
+                    required
+                    value={phone}
+                    onChange={(e) => setPhone(e.target.value)}
+                    placeholder="+919810000012"
+                    className="w-full rounded-xl border border-slate-700 bg-[#0b0f17] px-3.5 py-2.5 text-sm text-white placeholder-slate-500 outline-none focus:border-amber-500"
+                  />
+                </div>
+              )}
+
+              {otpRequested ? (
+                <div>
+                  <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-slate-400">
+                    6-Digit OTP Verification Code
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    inputMode="numeric"
+                    value={otpToken}
+                    onChange={(e) => setOtpToken(e.target.value)}
+                    placeholder="123456"
+                    className="w-full rounded-xl border border-slate-700 bg-[#0b0f17] px-3.5 py-2.5 font-mono text-sm tracking-widest text-white placeholder-slate-500 outline-none focus:border-amber-500"
+                  />
+                </div>
+              ) : null}
+
+              <div className="flex gap-2">
                 <button
-                  key={key}
-                  type="button"
-                  disabled={pending !== null}
-                  onClick={() => pressKey(key)}
-                  className={`min-h-10 rounded-lg border border-slate-700 bg-slate-950 text-sm font-semibold text-slate-200 hover:bg-slate-800 ${buttonFocus}`}
+                  type="submit"
+                  disabled={submitting}
+                  className="flex-1 rounded-xl bg-amber-500 py-2.5 text-sm font-bold text-slate-950 transition hover:bg-amber-400 disabled:opacity-50"
                 >
-                  {key}
+                  {submitting
+                    ? "Processing..."
+                    : otpRequested
+                      ? "Verify Code & Sign In"
+                      : "Send One-Time Code"}
+                </button>
+                {otpRequested ? (
+                  <button
+                    type="button"
+                    disabled={submitting}
+                    onClick={() => setOtpRequested(false)}
+                    className="rounded-xl border border-slate-700 px-3.5 py-2.5 text-xs font-semibold text-slate-300 hover:bg-slate-800"
+                  >
+                    Resend
+                  </button>
+                ) : null}
+              </div>
+            </form>
+          </div>
+        ) : null}
+
+        {/* Tab 3: Demo Sandbox Quick-Login (NEVER rendered in production unless DEMO_SANDBOX_MODE=true) */}
+        {activeTab === "demo" && demoSandboxEnabled ? (
+          <div className="space-y-4">
+            <p className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-3.5 py-2.5 text-xs text-emerald-200">
+              Demo Sandbox Mode active. Pick a pre-seeded kitchen role or enter
+              an employee terminal code to launch a signed HS256 demo session.
+            </p>
+
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+              {DEMO_ACCOUNTS.map((acct) => (
+                <button
+                  key={acct.code}
+                  type="button"
+                  disabled={submitting}
+                  onClick={() => void completeLogin({ employeeCode: acct.code })}
+                  className={`rounded-xl border p-3 text-left transition ${acct.accent} disabled:opacity-50`}
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] font-bold uppercase tracking-wider">
+                      {acct.role}
+                    </span>
+                    <span className="font-mono text-[10px] opacity-80">
+                      {acct.code}
+                    </span>
+                  </div>
+                  <div className="mt-1 text-sm font-semibold text-white">
+                    {acct.label}
+                  </div>
+                  <div className="mt-0.5 text-[11px] opacity-80">
+                    {acct.scope}
+                  </div>
                 </button>
               ))}
             </div>
-          )}
-          {failure?.source === "staff" && (
-            <p
-              role="alert"
-              className="rounded-lg border border-red-400/30 bg-red-400/10 p-3 text-sm text-red-200"
-            >
-              {failure.message}
-            </p>
-          )}
-          <button
-            type="submit"
-            disabled={pending !== null}
-            className={`min-h-11 w-full rounded-xl bg-cyan-200 px-4 py-2 text-sm font-bold text-slate-950 transition hover:bg-cyan-100 disabled:cursor-wait disabled:opacity-60 ${buttonFocus}`}
-          >
-            {pending === "staff" ? "Signing in…" : "Sign in"}
-          </button>
-        </form>
-      </section>
 
-      {demoSandboxEnabled && (
-        <section
-          id="demo-roles"
-          aria-labelledby="demo-roles-title"
-          className="scroll-mt-4 rounded-2xl border border-cyan-300/20 bg-cyan-300/[0.06] p-5 sm:p-6"
-        >
-          <h2 id="demo-roles-title" className="text-xl font-bold text-white">
-            Choose a demo role
-          </h2>
-          <p className="mt-1 text-sm leading-6 text-slate-300">
-            Demo Sandbox Mode is active. Pick the station role you want to try.
-          </p>
-          {failure?.source === "demo" && (
-            <p
-              role="alert"
-              className="mt-3 rounded-lg border border-red-400/30 bg-red-400/10 p-3 text-sm text-red-200"
+            <form
+              onSubmit={handleDemoSubmit}
+              className="flex gap-2 border-t border-slate-800 pt-4"
             >
-              {failure.message}
-            </p>
-          )}
-          {pending === "demo" && (
-            <p role="status" className="mt-2 text-sm text-cyan-200">
-              Opening your demo workspace…
-            </p>
-          )}
-          <ul className="mt-4 grid gap-2.5 sm:grid-cols-2">
-            {DEMO_ROLES.map((role) => (
-              <li key={role.code}>
-                <button
-                  type="button"
-                  disabled={pending !== null}
-                  onClick={() => void signIn(role.code, "demo")}
-                  className={`flex h-full w-full flex-col items-start rounded-xl border border-slate-700 bg-slate-950/70 p-3.5 text-left transition hover:border-cyan-300/50 hover:bg-slate-900 disabled:cursor-wait ${buttonFocus}`}
-                >
-                  <span className="flex w-full items-center gap-2 font-semibold text-white">
-                    <GuideIcon
-                      name={role.icon}
-                      className="h-4 w-4 text-cyan-200"
-                    />
-                    {role.label}
-                    <GuideIcon
-                      name="arrow"
-                      className="ml-auto h-4 w-4 text-cyan-200"
-                    />
-                  </span>
-                  <span className="mb-2 mt-1.5 text-sm leading-5 text-slate-300">
-                    {role.description}
-                  </span>
-                  <span className="mt-auto text-xs font-medium text-cyan-200">
-                    Starts in {role.startsAt}
-                  </span>
-                </button>
-              </li>
-            ))}
-          </ul>
-          {otherDemoAccounts.length > 0 && (
-            <details className="mt-4 rounded-xl border border-slate-800/90 bg-slate-950/50 p-3">
-              <summary
-                className={`cursor-pointer rounded text-sm font-medium text-slate-200 ${buttonFocus}`}
+              <input
+                type="text"
+                value={employeeCode}
+                onChange={(e) => setEmployeeCode(e.target.value)}
+                placeholder="Employee code (e.g. 0002, 2002)"
+                className="flex-1 rounded-xl border border-slate-700 bg-[#0b0f17] px-3.5 py-2 text-sm text-white placeholder-slate-500 outline-none focus:border-emerald-500"
+              />
+              <button
+                type="submit"
+                disabled={submitting || !employeeCode.trim()}
+                className="rounded-xl bg-emerald-500 px-4 py-2 text-xs font-bold text-slate-950 hover:bg-emerald-400 disabled:opacity-50"
               >
-                More sample accounts
-              </summary>
-              <div className="mt-3 flex flex-wrap gap-2">
-                {otherDemoAccounts.map((employee) => (
-                  <button
-                    key={employee.id}
-                    type="button"
-                    disabled={pending !== null}
-                    onClick={() => void signIn(employee.employeeCode, "demo")}
-                    className={`rounded-lg border border-slate-700 px-2.5 py-2 text-xs text-slate-200 hover:border-cyan-300/45 ${buttonFocus}`}
-                  >
-                    {employee.name} ·{" "}
-                    {DEMO_ROLES.find(({ role }) => role === employee.role)
-                      ?.label ?? employee.role}
-                    {employee.kitchenId ? ` · ${employee.kitchenId}` : ""}
-                  </button>
-                ))}
-              </div>
-            </details>
-          )}
-          <p className="mt-4 text-xs leading-5 text-slate-400">
-            This demo is shared and may reset. Use sample information only.
-          </p>
-        </section>
-      )}
+                Launch
+              </button>
+            </form>
+          </div>
+        ) : null}
+
+        <div className="mt-6 border-t border-slate-800 pt-4 text-center text-[11px] text-slate-500">
+          Protected by Two-Level Organization &amp; Kitchen RBAC • Immediate
+          Account Revocation
+        </div>
+      </div>
     </div>
   );
 }

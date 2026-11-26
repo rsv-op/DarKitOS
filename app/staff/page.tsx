@@ -1,454 +1,500 @@
 "use client";
 
-import {
-  useCallback,
-  useEffect,
-  useState,
-} from "react";
+import { useCallback, useEffect, useState } from "react";
 import AppShell from "@/components/AppShell";
-import {
-  KITCHENS_DB,
-  PERMISSIONS_DB,
-  ROLE_PERMISSIONS_DB,
-  type Employee,
-  type EmployeeRole,
-} from "@/lib/db";
+import type { Employee, EmployeeRole, KitchenConfig } from "@/lib/db";
 
-const ROLES: EmployeeRole[] = [
+interface StaffApiResponse {
+  employees?: Employee[];
+  kitchens?: KitchenConfig[];
+  organizationId?: string;
+  error?: string;
+}
+
+const ROLE_OPTIONS: EmployeeRole[] = [
   "OWNER",
   "MANAGER",
   "LINE_COOK",
   "DISPATCH",
 ];
 
+const ROLE_BADGE: Record<EmployeeRole, string> = {
+  OWNER: "border-amber-500/40 bg-amber-500/15 text-amber-300",
+  MANAGER: "border-emerald-500/40 bg-emerald-500/15 text-emerald-300",
+  LINE_COOK: "border-sky-500/40 bg-sky-500/15 text-sky-300",
+  DISPATCH: "border-purple-500/40 bg-purple-500/15 text-purple-300",
+};
+
 export default function StaffPage() {
-  const [employees, setEmployees] = useState<
-    Employee[]
-  >([]);
-  const [roleFilter, setRoleFilter] =
-    useState<string>("ALL");
-  const [kitchenFilter, setKitchenFilter] =
-    useState<string>("ALL");
-  const [notice, setNotice] = useState("");
+  const [employees, setEmployees] = useState<Employee[]>([]);
+  const [kitchens, setKitchens] = useState<KitchenConfig[]>([]);
+  const [organizationId, setOrganizationId] = useState<string>("ORG-001");
+  const [currentUser, setCurrentUser] = useState<Employee | null>(null);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [updatingId, setUpdatingId] = useState<string | null>(null);
 
-  // New Employee Form
-  const [empCode, setEmpCode] = useState("");
-  const [empName, setEmpName] = useState("");
-  const [empRole, setEmpRole] =
-    useState<EmployeeRole>("LINE_COOK");
-  const [empKitchen, setEmpKitchen] =
-    useState("K1");
+  // Provisioning form state
+  const [name, setName] = useState("");
+  const [employeeCode, setEmployeeCode] = useState("");
+  const [email, setEmail] = useState("");
+  const [phone, setPhone] = useState("");
+  const [role, setRole] = useState<EmployeeRole>("LINE_COOK");
+  const [kitchenId, setKitchenId] = useState<string>("K1");
+  const [sendInvite, setSendInvite] = useState<boolean>(true);
 
-  const loadData = useCallback(async () => {
+  const isGlobalOwner =
+    currentUser?.role === "OWNER" || !currentUser?.kitchenId;
+
+  const loadStaff = useCallback(async () => {
     try {
-      const res = await fetch("/api/system", {
-        cache: "no-store",
-      });
-      if (!res.ok) return;
-      const data = await res.json();
-      if (Array.isArray(data.employees)) {
-        setEmployees(data.employees);
+      const [sessionRes, staffRes] = await Promise.all([
+        fetch("/api/session", { cache: "no-store" }),
+        fetch("/api/staff", { cache: "no-store" }),
+      ]);
+
+      if (sessionRes.ok) {
+        const sData = await sessionRes.json();
+        if (sData.employee) {
+          setCurrentUser(sData.employee as Employee);
+        }
       }
-    } catch {
-      // ignore
+
+      const data = (await staffRes.json()) as StaffApiResponse;
+      if (!staffRes.ok) {
+        throw new Error(
+          data.error || "Requires STAFF_MANAGE permission to view staff.",
+        );
+      }
+
+      setEmployees(Array.isArray(data.employees) ? data.employees : []);
+      if (Array.isArray(data.kitchens) && data.kitchens.length > 0) {
+        setKitchens(data.kitchens);
+        setKitchenId((prev) =>
+          data.kitchens?.some((k) => k.id === prev)
+            ? prev
+            : data.kitchens![0].id,
+        );
+      }
+      if (data.organizationId) {
+        setOrganizationId(data.organizationId);
+      }
+      setError("");
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "Unable to load staff directory.",
+      );
+    } finally {
+      setLoading(false);
     }
   }, []);
 
   useEffect(() => {
-    void loadData();
-  }, [loadData]);
+    void loadStaff();
+  }, [loadStaff]);
 
-  async function toggleEmployeeActive(
-    emp: Employee,
-  ) {
-    setError("");
-    setNotice("");
-    try {
-      const res = await fetch("/api/system", {
-        method: "PATCH",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          action: "UPSERT_EMPLOYEE",
-          employee: {
-            ...emp,
-            active: !emp.active,
-          },
-        }),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        throw new Error(
-          data.error ||
-            "Requires STAFF_MANAGE permission.",
-        );
-      }
-      setEmployees(data.employees);
-      setNotice(
-        `Operator ${emp.name} (${emp.employeeCode}) status set to ${!emp.active ? "ACTIVE" : "INACTIVE"}.`,
-      );
-    } catch (err) {
-      setError(
-        err instanceof Error
-          ? err.message
-          : "Update failed.",
-      );
-    }
-  }
-
-  async function handleAddEmployee(
-    e: React.FormEvent,
-  ) {
+  async function handleProvision(e: React.FormEvent) {
     e.preventDefault();
-    if (!empCode.trim() || !empName.trim())
-      return;
+    if (!name.trim()) return;
+    setSubmitting(true);
     setError("");
     setNotice("");
+
     try {
-      const res = await fetch("/api/system", {
-        method: "PATCH",
-        headers: {
-          "Content-Type": "application/json",
-        },
+      const res = await fetch("/api/staff", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          action: "UPSERT_EMPLOYEE",
-          employee: {
-            employeeCode: empCode
-              .trim()
-              .toUpperCase(),
-            name: empName.trim(),
-            role: empRole,
-            kitchenId:
-              empRole === "OWNER"
-                ? undefined
-                : empKitchen,
-            active: true,
-          },
+          name: name.trim(),
+          employeeCode: employeeCode.trim() || undefined,
+          email: email.trim() || undefined,
+          phone: phone.trim() || undefined,
+          role,
+          kitchenId: role === "OWNER" ? undefined : kitchenId,
+          sendInvite,
         }),
       });
       const data = await res.json();
       if (!res.ok) {
-        throw new Error(
-          data.error ||
-            "Requires STAFF_MANAGE permission.",
-        );
+        throw new Error(data.error || "Unable to provision staff member.");
       }
-      setEmployees(data.employees);
-      setEmpCode("");
-      setEmpName("");
+
+      if (Array.isArray(data.employees)) {
+        setEmployees(data.employees);
+      }
+      setName("");
+      setEmployeeCode("");
+      setEmail("");
+      setPhone("");
       setNotice(
-        `Added operator ${empName} (${empCode.toUpperCase()}) with role ${empRole}.`,
+        data.inviteSent
+          ? `Provisioned ${data.employee?.name} and sent Supabase email invite.`
+          : `Provisioned ${data.employee?.name} (${data.employee?.employeeCode}). They can now sign in via Email/Password or OTP.`,
       );
     } catch (err) {
       setError(
-        err instanceof Error
-          ? err.message
-          : "Failed to add employee.",
+        err instanceof Error ? err.message : "Failed to provision staff.",
       );
+    } finally {
+      setSubmitting(false);
     }
   }
 
-  const filteredEmployees = employees.filter(
-    (e) => {
-      if (
-        roleFilter !== "ALL" &&
-        e.role !== roleFilter
-      )
-        return false;
-      if (
-        kitchenFilter !== "ALL" &&
-        (e.kitchenId || "GLOBAL") !==
-          kitchenFilter
-      )
-        return false;
-      return true;
-    },
-  );
+  async function handlePatchEmployee(
+    emp: Employee,
+    updates: Partial<Pick<Employee, "active" | "role" | "kitchenId">>,
+  ) {
+    setUpdatingId(emp.id);
+    setError("");
+    setNotice("");
+
+    try {
+      const res = await fetch("/api/staff", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          id: emp.id,
+          employeeCode: emp.employeeCode,
+          ...updates,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || "Unable to update staff record.");
+      }
+
+      if (Array.isArray(data.employees)) {
+        setEmployees(data.employees);
+      }
+      setNotice(
+        updates.active === false
+          ? `${emp.name} deactivated — active sessions are immediately revoked (403 Forbidden).`
+          : `Updated ${emp.name} (${emp.employeeCode}).`,
+      );
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "Failed to update employee.",
+      );
+    } finally {
+      setUpdatingId(null);
+    }
+  }
+
+  const activeCount = employees.filter((e) => e.active).length;
+  const linkedCount = employees.filter((e) => Boolean(e.authUserId)).length;
 
   return (
     <AppShell
-      title="Staff & access"
-      subtitle="Manage staff, assign people to kitchens, and see what each role can do."
+      title="Staff & Multi-Tenant RBAC Access"
+      subtitle={`Organization ${organizationId} • Provision kitchen operators, assign physical hubs, and revoke access instantly.`}
+      actions={
+        <div className="flex items-center gap-2">
+          <span className="rounded-full border border-emerald-500/35 bg-emerald-500/10 px-3 py-1 text-xs font-semibold text-emerald-300">
+            {activeCount} Active Staff
+          </span>
+          <span className="rounded-full border border-sky-500/35 bg-sky-500/10 px-3 py-1 text-xs font-semibold text-sky-300">
+            {linkedCount} Auth Linked
+          </span>
+        </div>
+      }
     >
       <div className="space-y-6">
-        {error && (
-          <div className="rounded-xl border border-red-500/40 bg-red-500/10 px-4 py-3 font-mono text-xs text-red-300">
-            ⚠ {error}
+        {error ? (
+          <div className="rounded-xl border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-200">
+            {error}
           </div>
-        )}
-        {notice && (
-          <div className="rounded-xl border border-emerald-500/40 bg-emerald-500/10 px-4 py-3 font-mono text-xs text-emerald-300">
-            ✓ {notice}
-          </div>
-        )}
+        ) : null}
 
-        {/* Canonical RBAC Permission Matrix */}
-        <section className="rounded-2xl border border-slate-800 bg-slate-900/70 p-6">
-          <div className="mb-4">
-            <span className="font-mono text-xs font-bold uppercase tracking-wider text-sky-400">
-              Server-Side Security Boundary
+        {notice ? (
+          <div className="rounded-xl border border-emerald-500/40 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-200">
+            {notice}
+          </div>
+        ) : null}
+
+        {/* Provision / Invite New Staff Card */}
+        <section className="rounded-2xl border border-slate-800 bg-[#111622] p-5">
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <h2 className="text-base font-bold text-white">
+                Provision Kitchen Staff Member
+              </h2>
+              <p className="text-xs text-slate-400">
+                Add an employee by work email or phone number. Their Supabase
+                Auth identity auto-links on first verified Email/Password or OTP
+                sign-in.
+              </p>
+            </div>
+            <span className="rounded-lg border border-slate-700 bg-slate-900 px-2.5 py-1 font-mono text-xs text-slate-300">
+              Tenant: {organizationId}
             </span>
-            <h2 className="mt-1 text-lg font-black text-white">
-              Canonical Role-Based Access Control (RBAC) Permission Matrix
-            </h2>
-            <p className="text-xs text-slate-400">
-              Every protected API route independently verifies the session, employee active state, and required permission code before executing domain logic.
-            </p>
           </div>
 
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs">
-              <thead className="border-b border-slate-800 bg-slate-950 font-mono text-[10px] uppercase text-slate-400">
-                <tr>
-                  <th className="px-4 py-3">
-                    Permission Code
-                  </th>
-                  <th className="px-4 py-3">
-                    Architectural Purpose
-                  </th>
-                  {ROLES.map((role) => (
-                    <th
-                      key={role}
-                      className="px-4 py-3 text-center"
-                    >
-                      {role}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-800">
-                {PERMISSIONS_DB.map((perm) => (
-                  <tr key={perm.id}>
-                    <td className="px-4 py-3 font-mono font-bold text-sky-300">
-                      {perm.code}
-                    </td>
-                    <td className="px-4 py-3 text-slate-300">
-                      {perm.description}
-                    </td>
-                    {ROLES.map((role) => {
-                      const granted =
-                        ROLE_PERMISSIONS_DB.some(
-                          (rp) =>
-                            rp.role === role &&
-                            rp.permissionId ===
-                              perm.id,
-                        );
-                      return (
-                        <td
-                          key={role}
-                          className="px-4 py-3 text-center font-mono"
-                        >
-                          {granted ? (
-                            <span className="inline-block rounded-full bg-emerald-500/20 px-2.5 py-0.5 text-[10px] font-bold text-emerald-300">
-                              ✓ GRANTED
-                            </span>
-                          ) : (
-                            <span className="text-[10px] text-slate-600">
-                              —
-                            </span>
-                          )}
-                        </td>
-                      );
-                    })}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <form
+            onSubmit={handleProvision}
+            className="grid grid-cols-1 gap-3 md:grid-cols-6"
+          >
+            <input
+              type="text"
+              required
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="Full name (e.g. Rohan Verma)"
+              className="rounded-xl border border-slate-700 bg-[#0b0f17] px-3 py-2 text-sm text-white placeholder-slate-500 outline-none focus:border-amber-500 md:col-span-2"
+            />
+            <input
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="Email (rohan.k1@darkit.in)"
+              className="rounded-xl border border-slate-700 bg-[#0b0f17] px-3 py-2 text-sm text-white placeholder-slate-500 outline-none focus:border-amber-500 md:col-span-2"
+            />
+            <input
+              type="tel"
+              value={phone}
+              onChange={(e) => setPhone(e.target.value)}
+              placeholder="Phone (+9198...)"
+              className="rounded-xl border border-slate-700 bg-[#0b0f17] px-3 py-2 text-sm text-white placeholder-slate-500 outline-none focus:border-amber-500"
+            />
+            <input
+              type="text"
+              value={employeeCode}
+              onChange={(e) => setEmployeeCode(e.target.value)}
+              placeholder="Code (auto)"
+              className="rounded-xl border border-slate-700 bg-[#0b0f17] px-3 py-2 font-mono text-sm text-white placeholder-slate-500 outline-none focus:border-amber-500"
+            />
+
+            <select
+              value={role}
+              onChange={(e) => setRole(e.target.value as EmployeeRole)}
+              className="rounded-xl border border-slate-700 bg-[#0b0f17] px-3 py-2 text-sm text-white outline-none focus:border-amber-500 md:col-span-2"
+            >
+              {ROLE_OPTIONS.filter((r) => isGlobalOwner || r !== "OWNER").map(
+                (r) => (
+                  <option key={r} value={r}>
+                    Role: {r.replaceAll("_", " ")}
+                  </option>
+                ),
+              )}
+            </select>
+
+            <select
+              value={role === "OWNER" ? "" : kitchenId}
+              disabled={role === "OWNER" || !isGlobalOwner}
+              onChange={(e) => setKitchenId(e.target.value)}
+              className="rounded-xl border border-slate-700 bg-[#0b0f17] px-3 py-2 text-sm text-white outline-none focus:border-amber-500 disabled:opacity-60 md:col-span-2"
+            >
+              {role === "OWNER" ? (
+                <option value="">All Kitchens (Org-Wide Scope)</option>
+              ) : (
+                kitchens.map((k) => (
+                  <option key={k.id} value={k.id}>
+                    {k.id} — {k.name}
+                  </option>
+                ))
+              )}
+            </select>
+
+            <label className="flex items-center gap-2 rounded-xl border border-slate-800 bg-[#0b0f17] px-3 py-2 text-xs text-slate-300">
+              <input
+                type="checkbox"
+                checked={sendInvite}
+                onChange={(e) => setSendInvite(e.target.checked)}
+                className="accent-amber-500"
+              />
+              Send Auth Invite
+            </label>
+
+            <button
+              type="submit"
+              disabled={submitting || !name.trim()}
+              className="rounded-xl bg-amber-500 px-4 py-2 text-sm font-bold text-slate-950 transition hover:bg-amber-400 disabled:opacity-50"
+            >
+              {submitting ? "Saving..." : "+ Provision Staff"}
+            </button>
+          </form>
         </section>
 
-        {/* Personnel Directory + Add Employee Form */}
-        <div className="grid gap-6 lg:grid-cols-[1.35fr_0.65fr]">
-          <section className="rounded-2xl border border-slate-800 bg-slate-900/70 p-6">
-            <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-              <h2 className="text-lg font-black text-white">
-                Personnel Directory ({filteredEmployees.length})
-              </h2>
-              <div className="flex gap-2">
-                <select
-                  value={roleFilter}
-                  onChange={(e) =>
-                    setRoleFilter(e.target.value)
-                  }
-                  className="rounded-xl border border-slate-700 bg-slate-950 px-3 py-1.5 text-xs text-white"
-                >
-                  <option value="ALL">
-                    All Roles
-                  </option>
-                  {ROLES.map((r) => (
-                    <option key={r} value={r}>
-                      {r}
-                    </option>
-                  ))}
-                </select>
-                <select
-                  value={kitchenFilter}
-                  onChange={(e) =>
-                    setKitchenFilter(
-                      e.target.value,
-                    )
-                  }
-                  className="rounded-xl border border-slate-700 bg-slate-950 px-3 py-1.5 text-xs text-white"
-                >
-                  <option value="ALL">
-                    All Kitchens
-                  </option>
-                  <option value="GLOBAL">
-                    GLOBAL (Owner)
-                  </option>
-                  {KITCHENS_DB.map((k) => (
-                    <option
-                      key={k.id}
-                      value={k.id}
-                    >
-                      {k.id} • {k.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            </div>
-
-            <div className="space-y-2.5">
-              {filteredEmployees.map((emp) => (
-                <div
-                  key={emp.id}
-                  className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-800 bg-slate-950 p-3.5"
-                >
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <span className="font-bold text-sm text-white">
-                        {emp.name}
-                      </span>
-                      <span className="rounded bg-slate-800 px-2 py-0.5 font-mono text-[10px] font-bold text-sky-300">
-                        Code: {emp.employeeCode}
-                      </span>
-                      <span className="rounded bg-purple-500/15 px-2 py-0.5 font-mono text-[10px] font-bold text-purple-300">
-                        {emp.role}
-                      </span>
-                    </div>
-                    <p className="mt-1 font-mono text-[11px] text-slate-400">
-                      ID: {emp.id} • Assigned
-                      Kitchen:{" "}
-                      <strong className="text-slate-200">
-                        {emp.kitchenId ||
-                          "GLOBAL (All Hubs)"}
-                      </strong>
-                    </p>
-                  </div>
-
-                  <button
-                    type="button"
-                    onClick={() =>
-                      void toggleEmployeeActive(
-                        emp,
-                      )
-                    }
-                    className={`rounded-xl border px-3 py-1.5 font-mono text-xs font-bold transition ${
-                      emp.active
-                        ? "border-emerald-500/40 bg-emerald-500/15 text-emerald-300 hover:bg-emerald-500/25"
-                        : "border-red-500/40 bg-red-500/15 text-red-300 hover:bg-red-500/25"
-                    }`}
-                  >
-                    {emp.active
-                      ? "● ACTIVE"
-                      : "○ INACTIVE"}
-                  </button>
-                </div>
-              ))}
-            </div>
-          </section>
-
-          <aside className="rounded-2xl border border-slate-800 bg-slate-900/80 p-5 h-fit">
-            <h3 className="font-mono text-xs font-bold uppercase tracking-wider text-emerald-400">
-              Register New Kitchen Operator
-            </h3>
-            <form
-              onSubmit={handleAddEmployee}
-              className="mt-4 space-y-3.5 text-xs"
+        {/* Staff Directory Table */}
+        <section className="overflow-hidden rounded-2xl border border-slate-800 bg-[#111622]">
+          <div className="flex items-center justify-between border-b border-slate-800 px-5 py-4">
+            <h2 className="text-base font-bold text-white">
+              Organization Staff Directory ({employees.length})
+            </h2>
+            <button
+              type="button"
+              onClick={() => void loadStaff()}
+              className="rounded-lg border border-slate-700 px-3 py-1.5 text-xs font-semibold text-slate-300 hover:bg-slate-800"
             >
-              <div>
-                <label className="block font-mono text-[10px] uppercase text-slate-400">
-                  Employee Terminal Code
-                </label>
-                <input
-                  type="text"
-                  required
-                  value={empCode}
-                  onChange={(e) =>
-                    setEmpCode(e.target.value)
-                  }
-                  placeholder="e.g. 2005"
-                  className="mt-1 w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 font-mono text-white"
-                />
-              </div>
-              <div>
-                <label className="block font-mono text-[10px] uppercase text-slate-400">
-                  Full Name
-                </label>
-                <input
-                  type="text"
-                  required
-                  value={empName}
-                  onChange={(e) =>
-                    setEmpName(e.target.value)
-                  }
-                  placeholder="e.g. Ishaan Malhotra"
-                  className="mt-1 w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-white"
-                />
-              </div>
-              <div>
-                <label className="block font-mono text-[10px] uppercase text-slate-400">
-                  Canonical Role
-                </label>
-                <select
-                  value={empRole}
-                  onChange={(e) =>
-                    setEmpRole(
-                      e.target
-                        .value as EmployeeRole,
-                    )
-                  }
-                  className="mt-1 w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-white"
-                >
-                  {ROLES.map((r) => (
-                    <option key={r} value={r}>
-                      {r}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className="block font-mono text-[10px] uppercase text-slate-400">
-                  Designated Kitchen
-                </label>
-                <select
-                  value={empKitchen}
-                  onChange={(e) =>
-                    setEmpKitchen(e.target.value)
-                  }
-                  className="mt-1 w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-white"
-                >
-                  {KITCHENS_DB.map((k) => (
-                    <option
-                      key={k.id}
-                      value={k.id}
-                    >
-                      {k.id} • {k.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <button
-                type="submit"
-                className="w-full rounded-xl bg-emerald-500 py-3 font-mono text-xs font-black uppercase text-slate-950 hover:bg-emerald-400"
-              >
-                + Register Operator
-              </button>
-            </form>
-          </aside>
-        </div>
+              Refresh
+            </button>
+          </div>
+
+          {loading ? (
+            <div className="p-8 text-center text-sm text-slate-400">
+              Loading staff directory...
+            </div>
+          ) : employees.length === 0 ? (
+            <div className="p-8 text-center text-sm text-slate-400">
+              No staff records visible for your scope.
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-sm">
+                <thead className="border-b border-slate-800 bg-[#0b0f17] text-[11px] uppercase tracking-wider text-slate-400">
+                  <tr>
+                    <th className="px-4 py-3">Operator</th>
+                    <th className="px-4 py-3">Contact / Auth Identity</th>
+                    <th className="px-4 py-3">Role</th>
+                    <th className="px-4 py-3">Kitchen Scope</th>
+                    <th className="px-4 py-3">Status</th>
+                    <th className="px-4 py-3 text-right">Access Control</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-800/70">
+                  {employees.map((emp) => {
+                    const isSelf = currentUser?.id === emp.id;
+                    const busy = updatingId === emp.id;
+
+                    return (
+                      <tr
+                        key={emp.id}
+                        className={`transition hover:bg-slate-800/30 ${
+                          !emp.active ? "opacity-60" : ""
+                        }`}
+                      >
+                        <td className="px-4 py-3">
+                          <div className="font-semibold text-white">
+                            {emp.name}
+                            {isSelf ? (
+                              <span className="ml-2 rounded bg-amber-500/20 px-1.5 py-0.5 text-[10px] font-bold text-amber-300">
+                                YOU
+                              </span>
+                            ) : null}
+                          </div>
+                          <div className="font-mono text-xs text-slate-400">
+                            {emp.employeeCode} • {emp.id}
+                          </div>
+                        </td>
+
+                        <td className="px-4 py-3 text-xs">
+                          <div className="text-slate-200">
+                            {emp.email || "No email"}
+                          </div>
+                          <div className="text-slate-400">
+                            {emp.phone || "No phone"}
+                          </div>
+                          <span
+                            className={`mt-1 inline-block rounded px-1.5 py-0.5 text-[10px] font-semibold ${
+                              emp.authUserId
+                                ? "bg-emerald-500/15 text-emerald-300"
+                                : "bg-slate-800 text-slate-400"
+                            }`}
+                          >
+                            {emp.authUserId
+                              ? "Supabase Auth Linked"
+                              : "Auto-Links on First Login"}
+                          </span>
+                        </td>
+
+                        <td className="px-4 py-3">
+                          <select
+                            disabled={busy || isSelf || (!isGlobalOwner && emp.role === "OWNER")}
+                            value={emp.role}
+                            onChange={(e) =>
+                              void handlePatchEmployee(emp, {
+                                role: e.target.value as EmployeeRole,
+                              })
+                            }
+                            className={`rounded-lg border px-2.5 py-1 text-xs font-semibold outline-none ${ROLE_BADGE[emp.role]} bg-slate-950 disabled:opacity-60`}
+                          >
+                            {ROLE_OPTIONS.filter(
+                              (r) => isGlobalOwner || r !== "OWNER",
+                            ).map((r) => (
+                              <option
+                                key={r}
+                                value={r}
+                                className="bg-slate-900 text-white"
+                              >
+                                {r.replaceAll("_", " ")}
+                              </option>
+                            ))}
+                          </select>
+                        </td>
+
+                        <td className="px-4 py-3">
+                          {emp.role === "OWNER" ? (
+                            <span className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-2.5 py-1 text-xs font-semibold text-amber-300">
+                              All Org Kitchens
+                            </span>
+                          ) : (
+                            <select
+                              disabled={busy || !isGlobalOwner}
+                              value={emp.kitchenId || ""}
+                              onChange={(e) =>
+                                void handlePatchEmployee(emp, {
+                                  kitchenId: e.target.value,
+                                })
+                              }
+                              className="rounded-lg border border-slate-700 bg-[#0b0f17] px-2.5 py-1 text-xs text-slate-200 outline-none disabled:opacity-60"
+                            >
+                              {kitchens.map((k) => (
+                                <option key={k.id} value={k.id}>
+                                  {k.id} ({k.code})
+                                </option>
+                              ))}
+                            </select>
+                          )}
+                        </td>
+
+                        <td className="px-4 py-3">
+                          <span
+                            className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-[11px] font-semibold ${
+                              emp.active
+                                ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-300"
+                                : "border-red-500/40 bg-red-500/10 text-red-300"
+                            }`}
+                          >
+                            <span
+                              className={`h-1.5 w-1.5 rounded-full ${
+                                emp.active ? "bg-emerald-400" : "bg-red-400"
+                              }`}
+                            />
+                            {emp.active ? "Active" : "Deactivated"}
+                          </span>
+                        </td>
+
+                        <td className="px-4 py-3 text-right">
+                          <button
+                            type="button"
+                            disabled={busy || isSelf}
+                            onClick={() =>
+                              void handlePatchEmployee(emp, {
+                                active: !emp.active,
+                              })
+                            }
+                            className={`rounded-lg border px-3 py-1.5 text-xs font-semibold transition disabled:opacity-40 ${
+                              emp.active
+                                ? "border-red-500/40 bg-red-500/10 text-red-300 hover:bg-red-500/20"
+                                : "border-emerald-500/40 bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/20"
+                            }`}
+                          >
+                            {busy
+                              ? "Updating..."
+                              : emp.active
+                                ? "Deactivate Now"
+                                : "Reactivate"}
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
       </div>
     </AppShell>
   );

@@ -4,11 +4,12 @@ import type {
   OrderStatus,
 } from "@/lib/db";
 import {
-  canAccessKitchen,
+  canAccessOrder,
   hasPermission,
 } from "@/lib/domain/permission-service";
 import {
   findOrder,
+  getKitchens,
   transitionCanonicalOrder,
   type TransitionOrderResult,
 } from "@/lib/store";
@@ -109,8 +110,11 @@ export async function executeAuthorizedOrderTransition(
     }
   }
 
-  // 2. Existence & kitchen-scope check before mutating canonical state
-  const existingOrder = await findOrder(cleanOrderId);
+  // 2. Existence & two-level (organization + kitchen) scope check before mutating canonical state
+  const [existingOrder, kitchens] = await Promise.all([
+    findOrder(cleanOrderId),
+    getKitchens(),
+  ]);
   if (!existingOrder) {
     return {
       ok: false,
@@ -119,11 +123,11 @@ export async function executeAuthorizedOrderTransition(
     };
   }
 
-  if (!canAccessKitchen(employee, existingOrder.kitchenId)) {
+  if (!canAccessOrder(employee, existingOrder, kitchens)) {
     return {
       ok: false,
       status: 403,
-      error: `Forbidden: Employee ${employee.employeeCode} (${employee.kitchenId}) cannot modify orders belonging to kitchen ${existingOrder.kitchenId}.`,
+      error: `Forbidden: Employee ${employee.employeeCode} cannot modify orders belonging to organization ${existingOrder.organizationId ?? "ORG-001"} / kitchen ${existingOrder.kitchenId}.`,
     };
   }
 

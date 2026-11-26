@@ -10,7 +10,9 @@ import Link from "next/link";
 import AppShell from "@/components/AppShell";
 import DesktopWindowManager from "@/components/DesktopWindowManager";
 import OwnerBottleneckBriefBuilder from "@/components/OwnerBottleneckBriefBuilder";
+import RealtimeSyncBadge from "@/components/RealtimeSyncBadge";
 import WorkspaceQuickStart from "@/components/WorkspaceQuickStart";
+import { useRealtimeKitchenSync } from "@/hooks/useRealtimeKitchenSync";
 import { formatCurrency, type SupportedCurrency } from "@/lib/currency";
 import {
   BRANDS_DB,
@@ -147,11 +149,18 @@ export default function OwnerPage() {
 
   useEffect(() => {
     void loadData();
-    const timer = window.setInterval(() => {
-      void loadData();
-    }, 6000);
-    return () => window.clearInterval(timer);
   }, [loadData]);
+
+  const realtimeSync = useRealtimeKitchenSync({
+    organizationId: currentEmployee?.organizationId,
+    kitchenId:
+      currentEmployee?.role !== "OWNER" && currentEmployee?.kitchenId
+        ? currentEmployee.kitchenId
+        : kitchenScope !== "ALL"
+          ? kitchenScope
+          : null,
+    onSync: loadData,
+  });
 
   useEffect(() => {
     const onSettingsUpdated = (event: Event) => {
@@ -385,6 +394,11 @@ export default function OwnerPage() {
       subtitle="Live INR sales, order throughput, low-stock risks, and a 1-click Bottleneck Brief builder for your cloud kitchens."
       actions={
         <>
+          <RealtimeSyncBadge
+            connectionMode={realtimeSync.connectionMode}
+            lastEventAt={realtimeSync.lastEventAt}
+            topic={realtimeSync.topic}
+          />
           <a
             href="#owner-bottleneck-brief"
             className="rounded-xl border border-emerald-500/40 bg-emerald-500/15 px-3.5 py-2 text-xs font-bold text-emerald-200 transition hover:bg-emerald-500/25"

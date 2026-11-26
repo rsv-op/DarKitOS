@@ -16,6 +16,7 @@ import type {
   OrderChannel,
   OrderSource,
   OrderStatus,
+  Organization,
   OutboxEvent,
   RevenueLeakageVector,
   SystemSettings,
@@ -102,6 +103,7 @@ export const ALLOWED_CIRCUIT_STATES: SystemSettings["circuitBreakerState"][] = [
 ];
 
 export interface KitchenState {
+  organizations: Organization[];
   orders: Order[];
   inventory: InventoryItem[];
   inventoryMovements: InventoryMovement[];
@@ -123,6 +125,7 @@ export interface StoreSnapshot extends KitchenState {}
 
 export interface InjectOrderInput {
   id?: string;
+  organizationId?: string;
   externalOrderId?: string;
   idempotencyKey?: string;
   brandId: DbaBrand;

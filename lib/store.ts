@@ -2,6 +2,8 @@ import "server-only";
 import crypto from "crypto";
 import { formatCurrency } from "@/lib/currency";
 import {
+  DEFAULT_ORGANIZATION_ID,
+  INVENTORY_DB,
   calculateOrderRecipeCost,
   calculateOrderTotalAmount,
   evaluateOrderInventory,
@@ -25,6 +27,7 @@ import {
   type OrderChannel,
   type OrderEvent,
   type OrderItem,
+  type Organization,
   type OutboxEvent,
   type RevenueLeakageVector,
   type SystemSettings,
@@ -32,6 +35,7 @@ import {
   type WebhookIdempotencyEntry,
 } from "@/lib/db";
 import { isPostgresConfigured } from "@/lib/db-client";
+import { publishKitchenRealtimeEvent } from "@/lib/realtime-publisher";
 import * as pgStore from "@/lib/store-pg";
 import { buildInitialSeedState } from "@/lib/store-seed";
 import {
@@ -148,6 +152,7 @@ function cloneInventoryItem(item: InventoryItem): InventoryItem {
 
 function cloneState(state: KitchenState): KitchenState {
   return {
+    organizations: state.organizations.map((o) => ({ ...o })),
     orders: state.orders.map(cloneOrder),
     inventory: state.inventory.map(cloneInventoryItem),
     inventoryMovements: state.inventoryMovements.map((m) => ({ ...m })),
@@ -260,6 +265,11 @@ export async function getCancellations(): Promise<CancellationRecord[]> {
       ? { ...c.dispatchEvidence }
       : undefined,
   }));
+}
+
+export async function getOrganizations(): Promise<Organization[]> {
+  if (isPostgresConfigured()) return pgStore.getOrganizationsPg();
+  return getGlobalState().organizations.map((o) => ({ ...o }));
 }
 
 export async function getActivities(): Promise<OperationalActivity[]> {
@@ -383,287 +393,335 @@ export async function recordActivity(
 // Order Injection (Canonical Intake + Atomic Deduplication)
 // -----------------------------------------------------------------------------
 
+async function resolveKitchenOrganizationId(kitchenId: string): Promise<string> {
+  try {
+    const kitchens = await getKitchens();
+    const found = kitchens.find((k) => k.id === kitchenId);
+    return found?.organizationId ?? DEFAULT_ORGANIZATION_ID;
+  } catch {
+    return DEFAULT_ORGANIZATION_ID;
+  }
+}
+
 export async function injectCanonicalOrder(
   input: InjectOrderInput,
 ): Promise<InjectOrderResult> {
-  if (isPostgresConfigured()) {
-    return pgStore.injectCanonicalOrderPg(input);
+  const result = isPostgresConfigured()
+    ? await pgStore.injectCanonicalOrderPg(input)
+    : await withMemoryLock(() =>
+        runMemoryTransaction((state) => {
+          const now = new Date().toISOString();
+
+          // 1. Validate Brand
+          const brand = state.brands.find(
+            (b) => b.id === input.brandId && b.active,
+          );
+          if (!brand) {
+            throw new Error(
+              `Invalid or inactive virtual brand: ${input.brandId}`,
+            );
+          }
+
+          // 2. Validate Kitchen
+          const kitchen = state.kitchens.find(
+            (k) => k.id === input.kitchenId && k.active,
+          );
+          if (!kitchen) {
+            throw new Error(
+              `Invalid or inactive physical kitchen: ${input.kitchenId}`,
+            );
+          }
+
+          // 3. Enforce Canonical BrandKitchen Mapping
+          const mapping = state.brandKitchens.find(
+            (bk) =>
+              bk.brandId === input.brandId &&
+              bk.kitchenId === input.kitchenId &&
+              bk.active,
+          );
+          if (!mapping) {
+            throw new Error(
+              `BrandKitchen violation: ${input.brandId} is not authorized to operate out of kitchen ${input.kitchenId}.`,
+            );
+          }
+
+          // 4. Validate Items BEFORE claiming idempotency key
+          if (!Array.isArray(input.items) || input.items.length === 0) {
+            throw new Error("Order must contain at least one menu item.");
+          }
+
+          const validatedItems = input.items.map((raw) => {
+            const menu = state.menuCatalog.find(
+              (m) => m.id === raw.menuItemId || m.name === raw.name,
+            );
+            if (!menu) {
+              throw new Error(
+                `Menu item not found in catalog: ${raw.menuItemId || raw.name}`,
+              );
+            }
+            if (menu.brandId !== input.brandId) {
+              throw new Error(
+                `Menu item ${menu.name} belongs to ${menu.brandId}, not ${input.brandId}.`,
+              );
+            }
+            const qty = Math.max(1, Math.floor(Number(raw.quantity) || 1));
+            return { raw, menu, qty };
+          });
+
+          // 5. Two-Phase Atomic Idempotency Check
+          const idemKey = input.idempotencyKey?.trim();
+          if (idemKey) {
+            const existingWebhook = state.webhookEvents.find(
+              (w) => w.idempotencyKey === idemKey,
+            );
+            if (existingWebhook) {
+              existingWebhook.hitCount += 1;
+              const existingOrder = state.orders.find(
+                (o) => o.id === existingWebhook.orderId,
+              );
+              if (existingOrder) {
+                pushMemoryActivity(state, {
+                  organizationId:
+                    existingOrder.organizationId ??
+                    kitchen.organizationId ??
+                    DEFAULT_ORGANIZATION_ID,
+                  type: "WEBHOOK_DEDUPLICATED",
+                  category: "CLOUD7",
+                  title: `Idempotent Replay Blocked (${idemKey})`,
+                  details: `Duplicate webhook payload intercepted via ON CONFLICT DO NOTHING. Returned cached order ${existingOrder.id} (Hit #${existingWebhook.hitCount}).`,
+                  actor: input.actor,
+                  orderId: existingOrder.id,
+                  kitchenId: existingOrder.kitchenId,
+                  brandId: existingOrder.brandId,
+                  severity: "warning",
+                });
+                return {
+                  order: cloneOrder(existingOrder),
+                  idempotentReplay: true,
+                  inventoryDecision:
+                    existingOrder.inventoryDecision ?? "AVAILABLE",
+                  inventoryWarnings: existingOrder.inventoryWarnings ?? [],
+                  inventoryUnavailable: existingOrder.inventoryUnavailable ?? [],
+                };
+              }
+            }
+          }
+
+          let orderId = input.id?.trim();
+          if (orderId) {
+            if (state.orders.some((o) => o.id === orderId)) {
+              throw new Error(`Order ID already exists: ${orderId}`);
+            }
+          } else {
+            let attempts = 0;
+            do {
+              const suffix = Math.floor(1000 + Math.random() * 9000);
+              orderId =
+                attempts < 20
+                  ? `ORD-${suffix}`
+                  : `ORD-${Date.now().toString().slice(-6)}-${suffix}`;
+              attempts += 1;
+            } while (state.orders.some((o) => o.id === orderId));
+          }
+
+          const resolvedItems: OrderItem[] = validatedItems.map(
+            ({ raw, menu, qty }, idx) => ({
+              id: raw.id || `${orderId}-ITEM-${idx + 1}`,
+              menuItemId: menu.id,
+              name: menu.name,
+              quantity: qty,
+              price: menu.price,
+              notes: raw.notes?.trim() || input.notes?.trim() || undefined,
+              station: menu.station,
+            }),
+          );
+
+          const totalAmount = calculateOrderTotalAmount(
+            resolvedItems,
+            state.menuCatalog,
+          );
+          const itemCount = resolvedItems.reduce(
+            (sum, item) => sum + item.quantity,
+            0,
+          );
+
+          const channel: OrderChannel = CHANNEL_SOURCE_MAP[input.channel]
+            ? input.channel
+            : "Direct Web";
+
+          const resolvedOrganizationId =
+            input.organizationId?.trim() ||
+            kitchen.organizationId ||
+            DEFAULT_ORGANIZATION_ID;
+
+          const draftOrder: Order = {
+            id: orderId,
+            organizationId: resolvedOrganizationId,
+            externalOrderId:
+              input.externalOrderId ||
+              `${channel.slice(0, 3).toUpperCase()}-${Date.now().toString().slice(-6)}`,
+            idempotencyKey: idemKey || `idem-${orderId.toLowerCase()}`,
+            brandId: input.brandId,
+            kitchenId: input.kitchenId,
+            channel,
+            source: input.source || CHANNEL_SOURCE_MAP[channel] || "MANUAL",
+            status: "PENDING",
+            priority: input.priority || "NORMAL",
+            items: resolvedItems,
+            totalAmount,
+            itemCount,
+            notes: input.notes?.trim() || undefined,
+            customerName:
+              input.customerName?.trim() || "Walk-In / Aggregator Guest",
+            createdAt: now,
+            updatedAt: now,
+            receivedAt: now,
+            inventoryConsumed: false,
+            events: [],
+          };
+
+          // 6. Per-Kitchen Inventory Availability Evaluation
+          const evaluation = evaluateOrderInventory(
+            draftOrder,
+            state.inventory,
+            state.menuCatalog,
+          );
+
+          draftOrder.inventoryDecision = evaluation.inventoryDecision;
+          draftOrder.inventoryWarnings =
+            evaluation.lowStockItems.length > 0
+              ? evaluation.lowStockItems
+              : undefined;
+          draftOrder.inventoryUnavailable =
+            evaluation.insufficientStockItems.length > 0
+              ? evaluation.insufficientStockItems
+              : undefined;
+
+          const events: OrderEvent[] = [
+            {
+              id: `${orderId}-EVT-1`,
+              type: "RECEIVED",
+              timestamp: now,
+              actor: input.actor,
+              details: `Order injected via ${channel} for ${input.brandId} at ${kitchen.name}.`,
+            },
+            {
+              id: `${orderId}-EVT-2`,
+              type: "INVENTORY_CHECKED",
+              timestamp: now,
+              actor: "SYSTEM",
+              details: `Inventory evaluation (${input.kitchenId}): ${evaluation.inventoryDecision}.`,
+            },
+          ];
+
+          if (evaluation.lowStockItems.length > 0) {
+            events.push({
+              id: `${orderId}-EVT-LOW`,
+              type: "INVENTORY_WARNING",
+              timestamp: now,
+              actor: "SYSTEM",
+              details: `Low stock warning at ${input.kitchenId} for: ${evaluation.lowStockItems.join(", ")}.`,
+            });
+          }
+
+          if (evaluation.insufficientStockItems.length > 0) {
+            events.push({
+              id: `${orderId}-EVT-UNAVAIL`,
+              type: "INVENTORY_UNAVAILABLE",
+              timestamp: now,
+              actor: "SYSTEM",
+              details: `Insufficient stock at ${input.kitchenId} for: ${evaluation.insufficientStockItems.join(", ")}.`,
+            });
+          }
+
+          draftOrder.events = events;
+
+          // 7. Save Order, Webhook Receipt, Outbox, Activity
+          state.orders.unshift(cloneOrder(draftOrder));
+
+          state.webhookEvents.unshift({
+            idempotencyKey: draftOrder.idempotencyKey!,
+            orderId: draftOrder.id,
+            status: "completed",
+            channel: draftOrder.channel,
+            brandId: draftOrder.brandId,
+            kitchenId: draftOrder.kitchenId,
+            payloadSummary: `${draftOrder.brandId} • ${itemCount} item(s) • ${formatCurrency(totalAmount, state.settings.currency)}`,
+            createdAt: now,
+            hitCount: 1,
+          });
+
+          state.outboxEvents.unshift({
+            id: makeId("OUT"),
+            eventType: "aggregator.order.created",
+            aggregateId: draftOrder.id,
+            payload: JSON.stringify({
+              orderId: draftOrder.id,
+              brandId: draftOrder.brandId,
+              kitchenId: draftOrder.kitchenId,
+              inventoryDecision: evaluation.inventoryDecision,
+            }),
+            attempt: 1,
+            maxAttempts: 6,
+            backoffSchedule: "Immediate (0s)",
+            status: "DELIVERED",
+            createdAt: now,
+          });
+
+          pushMemoryActivity(state, {
+            organizationId: resolvedOrganizationId,
+            type: "ORDER_CREATED",
+            category: "ORDER",
+            title: `Order ${draftOrder.id} Injected (${draftOrder.brandId})`,
+            details: `${itemCount} item(s) (${formatCurrency(totalAmount, state.settings.currency)}) via ${draftOrder.channel} → ${kitchen.name} (${evaluation.inventoryDecision}).`,
+            actor: input.actor,
+            orderId: draftOrder.id,
+            kitchenId: draftOrder.kitchenId,
+            brandId: draftOrder.brandId,
+            timestamp: now,
+            severity:
+              evaluation.inventoryDecision === "INSUFFICIENT_STOCK"
+                ? "error"
+                : evaluation.inventoryDecision === "LOW_STOCK"
+                  ? "warning"
+                  : "success",
+          });
+
+          return {
+            order: cloneOrder(draftOrder),
+            idempotentReplay: false,
+            inventoryDecision: evaluation.inventoryDecision,
+            inventoryWarnings: evaluation.lowStockItems,
+            inventoryUnavailable: evaluation.insufficientStockItems,
+          };
+        }),
+      );
+
+  if (!result.idempotentReplay) {
+    const orgId =
+      result.order.organizationId ??
+      (await resolveKitchenOrganizationId(result.order.kitchenId));
+    await publishKitchenRealtimeEvent({
+      type: "ORDER_CREATED",
+      organizationId: orgId,
+      kitchenId: result.order.kitchenId,
+      orderId: result.order.id,
+      status: result.order.status,
+      brandId: result.order.brandId,
+      actor: input.actor,
+    });
+    if (result.inventoryWarnings.length > 0) {
+      await publishKitchenRealtimeEvent({
+        type: "STOCK_LOW_ALERT",
+        organizationId: orgId,
+        kitchenId: result.order.kitchenId,
+        orderId: result.order.id,
+        details: result.inventoryWarnings.join(", "),
+      });
+    }
   }
 
-  return withMemoryLock(() =>
-    runMemoryTransaction((state) => {
-      const now = new Date().toISOString();
-
-      // 1. Validate Brand
-      const brand = state.brands.find(
-        (b) => b.id === input.brandId && b.active,
-      );
-      if (!brand) {
-        throw new Error(`Invalid or inactive virtual brand: ${input.brandId}`);
-      }
-
-      // 2. Validate Kitchen
-      const kitchen = state.kitchens.find(
-        (k) => k.id === input.kitchenId && k.active,
-      );
-      if (!kitchen) {
-        throw new Error(
-          `Invalid or inactive physical kitchen: ${input.kitchenId}`,
-        );
-      }
-
-      // 3. Enforce Canonical BrandKitchen Mapping
-      const mapping = state.brandKitchens.find(
-        (bk) =>
-          bk.brandId === input.brandId &&
-          bk.kitchenId === input.kitchenId &&
-          bk.active,
-      );
-      if (!mapping) {
-        throw new Error(
-          `BrandKitchen violation: ${input.brandId} is not authorized to operate out of kitchen ${input.kitchenId}.`,
-        );
-      }
-
-      // 4. Validate Items BEFORE claiming idempotency key
-      if (!Array.isArray(input.items) || input.items.length === 0) {
-        throw new Error("Order must contain at least one menu item.");
-      }
-
-      const validatedItems = input.items.map((raw) => {
-        const menu = state.menuCatalog.find(
-          (m) => m.id === raw.menuItemId || m.name === raw.name,
-        );
-        if (!menu) {
-          throw new Error(
-            `Menu item not found in catalog: ${raw.menuItemId || raw.name}`,
-          );
-        }
-        if (menu.brandId !== input.brandId) {
-          throw new Error(
-            `Menu item ${menu.name} belongs to ${menu.brandId}, not ${input.brandId}.`,
-          );
-        }
-        const qty = Math.max(1, Math.floor(Number(raw.quantity) || 1));
-        return { raw, menu, qty };
-      });
-
-      // 5. Two-Phase Atomic Idempotency Check
-      const idemKey = input.idempotencyKey?.trim();
-      if (idemKey) {
-        const existingWebhook = state.webhookEvents.find(
-          (w) => w.idempotencyKey === idemKey,
-        );
-        if (existingWebhook) {
-          existingWebhook.hitCount += 1;
-          const existingOrder = state.orders.find(
-            (o) => o.id === existingWebhook.orderId,
-          );
-          if (existingOrder) {
-            pushMemoryActivity(state, {
-              type: "WEBHOOK_DEDUPLICATED",
-              category: "CLOUD7",
-              title: `Idempotent Replay Blocked (${idemKey})`,
-              details: `Duplicate webhook payload intercepted via ON CONFLICT DO NOTHING. Returned cached order ${existingOrder.id} (Hit #${existingWebhook.hitCount}).`,
-              actor: input.actor,
-              orderId: existingOrder.id,
-              kitchenId: existingOrder.kitchenId,
-              brandId: existingOrder.brandId,
-              severity: "warning",
-            });
-            return {
-              order: cloneOrder(existingOrder),
-              idempotentReplay: true,
-              inventoryDecision: existingOrder.inventoryDecision ?? "AVAILABLE",
-              inventoryWarnings: existingOrder.inventoryWarnings ?? [],
-              inventoryUnavailable: existingOrder.inventoryUnavailable ?? [],
-            };
-          }
-        }
-      }
-
-      let orderId = input.id?.trim();
-      if (orderId) {
-        if (state.orders.some((o) => o.id === orderId)) {
-          throw new Error(`Order ID already exists: ${orderId}`);
-        }
-      } else {
-        let attempts = 0;
-        do {
-          const suffix = Math.floor(1000 + Math.random() * 9000);
-          orderId =
-            attempts < 20
-              ? `ORD-${suffix}`
-              : `ORD-${Date.now().toString().slice(-6)}-${suffix}`;
-          attempts += 1;
-        } while (state.orders.some((o) => o.id === orderId));
-      }
-
-      const resolvedItems: OrderItem[] = validatedItems.map(
-        ({ raw, menu, qty }, idx) => ({
-          id: raw.id || `${orderId}-ITEM-${idx + 1}`,
-          menuItemId: menu.id,
-          name: menu.name,
-          quantity: qty,
-          price: menu.price,
-          notes: raw.notes?.trim() || input.notes?.trim() || undefined,
-          station: menu.station,
-        }),
-      );
-
-      const totalAmount = calculateOrderTotalAmount(
-        resolvedItems,
-        state.menuCatalog,
-      );
-      const itemCount = resolvedItems.reduce(
-        (sum, item) => sum + item.quantity,
-        0,
-      );
-
-      const channel: OrderChannel = CHANNEL_SOURCE_MAP[input.channel]
-        ? input.channel
-        : "Direct Web";
-
-      const draftOrder: Order = {
-        id: orderId,
-        externalOrderId:
-          input.externalOrderId ||
-          `${channel.slice(0, 3).toUpperCase()}-${Date.now().toString().slice(-6)}`,
-        idempotencyKey: idemKey || `idem-${orderId.toLowerCase()}`,
-        brandId: input.brandId,
-        kitchenId: input.kitchenId,
-        channel,
-        source: input.source || CHANNEL_SOURCE_MAP[channel] || "MANUAL",
-        status: "PENDING",
-        priority: input.priority || "NORMAL",
-        items: resolvedItems,
-        totalAmount,
-        itemCount,
-        notes: input.notes?.trim() || undefined,
-        customerName:
-          input.customerName?.trim() || "Walk-In / Aggregator Guest",
-        createdAt: now,
-        updatedAt: now,
-        receivedAt: now,
-        inventoryConsumed: false,
-        events: [],
-      };
-
-      // 6. Per-Kitchen Inventory Availability Evaluation
-      const evaluation = evaluateOrderInventory(
-        draftOrder,
-        state.inventory,
-        state.menuCatalog,
-      );
-
-      draftOrder.inventoryDecision = evaluation.inventoryDecision;
-      draftOrder.inventoryWarnings =
-        evaluation.lowStockItems.length > 0
-          ? evaluation.lowStockItems
-          : undefined;
-      draftOrder.inventoryUnavailable =
-        evaluation.insufficientStockItems.length > 0
-          ? evaluation.insufficientStockItems
-          : undefined;
-
-      const events: OrderEvent[] = [
-        {
-          id: `${orderId}-EVT-1`,
-          type: "RECEIVED",
-          timestamp: now,
-          actor: input.actor,
-          details: `Order injected via ${channel} for ${input.brandId} at ${kitchen.name}.`,
-        },
-        {
-          id: `${orderId}-EVT-2`,
-          type: "INVENTORY_CHECKED",
-          timestamp: now,
-          actor: "SYSTEM",
-          details: `Inventory evaluation (${input.kitchenId}): ${evaluation.inventoryDecision}.`,
-        },
-      ];
-
-      if (evaluation.lowStockItems.length > 0) {
-        events.push({
-          id: `${orderId}-EVT-LOW`,
-          type: "INVENTORY_WARNING",
-          timestamp: now,
-          actor: "SYSTEM",
-          details: `Low stock warning at ${input.kitchenId} for: ${evaluation.lowStockItems.join(", ")}.`,
-        });
-      }
-
-      if (evaluation.insufficientStockItems.length > 0) {
-        events.push({
-          id: `${orderId}-EVT-UNAVAIL`,
-          type: "INVENTORY_UNAVAILABLE",
-          timestamp: now,
-          actor: "SYSTEM",
-          details: `Insufficient stock at ${input.kitchenId} for: ${evaluation.insufficientStockItems.join(", ")}.`,
-        });
-      }
-
-      draftOrder.events = events;
-
-      // 7. Save Order, Webhook Receipt, Outbox, Activity
-      state.orders.unshift(cloneOrder(draftOrder));
-
-      state.webhookEvents.unshift({
-        idempotencyKey: draftOrder.idempotencyKey!,
-        orderId: draftOrder.id,
-        status: "completed",
-        channel: draftOrder.channel,
-        brandId: draftOrder.brandId,
-        kitchenId: draftOrder.kitchenId,
-        payloadSummary: `${draftOrder.brandId} • ${itemCount} item(s) • ${formatCurrency(totalAmount, state.settings.currency)}`,
-        createdAt: now,
-        hitCount: 1,
-      });
-
-      state.outboxEvents.unshift({
-        id: makeId("OUT"),
-        eventType: "aggregator.order.created",
-        aggregateId: draftOrder.id,
-        payload: JSON.stringify({
-          orderId: draftOrder.id,
-          brandId: draftOrder.brandId,
-          kitchenId: draftOrder.kitchenId,
-          inventoryDecision: evaluation.inventoryDecision,
-        }),
-        attempt: 1,
-        maxAttempts: 6,
-        backoffSchedule: "Immediate (0s)",
-        status: "DELIVERED",
-        createdAt: now,
-      });
-
-      pushMemoryActivity(state, {
-        type: "ORDER_CREATED",
-        category: "ORDER",
-        title: `Order ${draftOrder.id} Injected (${draftOrder.brandId})`,
-        details: `${itemCount} item(s) (${formatCurrency(totalAmount, state.settings.currency)}) via ${draftOrder.channel} → ${kitchen.name} (${evaluation.inventoryDecision}).`,
-        actor: input.actor,
-        orderId: draftOrder.id,
-        kitchenId: draftOrder.kitchenId,
-        brandId: draftOrder.brandId,
-        timestamp: now,
-        severity:
-          evaluation.inventoryDecision === "INSUFFICIENT_STOCK"
-            ? "error"
-            : evaluation.inventoryDecision === "LOW_STOCK"
-              ? "warning"
-              : "success",
-      });
-
-      return {
-        order: cloneOrder(draftOrder),
-        idempotentReplay: false,
-        inventoryDecision: evaluation.inventoryDecision,
-        inventoryWarnings: evaluation.lowStockItems,
-        inventoryUnavailable: evaluation.insufficientStockItems,
-      };
-    }),
-  );
+  return result;
 }
 
 // -----------------------------------------------------------------------------
@@ -673,45 +731,45 @@ export async function injectCanonicalOrder(
 export async function transitionCanonicalOrder(
   input: TransitionOrderInput,
 ): Promise<TransitionOrderResult> {
-  if (isPostgresConfigured()) {
-    return pgStore.transitionCanonicalOrderPg(input);
-  }
+  const result = isPostgresConfigured()
+    ? await pgStore.transitionCanonicalOrderPg(input)
+    : await withMemoryLock(() => {
+        let blockedInsufficientStock: string[] | null = null;
 
-  return withMemoryLock(() => {
-    let blockedInsufficientStock: string[] | null = null;
+        const inner = runMemoryTransaction((state) => {
+          const index = state.orders.findIndex((o) => o.id === input.orderId);
+          if (index === -1) {
+            throw new Error(`Order not found: ${input.orderId}`);
+          }
 
-    const result = runMemoryTransaction((state) => {
-      const index = state.orders.findIndex((o) => o.id === input.orderId);
-      if (index === -1) {
-        throw new Error(`Order not found: ${input.orderId}`);
-      }
+          const currentOrder = cloneOrder(state.orders[index]);
+          const now = new Date().toISOString();
 
-      const currentOrder = cloneOrder(state.orders[index]);
-      const now = new Date().toISOString();
+          if (currentOrder.status === input.nextStatus) {
+            const existingCancel =
+              input.nextStatus === "CANCELLED"
+                ? state.cancellations.find(
+                    (c) => c.orderId === currentOrder.id,
+                  )
+                : undefined;
+            return {
+              order: currentOrder,
+              idempotentReplay: true,
+              cancellationRecord: existingCancel,
+            };
+          }
 
-      if (currentOrder.status === input.nextStatus) {
-        const existingCancel =
-          input.nextStatus === "CANCELLED"
-            ? state.cancellations.find((c) => c.orderId === currentOrder.id)
-            : undefined;
-        return {
-          order: currentOrder,
-          idempotentReplay: true,
-          cancellationRecord: existingCancel,
-        };
-      }
+          const allowed = VALID_ORDER_TRANSITIONS[currentOrder.status] ?? [];
+          if (!allowed.includes(input.nextStatus)) {
+            throw new Error(
+              `Invalid status transition: ${currentOrder.status} -> ${input.nextStatus}`,
+            );
+          }
 
-      const allowed = VALID_ORDER_TRANSITIONS[currentOrder.status] ?? [];
-      if (!allowed.includes(input.nextStatus)) {
-        throw new Error(
-          `Invalid status transition: ${currentOrder.status} -> ${input.nextStatus}`,
-        );
-      }
-
-      if (input.nextStatus === "CANCELLED") {
-        return executeStageAwareCancellationMemory(
-          state,
-          currentOrder,
+          if (input.nextStatus === "CANCELLED") {
+            return executeStageAwareCancellationMemory(
+              state,
+              currentOrder,
           index,
           input,
           now,
@@ -899,14 +957,43 @@ export async function transitionCanonicalOrder(
       };
     });
 
-    if (blockedInsufficientStock !== null) {
-      throw new Error(
-        `Insufficient inventory for preparation: ${(blockedInsufficientStock as string[]).join(", ")}`,
-      );
-    }
+        if (blockedInsufficientStock !== null) {
+          throw new Error(
+            `Insufficient inventory for preparation: ${(blockedInsufficientStock as string[]).join(", ")}`,
+          );
+        }
 
-    return result;
-  });
+        return inner;
+      });
+
+  if (!result.idempotentReplay) {
+    const orgId =
+      result.order.organizationId ??
+      (await resolveKitchenOrganizationId(result.order.kitchenId));
+    await publishKitchenRealtimeEvent({
+      type:
+        result.order.status === "CANCELLED"
+          ? "ORDER_CANCELLED"
+          : "ORDER_STATUS_CHANGED",
+      organizationId: orgId,
+      kitchenId: result.order.kitchenId,
+      orderId: result.order.id,
+      status: result.order.status,
+      brandId: result.order.brandId,
+      actor: input.actor,
+    });
+    if (result.lowStockAlerts && result.lowStockAlerts.length > 0) {
+      await publishKitchenRealtimeEvent({
+        type: "STOCK_LOW_ALERT",
+        organizationId: orgId,
+        kitchenId: result.order.kitchenId,
+        orderId: result.order.id,
+        details: result.lowStockAlerts.join(", "),
+      });
+    }
+  }
+
+  return result;
 }
 
 function executeStageAwareCancellationMemory(
@@ -1147,269 +1234,331 @@ function executeStageAwareCancellationMemory(
 export async function mutateCanonicalInventory(
   input: InventoryMutationInput,
 ): Promise<InventoryMutationResult> {
-  if (isPostgresConfigured()) {
-    return pgStore.mutateCanonicalInventoryPg(input);
+  const result = isPostgresConfigured()
+    ? await pgStore.mutateCanonicalInventoryPg(input)
+    : await withMemoryLock(() =>
+        runMemoryTransaction((state) => {
+          const targetKitchenId = input.kitchenId?.trim() || "K1";
+          const idx = state.inventory.findIndex(
+            (i) =>
+              (i.id === input.itemId || i.ingredientId === input.itemId) &&
+              i.kitchenId === targetKitchenId,
+          );
+          if (idx === -1) {
+            throw new Error(
+              `Inventory item not found in kitchen ${targetKitchenId}: ${input.itemId}`,
+            );
+          }
+
+          const existing = { ...state.inventory[idx] };
+          const previousStock = existing.currentStock;
+          const now = new Date().toISOString();
+
+          let nextStock = previousStock;
+          let movementType: InventoryMovementType = "MANUAL_ADJUSTMENT";
+          let delta = 0;
+
+          if (input.action === "SET_STOCK") {
+            if (
+              typeof input.currentStock !== "number" ||
+              !Number.isFinite(input.currentStock)
+            ) {
+              throw new Error(
+                "SET_STOCK requires a finite numeric currentStock value.",
+              );
+            }
+            nextStock = Number(input.currentStock);
+            delta = round4(nextStock - previousStock);
+            movementType = delta > 0 ? "RESTOCK" : "MANUAL_ADJUSTMENT";
+          } else if (input.action === "RESTOCK") {
+            const addQty = Math.abs(Number(input.quantity) || 0);
+            if (addQty <= 0) {
+              throw new Error("Restock quantity must be greater than 0.");
+            }
+            delta = addQty;
+            nextStock = round4(previousStock + addQty);
+            movementType = "RESTOCK";
+          } else if (input.action === "WASTE" || input.action === "LOSS") {
+            const lossQty = Math.abs(Number(input.quantity) || 0);
+            if (lossQty <= 0) {
+              throw new Error("Waste/Loss quantity must be greater than 0.");
+            }
+            delta = -Math.min(previousStock, lossQty);
+            nextStock = round4(Math.max(0, previousStock - lossQty));
+            movementType = input.action;
+          } else {
+            delta = Number(input.quantity) || 0;
+            nextStock = round4(Math.max(0, previousStock + delta));
+            movementType = "MANUAL_ADJUSTMENT";
+          }
+
+          if (!Number.isFinite(nextStock) || nextStock < 0) {
+            throw new Error("Resulting stock must be a non-negative number.");
+          }
+
+          const updatedItem: InventoryItem = {
+            ...existing,
+            currentStock: nextStock,
+            lastRestocked:
+              nextStock > previousStock ? now : existing.lastRestocked,
+          };
+
+          state.inventory[idx] = updatedItem;
+
+          const movement: InventoryMovement = {
+            id: makeId("MOV"),
+            inventoryItemId: updatedItem.id,
+            itemName: updatedItem.name,
+            sku: updatedItem.sku,
+            kitchenId: targetKitchenId,
+            type: movementType,
+            quantity: delta,
+            previousStock,
+            newStock: nextStock,
+            unit: updatedItem.unit,
+            costImpact: round2(Math.abs(delta) * updatedItem.costPerUnit),
+            actor: input.actor,
+            reason:
+              input.reason?.trim() ||
+              `${movementType.replaceAll("_", " ")} (${previousStock} -> ${nextStock} ${updatedItem.unit})`,
+            timestamp: now,
+          };
+
+          state.inventoryMovements.unshift(movement);
+
+          pushMemoryActivity(state, {
+            type: `INVENTORY_${movementType}`,
+            category: "INVENTORY",
+            title: `${updatedItem.name} (${targetKitchenId}): ${previousStock} → ${nextStock} ${updatedItem.unit}`,
+            details: `${movement.reason} (Cost impact: ${formatCurrency(movement.costImpact, state.settings.currency)})`,
+            actor: input.actor,
+            kitchenId: targetKitchenId,
+            timestamp: now,
+            severity:
+              movementType === "WASTE" || movementType === "LOSS"
+                ? "error"
+                : nextStock <= updatedItem.reorderThreshold
+                  ? "warning"
+                  : "success",
+          });
+
+          return {
+            item: { ...updatedItem },
+            movement: { ...movement },
+            inventory: state.inventory.map(cloneInventoryItem),
+          };
+        }),
+      );
+
+  const kitchenId = result.item.kitchenId ?? input.kitchenId ?? "K1";
+  const orgId = await resolveKitchenOrganizationId(kitchenId);
+  await publishKitchenRealtimeEvent({
+    type: "INVENTORY_UPDATED",
+    organizationId: orgId,
+    kitchenId,
+    ingredientId: result.item.id,
+    itemName: result.item.name,
+    currentStock: result.item.currentStock,
+    reorderThreshold: result.item.reorderThreshold,
+    actor: input.actor,
+  });
+  if (result.item.currentStock <= result.item.reorderThreshold) {
+    await publishKitchenRealtimeEvent({
+      type: "STOCK_LOW_ALERT",
+      organizationId: orgId,
+      kitchenId,
+      ingredientId: result.item.id,
+      itemName: result.item.name,
+      currentStock: result.item.currentStock,
+      reorderThreshold: result.item.reorderThreshold,
+      actor: input.actor,
+    });
   }
 
-  return withMemoryLock(() =>
-    runMemoryTransaction((state) => {
-      const targetKitchenId = input.kitchenId?.trim() || "K1";
-      const idx = state.inventory.findIndex(
-        (i) =>
-          (i.id === input.itemId || i.ingredientId === input.itemId) &&
-          i.kitchenId === targetKitchenId,
-      );
-      if (idx === -1) {
-        throw new Error(
-          `Inventory item not found in kitchen ${targetKitchenId}: ${input.itemId}`,
-        );
-      }
-
-      const existing = { ...state.inventory[idx] };
-      const previousStock = existing.currentStock;
-      const now = new Date().toISOString();
-
-      let nextStock = previousStock;
-      let movementType: InventoryMovementType = "MANUAL_ADJUSTMENT";
-      let delta = 0;
-
-      if (input.action === "SET_STOCK") {
-        if (
-          typeof input.currentStock !== "number" ||
-          !Number.isFinite(input.currentStock)
-        ) {
-          throw new Error(
-            "SET_STOCK requires a finite numeric currentStock value.",
-          );
-        }
-        nextStock = Number(input.currentStock);
-        delta = round4(nextStock - previousStock);
-        movementType = delta > 0 ? "RESTOCK" : "MANUAL_ADJUSTMENT";
-      } else if (input.action === "RESTOCK") {
-        const addQty = Math.abs(Number(input.quantity) || 0);
-        if (addQty <= 0) {
-          throw new Error("Restock quantity must be greater than 0.");
-        }
-        delta = addQty;
-        nextStock = round4(previousStock + addQty);
-        movementType = "RESTOCK";
-      } else if (input.action === "WASTE" || input.action === "LOSS") {
-        const lossQty = Math.abs(Number(input.quantity) || 0);
-        if (lossQty <= 0) {
-          throw new Error("Waste/Loss quantity must be greater than 0.");
-        }
-        delta = -Math.min(previousStock, lossQty);
-        nextStock = round4(Math.max(0, previousStock - lossQty));
-        movementType = input.action;
-      } else {
-        delta = Number(input.quantity) || 0;
-        nextStock = round4(Math.max(0, previousStock + delta));
-        movementType = "MANUAL_ADJUSTMENT";
-      }
-
-      if (!Number.isFinite(nextStock) || nextStock < 0) {
-        throw new Error("Resulting stock must be a non-negative number.");
-      }
-
-      const updatedItem: InventoryItem = {
-        ...existing,
-        currentStock: nextStock,
-        lastRestocked:
-          nextStock > previousStock ? now : existing.lastRestocked,
-      };
-
-      state.inventory[idx] = updatedItem;
-
-      const movement: InventoryMovement = {
-        id: makeId("MOV"),
-        inventoryItemId: updatedItem.id,
-        itemName: updatedItem.name,
-        sku: updatedItem.sku,
-        kitchenId: targetKitchenId,
-        type: movementType,
-        quantity: delta,
-        previousStock,
-        newStock: nextStock,
-        unit: updatedItem.unit,
-        costImpact: round2(Math.abs(delta) * updatedItem.costPerUnit),
-        actor: input.actor,
-        reason:
-          input.reason?.trim() ||
-          `${movementType.replaceAll("_", " ")} (${previousStock} -> ${nextStock} ${updatedItem.unit})`,
-        timestamp: now,
-      };
-
-      state.inventoryMovements.unshift(movement);
-
-      pushMemoryActivity(state, {
-        type: `INVENTORY_${movementType}`,
-        category: "INVENTORY",
-        title: `${updatedItem.name} (${targetKitchenId}): ${previousStock} → ${nextStock} ${updatedItem.unit}`,
-        details: `${movement.reason} (Cost impact: ${formatCurrency(movement.costImpact, state.settings.currency)})`,
-        actor: input.actor,
-        kitchenId: targetKitchenId,
-        timestamp: now,
-        severity:
-          movementType === "WASTE" || movementType === "LOSS"
-            ? "error"
-            : nextStock <= updatedItem.reorderThreshold
-              ? "warning"
-              : "success",
-      });
-
-      return {
-        item: { ...updatedItem },
-        movement: { ...movement },
-        inventory: state.inventory.map(cloneInventoryItem),
-      };
-    }),
-  );
+  return result;
 }
 
 export async function transferKitchenInventory(
   input: TransferInventoryInput,
 ): Promise<TransferInventoryResult> {
-  if (isPostgresConfigured()) {
-    return pgStore.transferKitchenInventoryPg(input);
+  const result = isPostgresConfigured()
+    ? await pgStore.transferKitchenInventoryPg(input)
+    : await withMemoryLock(() =>
+        runMemoryTransaction((state) => {
+          const fromKitchenId = input.fromKitchenId?.trim();
+          const toKitchenId = input.toKitchenId?.trim();
+          const itemId = input.itemId?.trim();
+          const qty = Number(input.quantity);
+
+          if (!fromKitchenId || !toKitchenId || !itemId) {
+            throw new Error(
+              "itemId, fromKitchenId, and toKitchenId are required for a stock transfer.",
+            );
+          }
+          if (fromKitchenId === toKitchenId) {
+            throw new Error(
+              "Source and destination kitchens must be different for an inter-kitchen stock transfer.",
+            );
+          }
+          if (!Number.isFinite(qty) || qty <= 0) {
+            throw new Error("Transfer quantity must be a positive number.");
+          }
+
+          if (!state.kitchens.some((k) => k.id === fromKitchenId)) {
+            throw new Error(`Source kitchen not found: ${fromKitchenId}`);
+          }
+          if (!state.kitchens.some((k) => k.id === toKitchenId)) {
+            throw new Error(`Destination kitchen not found: ${toKitchenId}`);
+          }
+
+          const fromIdx = state.inventory.findIndex(
+            (i) =>
+              (i.id === itemId || i.ingredientId === itemId) &&
+              i.kitchenId === fromKitchenId,
+          );
+          const toIdx = state.inventory.findIndex(
+            (i) =>
+              (i.id === itemId || i.ingredientId === itemId) &&
+              i.kitchenId === toKitchenId,
+          );
+
+          if (fromIdx === -1) {
+            throw new Error(
+              `Inventory item ${itemId} not found in source kitchen ${fromKitchenId}.`,
+            );
+          }
+          if (toIdx === -1) {
+            throw new Error(
+              `Inventory item ${itemId} not found in destination kitchen ${toKitchenId}.`,
+            );
+          }
+
+          const fromRow = { ...state.inventory[fromIdx] };
+          const toRow = { ...state.inventory[toIdx] };
+
+          if (fromRow.currentStock < qty) {
+            throw new Error(
+              `Insufficient stock in ${fromKitchenId} for ${fromRow.name}: requested ${qty} ${fromRow.unit}, available ${fromRow.currentStock} ${fromRow.unit}.`,
+            );
+          }
+
+          const now = new Date().toISOString();
+          const fromPrev = fromRow.currentStock;
+          const toPrev = toRow.currentStock;
+          const fromNext = round4(fromPrev - qty);
+          const toNext = round4(toPrev + qty);
+
+          fromRow.currentStock = fromNext;
+          toRow.currentStock = toNext;
+          toRow.lastRestocked = now;
+
+          state.inventory[fromIdx] = fromRow;
+          state.inventory[toIdx] = toRow;
+
+          const transferGroupId = makeId("XFER");
+          const costImpact = round2(qty * fromRow.costPerUnit);
+          const reasonText =
+            input.reason?.trim() ||
+            `Inter-kitchen stock transfer ${fromKitchenId} → ${toKitchenId}`;
+
+          const outMovement: InventoryMovement = {
+            id: makeId("MOV"),
+            inventoryItemId: fromRow.id,
+            itemName: fromRow.name,
+            sku: fromRow.sku,
+            kitchenId: fromKitchenId,
+            type: "TRANSFER_OUT",
+            quantity: -qty,
+            previousStock: fromPrev,
+            newStock: fromNext,
+            unit: fromRow.unit,
+            costImpact,
+            transferGroupId,
+            actor: input.actor,
+            reason: `${reasonText} (to ${toKitchenId})`,
+            timestamp: now,
+          };
+
+          const inMovement: InventoryMovement = {
+            id: makeId("MOV"),
+            inventoryItemId: toRow.id,
+            itemName: toRow.name,
+            sku: toRow.sku,
+            kitchenId: toKitchenId,
+            type: "TRANSFER_IN",
+            quantity: qty,
+            previousStock: toPrev,
+            newStock: toNext,
+            unit: toRow.unit,
+            costImpact,
+            transferGroupId,
+            actor: input.actor,
+            reason: `${reasonText} (from ${fromKitchenId})`,
+            timestamp: now,
+          };
+
+          state.inventoryMovements.unshift(inMovement, outMovement);
+
+          pushMemoryActivity(state, {
+            type: "INVENTORY_TRANSFER",
+            category: "INVENTORY",
+            title: `Stock Transfer: ${qty} ${fromRow.unit} ${fromRow.name} (${fromKitchenId} → ${toKitchenId})`,
+            details: `${reasonText} • Group ${transferGroupId} • Stock value: ${formatCurrency(costImpact, state.settings.currency)}.`,
+            actor: input.actor,
+            kitchenId: toKitchenId,
+            timestamp: now,
+            severity: "success",
+          });
+
+          return {
+            transferGroupId,
+            fromItem: cloneInventoryItem(fromRow),
+            toItem: cloneInventoryItem(toRow),
+            outMovement: { ...outMovement },
+            inMovement: { ...inMovement },
+            inventory: state.inventory.map(cloneInventoryItem),
+          };
+        }),
+      );
+
+  const fromOrgId = await resolveKitchenOrganizationId(input.fromKitchenId);
+  const toOrgId = await resolveKitchenOrganizationId(input.toKitchenId);
+  await Promise.all([
+    publishKitchenRealtimeEvent({
+      type: "INVENTORY_UPDATED",
+      organizationId: fromOrgId,
+      kitchenId: input.fromKitchenId,
+      ingredientId: result.fromItem.id,
+      itemName: result.fromItem.name,
+      currentStock: result.fromItem.currentStock,
+      reorderThreshold: result.fromItem.reorderThreshold,
+      actor: input.actor,
+    }),
+    publishKitchenRealtimeEvent({
+      type: "INVENTORY_UPDATED",
+      organizationId: toOrgId,
+      kitchenId: input.toKitchenId,
+      ingredientId: result.toItem.id,
+      itemName: result.toItem.name,
+      currentStock: result.toItem.currentStock,
+      reorderThreshold: result.toItem.reorderThreshold,
+      actor: input.actor,
+    }),
+  ]);
+  if (result.fromItem.currentStock <= result.fromItem.reorderThreshold) {
+    await publishKitchenRealtimeEvent({
+      type: "STOCK_LOW_ALERT",
+      organizationId: fromOrgId,
+      kitchenId: input.fromKitchenId,
+      ingredientId: result.fromItem.id,
+      itemName: result.fromItem.name,
+      currentStock: result.fromItem.currentStock,
+      reorderThreshold: result.fromItem.reorderThreshold,
+      actor: input.actor,
+    });
   }
 
-  return withMemoryLock(() =>
-    runMemoryTransaction((state) => {
-      const fromKitchenId = input.fromKitchenId?.trim();
-      const toKitchenId = input.toKitchenId?.trim();
-      const itemId = input.itemId?.trim();
-      const qty = Number(input.quantity);
-
-      if (!fromKitchenId || !toKitchenId || !itemId) {
-        throw new Error(
-          "itemId, fromKitchenId, and toKitchenId are required for a stock transfer.",
-        );
-      }
-      if (fromKitchenId === toKitchenId) {
-        throw new Error(
-          "Source and destination kitchens must be different for an inter-kitchen stock transfer.",
-        );
-      }
-      if (!Number.isFinite(qty) || qty <= 0) {
-        throw new Error("Transfer quantity must be a positive number.");
-      }
-
-      if (!state.kitchens.some((k) => k.id === fromKitchenId)) {
-        throw new Error(`Source kitchen not found: ${fromKitchenId}`);
-      }
-      if (!state.kitchens.some((k) => k.id === toKitchenId)) {
-        throw new Error(`Destination kitchen not found: ${toKitchenId}`);
-      }
-
-      const fromIdx = state.inventory.findIndex(
-        (i) =>
-          (i.id === itemId || i.ingredientId === itemId) &&
-          i.kitchenId === fromKitchenId,
-      );
-      const toIdx = state.inventory.findIndex(
-        (i) =>
-          (i.id === itemId || i.ingredientId === itemId) &&
-          i.kitchenId === toKitchenId,
-      );
-
-      if (fromIdx === -1) {
-        throw new Error(
-          `Inventory item ${itemId} not found in source kitchen ${fromKitchenId}.`,
-        );
-      }
-      if (toIdx === -1) {
-        throw new Error(
-          `Inventory item ${itemId} not found in destination kitchen ${toKitchenId}.`,
-        );
-      }
-
-      const fromRow = { ...state.inventory[fromIdx] };
-      const toRow = { ...state.inventory[toIdx] };
-
-      if (fromRow.currentStock < qty) {
-        throw new Error(
-          `Insufficient stock in ${fromKitchenId} for ${fromRow.name}: requested ${qty} ${fromRow.unit}, available ${fromRow.currentStock} ${fromRow.unit}.`,
-        );
-      }
-
-      const now = new Date().toISOString();
-      const fromPrev = fromRow.currentStock;
-      const toPrev = toRow.currentStock;
-      const fromNext = round4(fromPrev - qty);
-      const toNext = round4(toPrev + qty);
-
-      fromRow.currentStock = fromNext;
-      toRow.currentStock = toNext;
-      toRow.lastRestocked = now;
-
-      state.inventory[fromIdx] = fromRow;
-      state.inventory[toIdx] = toRow;
-
-      const transferGroupId = makeId("XFER");
-      const costImpact = round2(qty * fromRow.costPerUnit);
-      const reasonText =
-        input.reason?.trim() ||
-        `Inter-kitchen stock transfer ${fromKitchenId} → ${toKitchenId}`;
-
-      const outMovement: InventoryMovement = {
-        id: makeId("MOV"),
-        inventoryItemId: fromRow.id,
-        itemName: fromRow.name,
-        sku: fromRow.sku,
-        kitchenId: fromKitchenId,
-        type: "TRANSFER_OUT",
-        quantity: -qty,
-        previousStock: fromPrev,
-        newStock: fromNext,
-        unit: fromRow.unit,
-        costImpact,
-        transferGroupId,
-        actor: input.actor,
-        reason: `${reasonText} (to ${toKitchenId})`,
-        timestamp: now,
-      };
-
-      const inMovement: InventoryMovement = {
-        id: makeId("MOV"),
-        inventoryItemId: toRow.id,
-        itemName: toRow.name,
-        sku: toRow.sku,
-        kitchenId: toKitchenId,
-        type: "TRANSFER_IN",
-        quantity: qty,
-        previousStock: toPrev,
-        newStock: toNext,
-        unit: toRow.unit,
-        costImpact,
-        transferGroupId,
-        actor: input.actor,
-        reason: `${reasonText} (from ${fromKitchenId})`,
-        timestamp: now,
-      };
-
-      state.inventoryMovements.unshift(inMovement, outMovement);
-
-      pushMemoryActivity(state, {
-        type: "INVENTORY_TRANSFER",
-        category: "INVENTORY",
-        title: `Stock Transfer: ${qty} ${fromRow.unit} ${fromRow.name} (${fromKitchenId} → ${toKitchenId})`,
-        details: `${reasonText} • Group ${transferGroupId} • Stock value: ${formatCurrency(costImpact, state.settings.currency)}.`,
-        actor: input.actor,
-        kitchenId: toKitchenId,
-        timestamp: now,
-        severity: "success",
-      });
-
-      return {
-        transferGroupId,
-        fromItem: cloneInventoryItem(fromRow),
-        toItem: cloneInventoryItem(toRow),
-        outMovement: { ...outMovement },
-        inMovement: { ...inMovement },
-        inventory: state.inventory.map(cloneInventoryItem),
-      };
-    }),
-  );
+  return result;
 }
 
 // -----------------------------------------------------------------------------
@@ -1589,6 +1738,116 @@ export async function toggleKitchenActive(
   );
 }
 
+export async function upsertOrganization(
+  org: Partial<Organization> & { id: string; name: string; slug: string },
+): Promise<Organization> {
+  if (isPostgresConfigured()) {
+    return pgStore.upsertOrganizationPg(org);
+  }
+  return withMemoryLock(() =>
+    runMemoryTransaction((state) => {
+      const cleanId = org.id.trim();
+      const idx = state.organizations.findIndex((o) => o.id === cleanId);
+      const record: Organization = {
+        id: cleanId,
+        name: org.name.trim(),
+        slug: org.slug.trim().toLowerCase(),
+        gstin: org.gstin,
+        fssaiLicense: org.fssaiLicense,
+        active: typeof org.active === "boolean" ? org.active : true,
+        createdAt: org.createdAt ?? new Date().toISOString(),
+      };
+      if (idx !== -1) {
+        state.organizations[idx] = { ...state.organizations[idx], ...record };
+      } else {
+        state.organizations.push(record);
+      }
+      return { ...record };
+    }),
+  );
+}
+
+export async function upsertKitchen(
+  kitchen: KitchenConfig,
+): Promise<KitchenConfig> {
+  if (isPostgresConfigured()) {
+    return pgStore.upsertKitchenPg(kitchen);
+  }
+  return withMemoryLock(() =>
+    runMemoryTransaction((state) => {
+      const cleanId = kitchen.id.trim();
+      const orgId = kitchen.organizationId?.trim() || DEFAULT_ORGANIZATION_ID;
+      const record: KitchenConfig = {
+        ...kitchen,
+        id: cleanId,
+        organizationId: orgId,
+      };
+      const idx = state.kitchens.findIndex((k) => k.id === cleanId);
+      if (idx !== -1) {
+        state.kitchens[idx] = record;
+      } else {
+        state.kitchens.push(record);
+      }
+      for (const ing of INVENTORY_DB) {
+        const exists = state.inventory.some(
+          (row) => row.kitchenId === cleanId && row.id === ing.id,
+        );
+        if (!exists) {
+          state.inventory.push({
+            ...ing,
+            id: ing.id,
+            ingredientId: ing.id,
+            kitchenId: cleanId,
+          });
+        }
+      }
+      return { ...record };
+    }),
+  );
+}
+
+export async function findOrLinkEmployeeByAuthIdentity(identity: {
+  authUserId?: string | null;
+  email?: string | null;
+  phone?: string | null;
+}): Promise<Employee | null> {
+  if (isPostgresConfigured()) {
+    return pgStore.findOrLinkEmployeeByAuthIdentityPg(identity);
+  }
+  return withMemoryLock(() => {
+    const state = getGlobalState();
+    const cleanAuthId = identity.authUserId?.trim() || null;
+    const cleanEmail = identity.email?.trim().toLowerCase() || null;
+    const cleanPhone = identity.phone?.replace(/[\s-]/g, "").trim() || null;
+
+    const match =
+      (cleanAuthId
+        ? state.employees.find((e) => e.authUserId === cleanAuthId)
+        : undefined) ??
+      (cleanEmail
+        ? state.employees.find(
+            (e) => e.email?.trim().toLowerCase() === cleanEmail,
+          )
+        : undefined) ??
+      (cleanPhone
+        ? state.employees.find(
+            (e) => e.phone?.replace(/[\s-]/g, "").trim() === cleanPhone,
+          )
+        : undefined);
+
+    if (!match) return null;
+
+    if (cleanAuthId && !match.authUserId) {
+      match.authUserId = cleanAuthId;
+    }
+
+    return {
+      ...match,
+      organizationId: match.organizationId ?? DEFAULT_ORGANIZATION_ID,
+    };
+  });
+}
+
 export async function upsertCanonicalEmployee(
   employee: Partial<Employee> & { employeeCode: string },
   actor: string,
@@ -1619,47 +1878,96 @@ export async function upsertCanonicalEmployee(
           e.employeeCode.toLowerCase() === cleanCode.toLowerCase(),
       );
 
+      const normalizedEmail =
+        typeof employee.email === "string"
+          ? employee.email.trim().toLowerCase() || undefined
+          : undefined;
+      const normalizedPhone =
+        typeof employee.phone === "string"
+          ? employee.phone.trim() || undefined
+          : undefined;
+      const normalizedAuthUserId =
+        typeof employee.authUserId === "string"
+          ? employee.authUserId.trim() || undefined
+          : undefined;
+
       if (idx !== -1) {
         const existing = state.employees[idx];
+        const nextRole = employee.role ?? existing.role;
+        const targetOrgId =
+          typeof employee.organizationId === "string" &&
+          employee.organizationId.trim()
+            ? employee.organizationId.trim()
+            : existing.organizationId ?? DEFAULT_ORGANIZATION_ID;
         state.employees[idx] = {
           id: existing.id,
+          organizationId: targetOrgId,
           employeeCode: cleanCode,
           name:
             typeof employee.name === "string" && employee.name.trim()
               ? employee.name.trim()
               : existing.name,
-          role: employee.role ?? existing.role,
+          role: nextRole,
           kitchenId:
-            typeof employee.kitchenId === "string" && employee.kitchenId.trim()
-              ? employee.kitchenId.trim()
-              : existing.kitchenId,
+            nextRole === "OWNER"
+              ? undefined
+              : typeof employee.kitchenId === "string" &&
+                  employee.kitchenId.trim()
+                ? employee.kitchenId.trim()
+                : existing.kitchenId,
+          email:
+            employee.email !== undefined ? normalizedEmail : existing.email,
+          phone:
+            employee.phone !== undefined ? normalizedPhone : existing.phone,
+          authUserId:
+            employee.authUserId !== undefined
+              ? normalizedAuthUserId
+              : existing.authUserId,
           active:
             typeof employee.active === "boolean"
               ? employee.active
               : existing.active,
         };
       } else {
+        const nextRole = employee.role ?? "LINE_COOK";
+        const targetOrgId =
+          typeof employee.organizationId === "string" &&
+          employee.organizationId.trim()
+            ? employee.organizationId.trim()
+            : DEFAULT_ORGANIZATION_ID;
         state.employees.push({
           id:
             typeof employee.id === "string" && employee.id.trim()
               ? employee.id.trim()
               : makeId("EMP"),
+          organizationId: targetOrgId,
           employeeCode: cleanCode,
           name:
             typeof employee.name === "string" && employee.name.trim()
               ? employee.name.trim()
               : "New Operator",
-          role: employee.role ?? "LINE_COOK",
+          role: nextRole,
           kitchenId:
-            typeof employee.kitchenId === "string" && employee.kitchenId.trim()
-              ? employee.kitchenId.trim()
-              : "K1",
+            nextRole === "OWNER"
+              ? undefined
+              : typeof employee.kitchenId === "string" &&
+                  employee.kitchenId.trim()
+                ? employee.kitchenId.trim()
+                : "K1",
+          email: normalizedEmail,
+          phone: normalizedPhone,
+          authUserId: normalizedAuthUserId,
           active:
             typeof employee.active === "boolean" ? employee.active : true,
         });
       }
 
       pushMemoryActivity(state, {
+        organizationId:
+          typeof employee.organizationId === "string" &&
+          employee.organizationId.trim()
+            ? employee.organizationId.trim()
+            : DEFAULT_ORGANIZATION_ID,
         type: "STAFF_UPDATED",
         category: "AUTH",
         title: `Staff Record Updated (${cleanCode})`,

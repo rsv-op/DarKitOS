@@ -36,31 +36,66 @@ import type {
 } from "@/lib/db";
 
 // -----------------------------------------------------------------------------
-// 1. Physical Kitchens
+// 0. Multi-Tenant Organizations
 // -----------------------------------------------------------------------------
-export const kitchens = pgTable("kitchens", {
+export const organizations = pgTable("organizations", {
   id: text("id").primaryKey(),
   name: text("name").notNull(),
-  code: text("code").notNull().unique(),
-  location: text("location").notNull(),
-  areaCode: text("area_code").notNull(),
+  slug: text("slug").notNull().unique(),
+  gstin: text("gstin"),
+  fssaiLicense: text("fssai_license"),
   active: boolean("active").notNull().default(true),
-  timezone: text("timezone").notNull().default("Asia/Kolkata"),
-  capacityPerHour: integer("capacity_per_hour").notNull().default(100),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
 });
+
+// -----------------------------------------------------------------------------
+// 1. Physical Kitchens
+// -----------------------------------------------------------------------------
+export const kitchens = pgTable(
+  "kitchens",
+  {
+    id: text("id").primaryKey(),
+    organizationId: text("organization_id")
+      .notNull()
+      .default("ORG-001")
+      .references(() => organizations.id, { onDelete: "restrict" }),
+    name: text("name").notNull(),
+    code: text("code").notNull().unique(),
+    location: text("location").notNull(),
+    areaCode: text("area_code").notNull(),
+    active: boolean("active").notNull().default(true),
+    timezone: text("timezone").notNull().default("Asia/Kolkata"),
+    capacityPerHour: integer("capacity_per_hour").notNull().default(100),
+  },
+  (table) => ({
+    orgIdx: index("kitchens_organization_idx").on(table.organizationId),
+  }),
+);
 
 // -----------------------------------------------------------------------------
 // 2. Virtual Brands (DBA)
 // -----------------------------------------------------------------------------
-export const brands = pgTable("brands", {
-  id: text("id").$type<DbaBrand>().primaryKey(),
-  name: text("name").notNull(),
-  code: text("code").notNull().unique(),
-  active: boolean("active").notNull().default(true),
-  colorTheme: text("color_theme").$type<BrandConfig["colorTheme"]>().notNull(),
-  tagline: text("tagline").notNull(),
-  cuisine: text("cuisine").notNull(),
-});
+export const brands = pgTable(
+  "brands",
+  {
+    id: text("id").$type<DbaBrand>().primaryKey(),
+    organizationId: text("organization_id")
+      .notNull()
+      .default("ORG-001")
+      .references(() => organizations.id, { onDelete: "restrict" }),
+    name: text("name").notNull(),
+    code: text("code").notNull().unique(),
+    active: boolean("active").notNull().default(true),
+    colorTheme: text("color_theme").$type<BrandConfig["colorTheme"]>().notNull(),
+    tagline: text("tagline").notNull(),
+    cuisine: text("cuisine").notNull(),
+  },
+  (table) => ({
+    orgIdx: index("brands_organization_idx").on(table.organizationId),
+  }),
+);
 
 // -----------------------------------------------------------------------------
 // 3. Brand <-> Kitchen Production Authorization Matrix
@@ -90,16 +125,24 @@ export const employees = pgTable(
   "employees",
   {
     id: text("id").primaryKey(),
+    organizationId: text("organization_id")
+      .notNull()
+      .default("ORG-001")
+      .references(() => organizations.id, { onDelete: "restrict" }),
     employeeCode: text("employee_code").notNull().unique(),
     name: text("name").notNull(),
     role: text("role").$type<EmployeeRole>().notNull(),
     kitchenId: text("kitchen_id").references(() => kitchens.id, {
       onDelete: "set null",
     }),
+    email: text("email"),
+    phone: text("phone"),
+    authUserId: text("auth_user_id").unique(),
     active: boolean("active").notNull().default(true),
   },
   (table) => ({
     kitchenIdx: index("employees_kitchen_idx").on(table.kitchenId),
+    orgIdx: index("employees_organization_idx").on(table.organizationId),
   }),
 );
 
@@ -203,6 +246,10 @@ export const orders = pgTable(
   "orders",
   {
     id: text("id").primaryKey(),
+    organizationId: text("organization_id")
+      .notNull()
+      .default("ORG-001")
+      .references(() => organizations.id, { onDelete: "restrict" }),
     externalOrderId: text("external_order_id"),
     idempotencyKey: text("idempotency_key"),
     brandId: text("brand_id")
@@ -254,6 +301,11 @@ export const orders = pgTable(
     inventoryRestored: boolean("inventory_restored").notNull().default(false),
   },
   (table) => ({
+    orgKitchenStatusIdx: index("orders_org_kitchen_status_idx").on(
+      table.organizationId,
+      table.kitchenId,
+      table.status,
+    ),
     kitchenStatusIdx: index("orders_kitchen_status_idx").on(
       table.kitchenId,
       table.status,
@@ -462,6 +514,10 @@ export const activities = pgTable(
   "activities",
   {
     id: text("id").primaryKey(),
+    organizationId: text("organization_id")
+      .notNull()
+      .default("ORG-001")
+      .references(() => organizations.id, { onDelete: "restrict" }),
     type: text("type").notNull(),
     category: text("category")
       .$type<OperationalActivity["category"]>()
@@ -537,6 +593,10 @@ export const virtualFiles = pgTable(
 // -----------------------------------------------------------------------------
 export const systemSettings = pgTable("system_settings", {
   id: text("id").primaryKey().default("default"),
+  organizationId: text("organization_id")
+    .notNull()
+    .default("ORG-001")
+    .references(() => organizations.id, { onDelete: "restrict" }),
   currency: text("currency").$type<SystemSettings["currency"]>().notNull(),
   timezone: text("timezone").notNull(),
   theme: text("theme").$type<SystemSettings["theme"]>().notNull(),
@@ -557,6 +617,7 @@ export const systemSettings = pgTable("system_settings", {
 });
 
 export const schema = {
+  organizations,
   kitchens,
   brands,
   brandKitchens,

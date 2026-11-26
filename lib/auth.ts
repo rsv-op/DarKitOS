@@ -2,6 +2,7 @@ import { jwtVerify, SignJWT } from "jose";
 import { cookies } from "next/headers";
 import type { NextRequest } from "next/server";
 import {
+  DEFAULT_ORGANIZATION_ID,
   EMPLOYEES_DB,
   type Employee,
   type EmployeeRole,
@@ -33,10 +34,13 @@ export function isDemoSandboxEnabled(): boolean {
   if (process.env.DEMO_SANDBOX_MODE === "true") {
     return true;
   }
-  // Sprint 0 demo workspaces without a production database default to sandbox mode
+  return process.env.NODE_ENV !== "production";
+}
+
+export function isStrictProductionMode(): boolean {
   return (
-    process.env.NODE_ENV !== "production" ||
-    !process.env.DATABASE_URL
+    process.env.NODE_ENV === "production" &&
+    process.env.DEMO_SANDBOX_MODE !== "true"
   );
 }
 
@@ -49,15 +53,25 @@ export type AuthRole =
   | "dispatch"
   | "developer";
 
-export type PublicEmployee = Omit<Employee, "pin">;
+export type AuthProvider = "supabase" | "demo_jwt";
+
+export interface PublicEmployee extends Omit<Employee, "pin"> {
+  organizationId: string;
+  employeeId: string;
+  authProvider?: AuthProvider;
+}
+
+export type AuthenticatedEmployee = PublicEmployee;
 
 export interface SessionPayload {
   userId: string;
+  organizationId?: string;
   employeeCode?: string;
   name?: string;
   role: Role;
   authRole?: AuthRole;
   kitchenId?: string;
+  authProvider?: AuthProvider;
   developer?: boolean;
   iat?: number;
   exp?: number;
@@ -80,14 +94,21 @@ const DEVELOPER_CODES = new Set([
 
 export function sanitizeEmployee(
   employee: Employee,
+  authProvider?: AuthProvider,
 ): PublicEmployee {
   return {
     id: employee.id,
+    employeeId: employee.id,
+    organizationId: employee.organizationId ?? DEFAULT_ORGANIZATION_ID,
     employeeCode: employee.employeeCode,
     name: employee.name,
     role: employee.role,
     kitchenId: employee.kitchenId,
+    email: employee.email,
+    phone: employee.phone,
+    authUserId: employee.authUserId,
     active: employee.active,
+    ...(authProvider ? { authProvider } : {}),
   };
 }
 
@@ -123,6 +144,7 @@ export function findEmployeeByCode(
   if (isDemoSandboxEnabled() && isDeveloperCode(mappedCode)) {
     return {
       id: "EMP-DEV-01",
+      organizationId: DEFAULT_ORGANIZATION_ID,
       employeeCode: "DEVELOPER",
       name: "DarKitOS Demo Architect",
       role: "OWNER",

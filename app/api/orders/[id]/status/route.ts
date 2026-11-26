@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import type { CancellationSource } from "@/lib/db";
-import { getAuthenticatedEmployee } from "@/lib/domain/auth-service";
+import { requireAuthenticatedEmployee } from "@/lib/domain/auth-service";
 import { executeAuthorizedOrderTransition } from "@/lib/domain/order-transitions";
 
 export async function PATCH(
@@ -8,14 +8,9 @@ export async function PATCH(
   { params }: { params: { id: string } },
 ) {
   try {
-    const employee = await getAuthenticatedEmployee(request);
-
-    if (!employee) {
-      return NextResponse.json(
-        { error: "Unauthorized" },
-        { status: 401 },
-      );
-    }
+    const auth = await requireAuthenticatedEmployee(request);
+    if (!auth.ok) return auth.response;
+    const employee = auth.employee;
 
     const body = await request.json();
     const outcome = await executeAuthorizedOrderTransition({
@@ -23,9 +18,7 @@ export async function PATCH(
       orderId: params.id,
       nextStatusRaw: String(body?.status || body?.action || ""),
       driverName:
-        typeof body?.driverName === "string"
-          ? body.driverName
-          : undefined,
+        typeof body?.driverName === "string" ? body.driverName : undefined,
       courierEtaMins:
         typeof body?.courierEtaMins === "number"
           ? body.courierEtaMins

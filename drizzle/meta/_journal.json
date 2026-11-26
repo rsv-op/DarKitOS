@@ -8,6 +8,13 @@
       "when": 1795647090908,
       "tag": "0000_slippery_the_renegades",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1795661317030,
+      "tag": "0001_living_shadowcat",
+      "breakpoints": true
     }
   ]
 }

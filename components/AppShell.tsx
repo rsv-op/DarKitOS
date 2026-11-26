@@ -514,13 +514,13 @@ export default function AppShell({
           <div className="mt-6 rounded-xl border border-slate-800 bg-slate-900/60 p-3.5">
             <p className="text-xs font-semibold text-slate-200">
               {demoSandboxEnabled
-                ? "Sprint 0 Demo Sandbox"
-                : "DarKitOS Production"}
+                ? "DarKitOS Demo Sandbox"
+                : "DarKitOS Multi-Tenant Cloud"}
             </p>
             <p className="mt-1 text-xs leading-5 text-slate-400">
               {demoSandboxEnabled
-                ? "In-memory INR sample store. PostgreSQL persistence ships in Sprint 1."
-                : "Role & kitchen access controls enforced server-side."}
+                ? "Demo role switcher enabled. Multi-tenant RBAC, PostgreSQL persistence, and Realtime KDS active."
+                : "Two-level Organization & Kitchen RBAC with instant account revocation enforced server-side."}
             </p>
           </div>
         </aside>

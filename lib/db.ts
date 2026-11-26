@@ -105,8 +105,21 @@ export type OrderEventType =
   | "LOSS_RECORDED"
   | "CLAIM_LOGGED";
 
+export const DEFAULT_ORGANIZATION_ID = "ORG-001";
+
+export interface Organization {
+  id: string;
+  name: string;
+  slug: string;
+  gstin?: string;
+  fssaiLicense?: string;
+  active: boolean;
+  createdAt: string;
+}
+
 export interface BrandConfig {
   id: DbaBrand;
+  organizationId?: string;
   name: string;
   code: string;
   active: boolean;
@@ -117,6 +130,7 @@ export interface BrandConfig {
 
 export interface KitchenConfig {
   id: string;
+  organizationId?: string;
   name: string;
   code: string;
   location?: string;
@@ -134,10 +148,14 @@ export interface BrandKitchenConfig {
 
 export interface Employee {
   id: string;
+  organizationId?: string;
   employeeCode: string;
   name: string;
   role: EmployeeRole;
   kitchenId?: string;
+  email?: string;
+  phone?: string;
+  authUserId?: string;
   active: boolean;
   pin?: string;
 }
@@ -230,6 +248,7 @@ export interface OrderEvent {
 
 export interface Order {
   id: string;
+  organizationId?: string;
   externalOrderId?: string;
   idempotencyKey?: string;
 
@@ -317,6 +336,7 @@ export interface CancellationRecord {
 
 export interface OperationalActivity {
   id: string;
+  organizationId?: string;
   type: string;
   category:
     | "ORDER"
@@ -395,6 +415,7 @@ export interface VirtualFileAsset {
 }
 
 export interface SystemSettings {
+  organizationId?: string;
   currency: "INR" | "USD" | "EUR";
   timezone: string;
   theme: "obsidian" | "midnight" | "cyber-emerald" | "titanium";
@@ -423,9 +444,22 @@ export interface OrderDepletionResult {
   insufficientStockItems: string[];
 }
 
+export const ORGANIZATIONS_DB: Organization[] = [
+  {
+    id: DEFAULT_ORGANIZATION_ID,
+    name: "DarKit Hospitality Pvt. Ltd.",
+    slug: "darkit-hospitality",
+    gstin: "06AABCD4921E1Z5",
+    fssaiLicense: "10824005001942",
+    active: true,
+    createdAt: "2026-01-01T00:00:00.000Z",
+  },
+];
+
 export const BRANDS_DB: BrandConfig[] = [
   {
     id: "BurgerForge",
+    organizationId: DEFAULT_ORGANIZATION_ID,
     name: "BurgerForge",
     code: "BF",
     active: true,
@@ -435,6 +469,7 @@ export const BRANDS_DB: BrandConfig[] = [
   },
   {
     id: "TacoMatrix",
+    organizationId: DEFAULT_ORGANIZATION_ID,
     name: "TacoMatrix",
     code: "TM",
     active: true,
@@ -444,6 +479,7 @@ export const BRANDS_DB: BrandConfig[] = [
   },
   {
     id: "WingProtocol",
+    organizationId: DEFAULT_ORGANIZATION_ID,
     name: "WingProtocol",
     code: "WP",
     active: true,
@@ -453,6 +489,7 @@ export const BRANDS_DB: BrandConfig[] = [
   },
   {
     id: "GreenBowl",
+    organizationId: DEFAULT_ORGANIZATION_ID,
     name: "GreenBowl",
     code: "GB",
     active: true,
@@ -465,6 +502,7 @@ export const BRANDS_DB: BrandConfig[] = [
 export const KITCHENS_DB: KitchenConfig[] = [
   {
     id: "K1",
+    organizationId: DEFAULT_ORGANIZATION_ID,
     name: "Gurugram Central Hub",
     code: "GGN-01",
     location: "Sector 29, Gurugram",
@@ -475,6 +513,7 @@ export const KITCHENS_DB: KitchenConfig[] = [
   },
   {
     id: "K2",
+    organizationId: DEFAULT_ORGANIZATION_ID,
     name: "Noida Sector 62 Cloud Unit B",
     code: "NDA-02",
     location: "Sector 62, Noida",
@@ -485,6 +524,7 @@ export const KITCHENS_DB: KitchenConfig[] = [
   },
   {
     id: "K3",
+    organizationId: DEFAULT_ORGANIZATION_ID,
     name: "South Delhi Dark Kitchen",
     code: "DEL-03",
     location: "Greater Kailash, New Delhi",
@@ -495,6 +535,7 @@ export const KITCHENS_DB: KitchenConfig[] = [
   },
   {
     id: "K4",
+    organizationId: DEFAULT_ORGANIZATION_ID,
     name: "Cyber City Express Hatch",
     code: "CYB-04",
     location: "DLF Phase 3, Gurugram",
@@ -531,105 +572,135 @@ export const BRAND_KITCHENS_DB: BrandKitchenConfig[] = [
 export const EMPLOYEES_DB: Employee[] = [
   {
     id: "EMP-OWNER-01",
+    organizationId: DEFAULT_ORGANIZATION_ID,
     employeeCode: "OWNER-01",
     name: "Patric Revuelto",
     role: "OWNER",
+    email: "owner@darkit.in",
+    phone: "+919810000001",
     active: true,
   },
   {
     id: "EMP-K1-MGR-01",
+    organizationId: DEFAULT_ORGANIZATION_ID,
     employeeCode: "0001",
     name: "Priya Sharma",
     role: "MANAGER",
     kitchenId: "K1",
+    email: "priya.k1@darkit.in",
+    phone: "+919810000011",
     active: true,
   },
   {
     id: "EMP-K1-COOK-01",
+    organizationId: DEFAULT_ORGANIZATION_ID,
     employeeCode: "2001",
     name: "Rajesh Kumar",
     role: "LINE_COOK",
     kitchenId: "K1",
+    email: "rajesh.k1@darkit.in",
+    phone: "+919810000012",
     active: true,
   },
   {
     id: "EMP-K1-DISP-01",
+    organizationId: DEFAULT_ORGANIZATION_ID,
     employeeCode: "3001",
     name: "Arjun Mehta",
     role: "DISPATCH",
     kitchenId: "K1",
+    email: "arjun.k1@darkit.in",
+    phone: "+919810000013",
     active: true,
   },
   {
     id: "EMP-K2-MGR-01",
+    organizationId: DEFAULT_ORGANIZATION_ID,
     employeeCode: "0002",
     name: "Amit Verma",
     role: "MANAGER",
     kitchenId: "K2",
+    email: "amit.k2@darkit.in",
     active: true,
   },
   {
     id: "EMP-K2-COOK-01",
+    organizationId: DEFAULT_ORGANIZATION_ID,
     employeeCode: "2002",
     name: "Sunita Rao",
     role: "LINE_COOK",
     kitchenId: "K2",
+    email: "sunita.k2@darkit.in",
     active: true,
   },
   {
     id: "EMP-K2-DISP-01",
+    organizationId: DEFAULT_ORGANIZATION_ID,
     employeeCode: "3002",
     name: "Karan Saxena",
     role: "DISPATCH",
     kitchenId: "K2",
+    email: "karan.k2@darkit.in",
     active: true,
   },
   {
     id: "EMP-K3-MGR-01",
+    organizationId: DEFAULT_ORGANIZATION_ID,
     employeeCode: "0003",
     name: "Vikram Malhotra",
     role: "MANAGER",
     kitchenId: "K3",
+    email: "vikram.k3@darkit.in",
     active: true,
   },
   {
     id: "EMP-K3-COOK-01",
+    organizationId: DEFAULT_ORGANIZATION_ID,
     employeeCode: "2003",
     name: "Pooja Iyer",
     role: "LINE_COOK",
     kitchenId: "K3",
+    email: "pooja.k3@darkit.in",
     active: true,
   },
   {
     id: "EMP-K3-DISP-01",
+    organizationId: DEFAULT_ORGANIZATION_ID,
     employeeCode: "3003",
     name: "Neha Gupta",
     role: "DISPATCH",
     kitchenId: "K3",
+    email: "neha.k3@darkit.in",
     active: true,
   },
   {
     id: "EMP-K4-MGR-01",
+    organizationId: DEFAULT_ORGANIZATION_ID,
     employeeCode: "0004",
     name: "Deepesh Nair",
     role: "MANAGER",
     kitchenId: "K4",
+    email: "deepesh.k4@darkit.in",
     active: true,
   },
   {
     id: "EMP-K4-COOK-01",
+    organizationId: DEFAULT_ORGANIZATION_ID,
     employeeCode: "2004",
     name: "Anjali Das",
     role: "LINE_COOK",
     kitchenId: "K4",
+    email: "anjali.k4@darkit.in",
     active: true,
   },
   {
     id: "EMP-K4-DISP-01",
+    organizationId: DEFAULT_ORGANIZATION_ID,
     employeeCode: "3004",
     name: "Rohan Joshi",
     role: "DISPATCH",
     kitchenId: "K4",
+    email: "rohan.k4@darkit.in",
     active: true,
   },
 ];

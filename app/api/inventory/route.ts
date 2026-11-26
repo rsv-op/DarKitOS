@@ -1,24 +1,24 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getAuthenticatedEmployee } from "@/lib/domain/auth-service";
+import { requireAuthenticatedEmployee } from "@/lib/domain/auth-service";
 import {
   canAccessKitchen,
+  getAccessibleKitchenIds,
   hasGlobalScope,
   hasPermission,
 } from "@/lib/domain/permission-service";
 import {
   getInventory,
   getInventoryMovements,
+  getKitchens,
   mutateCanonicalInventory,
   transferKitchenInventory,
 } from "@/lib/store";
 
 export async function GET(request: NextRequest) {
   try {
-    const employee = await getAuthenticatedEmployee(request);
-
-    if (!employee) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+    const auth = await requireAuthenticatedEmployee(request);
+    if (!auth.ok) return auth.response;
+    const employee = auth.employee;
 
     if (
       !hasPermission(employee, "INVENTORY_VIEW") &&
@@ -31,14 +31,13 @@ export async function GET(request: NextRequest) {
       request.nextUrl.searchParams.get("kitchenId") || ""
     ).trim();
 
+    const kitchens = await getKitchens();
+    const accessibleKitchens = getAccessibleKitchenIds(employee, kitchens);
+
     let effectiveKitchenFilter: string | undefined;
 
-    if (!hasGlobalScope(employee)) {
-      if (
-        requestedKitchenId &&
-        requestedKitchenId !== "ALL" &&
-        !canAccessKitchen(employee, requestedKitchenId)
-      ) {
+    if (requestedKitchenId && requestedKitchenId !== "ALL") {
+      if (!canAccessKitchen(employee, requestedKitchenId, kitchens)) {
         return NextResponse.json(
           {
             error: `Forbidden: Employee ${employee.employeeCode} cannot view inventory for kitchen ${requestedKitchenId}`,
@@ -46,15 +45,22 @@ export async function GET(request: NextRequest) {
           { status: 403 },
         );
       }
-      effectiveKitchenFilter = employee.kitchenId || "K1";
-    } else if (requestedKitchenId && requestedKitchenId !== "ALL") {
       effectiveKitchenFilter = requestedKitchenId;
+    } else if (!hasGlobalScope(employee)) {
+      effectiveKitchenFilter = employee.kitchenId || "K1";
     }
 
-    const [inventory, movements] = await Promise.all([
+    const [allInventory, allMovements] = await Promise.all([
       getInventory(effectiveKitchenFilter),
       getInventoryMovements(effectiveKitchenFilter),
     ]);
+
+    const inventory = allInventory.filter(
+      (i) => i.kitchenId && accessibleKitchens.has(i.kitchenId),
+    );
+    const movements = allMovements.filter((m) =>
+      accessibleKitchens.has(m.kitchenId),
+    );
 
     return NextResponse.json({
       inventory,
@@ -73,11 +79,9 @@ export async function GET(request: NextRequest) {
 
 export async function PATCH(request: NextRequest) {
   try {
-    const employee = await getAuthenticatedEmployee(request);
-
-    if (!employee) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+    const auth = await requireAuthenticatedEmployee(request);
+    if (!auth.ok) return auth.response;
+    const employee = auth.employee;
 
     if (
       !hasPermission(employee, "INVENTORY_MANAGE") &&
@@ -114,12 +118,14 @@ export async function PATCH(request: NextRequest) {
       );
     }
 
+    const kitchens = await getKitchens();
+    const accessibleKitchens = getAccessibleKitchenIds(employee, kitchens);
     const actorLabel = `${employee.employeeCode} (${employee.name})`;
     const scopedFilter = hasGlobalScope(employee)
       ? undefined
       : employee.kitchenId || "K1";
 
-    // Atomic Inter-Kitchen Stock Transfer
+    // Atomic Inter-Kitchen Stock Transfer (must stay inside actor's organization + accessible kitchens)
     if (body.action === "TRANSFER") {
       const fromKitchenId = String(body.fromKitchenId || "").trim();
       const toKitchenId = String(body.toKitchenId || "").trim();
@@ -133,8 +139,8 @@ export async function PATCH(request: NextRequest) {
       }
 
       if (
-        !canAccessKitchen(employee, fromKitchenId) ||
-        !canAccessKitchen(employee, toKitchenId)
+        !canAccessKitchen(employee, fromKitchenId, kitchens) ||
+        !canAccessKitchen(employee, toKitchenId, kitchens)
       ) {
         return NextResponse.json(
           {
@@ -153,10 +159,12 @@ export async function PATCH(request: NextRequest) {
         actor: actorLabel,
       });
 
-      const movements = await getInventoryMovements(scopedFilter);
-      const visibleInventory = scopedFilter
-        ? transferResult.inventory.filter((i) => i.kitchenId === scopedFilter)
-        : transferResult.inventory;
+      const movements = (await getInventoryMovements(scopedFilter)).filter(
+        (m) => accessibleKitchens.has(m.kitchenId),
+      );
+      const visibleInventory = transferResult.inventory.filter(
+        (i) => i.kitchenId && accessibleKitchens.has(i.kitchenId),
+      );
 
       return NextResponse.json({
         success: true,
@@ -175,7 +183,7 @@ export async function PATCH(request: NextRequest) {
         ? body.kitchenId.trim()
         : employee.kitchenId || "K1";
 
-    if (!canAccessKitchen(employee, targetKitchenId)) {
+    if (!canAccessKitchen(employee, targetKitchenId, kitchens)) {
       return NextResponse.json(
         {
           error: `Forbidden: Employee ${employee.employeeCode} cannot adjust inventory for kitchen ${targetKitchenId}`,
@@ -197,10 +205,12 @@ export async function PATCH(request: NextRequest) {
       actor: actorLabel,
     });
 
-    const movements = await getInventoryMovements(scopedFilter);
-    const visibleInventory = scopedFilter
-      ? result.inventory.filter((i) => i.kitchenId === scopedFilter)
-      : result.inventory;
+    const movements = (await getInventoryMovements(scopedFilter)).filter((m) =>
+      accessibleKitchens.has(m.kitchenId),
+    );
+    const visibleInventory = result.inventory.filter(
+      (i) => i.kitchenId && accessibleKitchens.has(i.kitchenId),
+    );
 
     return NextResponse.json({
       inventory: visibleInventory,

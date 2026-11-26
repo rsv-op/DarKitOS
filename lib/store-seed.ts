@@ -2,10 +2,12 @@ import { formatCurrency } from "@/lib/currency";
 import {
   BRANDS_DB,
   BRAND_KITCHENS_DB,
+  DEFAULT_ORGANIZATION_ID,
   EMPLOYEES_DB,
   INVENTORY_DB,
   KITCHENS_DB,
   MENU_CATALOG,
+  ORGANIZATIONS_DB,
   type BrandConfig,
   type BrandKitchenConfig,
   type CancellationRecord,
@@ -16,6 +18,7 @@ import {
   type MenuItem,
   type OperationalActivity,
   type Order,
+  type Organization,
   type OutboxEvent,
   type RevenueLeakageVector,
   type SystemSettings,
@@ -24,6 +27,7 @@ import {
 } from "@/lib/db";
 
 export interface SeedDataset {
+  organizations: Organization[];
   orders: Order[];
   inventory: InventoryItem[];
   inventoryMovements: InventoryMovement[];
@@ -42,6 +46,7 @@ export interface SeedDataset {
 }
 
 export const DEFAULT_SETTINGS: SystemSettings = {
+  organizationId: DEFAULT_ORGANIZATION_ID,
   currency: "INR",
   timezone: "Asia/Kolkata",
   theme: "obsidian",
@@ -1048,19 +1053,35 @@ export function buildInitialSeedState(baseNowMs = Date.now()): SeedDataset {
   ];
 
   return {
-    orders: seedOrders,
+    organizations: ORGANIZATIONS_DB.map((o) => ({ ...o })),
+    orders: seedOrders.map((o) => ({
+      ...o,
+      organizationId: o.organizationId ?? DEFAULT_ORGANIZATION_ID,
+    })),
     inventory: buildPerKitchenSeedInventory(),
     inventoryMovements: seedMovements,
     cancellations: seedCancellations,
-    activities: seedActivities,
-    brands: BRANDS_DB.map((b) => ({ ...b })),
-    kitchens: KITCHENS_DB.map((k) => ({ ...k })),
+    activities: seedActivities.map((a) => ({
+      ...a,
+      organizationId: a.organizationId ?? DEFAULT_ORGANIZATION_ID,
+    })),
+    brands: BRANDS_DB.map((b) => ({
+      ...b,
+      organizationId: b.organizationId ?? DEFAULT_ORGANIZATION_ID,
+    })),
+    kitchens: KITCHENS_DB.map((k) => ({
+      ...k,
+      organizationId: k.organizationId ?? DEFAULT_ORGANIZATION_ID,
+    })),
     brandKitchens: BRAND_KITCHENS_DB.map((bk) => ({ ...bk })),
     menuCatalog: MENU_CATALOG.map((m) => ({
       ...m,
       recipe: m.recipe.map((r) => ({ ...r })),
     })),
-    employees: EMPLOYEES_DB.map((e) => ({ ...e })),
+    employees: EMPLOYEES_DB.map((e) => ({
+      ...e,
+      organizationId: e.organizationId ?? DEFAULT_ORGANIZATION_ID,
+    })),
     webhookEvents: seedWebhooks,
     outboxEvents: seedOutbox,
     leakageVectors: INITIAL_LEAKAGE_VECTORS.map((l) => ({ ...l })),

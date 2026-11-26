@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import AppShell from "@/components/AppShell";
+import RealtimeSyncBadge from "@/components/RealtimeSyncBadge";
+import { useRealtimeKitchenSync } from "@/hooks/useRealtimeKitchenSync";
 import { formatCurrency, type SupportedCurrency } from "@/lib/currency";
 import {
   KITCHENS_DB,
@@ -204,6 +206,17 @@ export default function InventoryPage() {
     void loadInventory();
   }, [loadInventory]);
 
+  const realtimeSync = useRealtimeKitchenSync({
+    organizationId: currentEmployee?.organizationId,
+    kitchenId:
+      currentEmployee?.role !== "OWNER" && currentEmployee?.kitchenId
+        ? currentEmployee.kitchenId
+        : selectedKitchenId !== "ALL"
+          ? selectedKitchenId
+          : null,
+    onSync: loadInventory,
+  });
+
   const uniqueIngredientCatalog = useMemo(() => {
     const map = new Map<string, InventoryItem>();
     for (const item of inventory) {
@@ -359,13 +372,20 @@ export default function InventoryPage() {
       title="Inventory"
       subtitle="Per-kitchen isolated stock ledgers (K1–K4), atomic recipe depletion, and hub-to-hub stock transfers."
       actions={
-        <button
-          type="button"
-          onClick={() => void loadInventory()}
-          className="rounded-xl border border-slate-700 bg-slate-800 px-3.5 py-2 font-mono text-xs font-bold text-white hover:bg-slate-700"
-        >
-          ↻ Refresh Ledger
-        </button>
+        <>
+          <RealtimeSyncBadge
+            connectionMode={realtimeSync.connectionMode}
+            lastEventAt={realtimeSync.lastEventAt}
+            topic={realtimeSync.topic}
+          />
+          <button
+            type="button"
+            onClick={() => void loadInventory()}
+            className="rounded-xl border border-slate-700 bg-slate-800 px-3.5 py-2 font-mono text-xs font-bold text-white hover:bg-slate-700"
+          >
+            ↻ Refresh Ledger
+          </button>
+        </>
       }
     >
       <div className="space-y-6">

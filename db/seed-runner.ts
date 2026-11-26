@@ -1,7 +1,7 @@
 import { sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import * as schema from "@/db/schema";
-import { INVENTORY_DB } from "@/lib/db";
+import { DEFAULT_ORGANIZATION_ID, INVENTORY_DB } from "@/lib/db";
 import { buildInitialSeedState } from "@/lib/store-seed";
 
 export type SeedableDb = PostgresJsDatabase<typeof schema>;
@@ -27,12 +27,29 @@ export async function seedDatabaseIdempotent(db: SeedableDb): Promise<void> {
   const dataset = buildInitialSeedState();
 
   await db.transaction(async (tx) => {
+    // 0. Organizations
+    await tx
+      .insert(schema.organizations)
+      .values(
+        dataset.organizations.map((o) => ({
+          id: o.id,
+          name: o.name,
+          slug: o.slug,
+          gstin: o.gstin ?? null,
+          fssaiLicense: o.fssaiLicense ?? null,
+          active: o.active,
+          createdAt: new Date(o.createdAt),
+        })),
+      )
+      .onConflictDoNothing();
+
     // 1. Kitchens
     await tx
       .insert(schema.kitchens)
       .values(
         dataset.kitchens.map((k) => ({
           id: k.id,
+          organizationId: k.organizationId ?? DEFAULT_ORGANIZATION_ID,
           name: k.name,
           code: k.code,
           location: k.location ?? "",
@@ -50,6 +67,7 @@ export async function seedDatabaseIdempotent(db: SeedableDb): Promise<void> {
       .values(
         dataset.brands.map((b) => ({
           id: b.id,
+          organizationId: b.organizationId ?? DEFAULT_ORGANIZATION_ID,
           name: b.name,
           code: b.code,
           active: b.active,
@@ -78,10 +96,14 @@ export async function seedDatabaseIdempotent(db: SeedableDb): Promise<void> {
       .values(
         dataset.employees.map((e) => ({
           id: e.id,
+          organizationId: e.organizationId ?? DEFAULT_ORGANIZATION_ID,
           employeeCode: e.employeeCode,
           name: e.name,
           role: e.role,
           kitchenId: e.kitchenId ?? null,
+          email: e.email ?? null,
+          phone: e.phone ?? null,
+          authUserId: e.authUserId ?? null,
           active: e.active,
         })),
       )
@@ -156,6 +178,7 @@ export async function seedDatabaseIdempotent(db: SeedableDb): Promise<void> {
         .values(
           dataset.orders.map((o) => ({
             id: o.id,
+            organizationId: o.organizationId ?? DEFAULT_ORGANIZATION_ID,
             externalOrderId: o.externalOrderId ?? null,
             idempotencyKey: o.idempotencyKey ?? null,
             brandId: o.brandId,
@@ -340,6 +363,7 @@ export async function seedDatabaseIdempotent(db: SeedableDb): Promise<void> {
         .values(
           dataset.activities.map((a) => ({
             id: a.id,
+            organizationId: a.organizationId ?? DEFAULT_ORGANIZATION_ID,
             type: a.type,
             category: a.category,
             title: a.title,
@@ -403,6 +427,8 @@ export async function seedDatabaseIdempotent(db: SeedableDb): Promise<void> {
       .insert(schema.systemSettings)
       .values({
         id: "default",
+        organizationId:
+          dataset.settings.organizationId ?? DEFAULT_ORGANIZATION_ID,
         currency: dataset.settings.currency,
         timezone: dataset.settings.timezone,
         theme: dataset.settings.theme,
@@ -445,7 +471,8 @@ export async function resetDatabaseToSeed(db: SeedableDb): Promise<void> {
       brand_kitchens,
       brands,
       kitchens,
-      system_settings
+      system_settings,
+      organizations
     RESTART IDENTITY CASCADE
   `);
 

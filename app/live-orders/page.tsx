@@ -10,11 +10,14 @@ import {
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import AppShell from "@/components/AppShell";
+import RealtimeSyncBadge from "@/components/RealtimeSyncBadge";
+import { useRealtimeKitchenSync } from "@/hooks/useRealtimeKitchenSync";
 import { formatCurrency, type SupportedCurrency } from "@/lib/currency";
 import {
   BRANDS_DB,
   KITCHENS_DB,
   type CancellationSource,
+  type Employee,
   type Order,
   type OrderChannel,
   type OrderStatus,
@@ -86,6 +89,8 @@ export default function LiveOrdersPage() {
   const [feedback, setFeedback] = useState("");
   const [currency, setCurrency] =
     useState<SupportedCurrency>("INR");
+  const [currentEmployee, setCurrentEmployee] =
+    useState<Employee | null>(null);
 
   const fmt = useCallback(
     (amount: number) => formatCurrency(amount, currency),
@@ -99,6 +104,7 @@ export default function LiveOrdersPage() {
       .then((data) => {
         if (!active || !data) return;
         if (data.settings?.currency) setCurrency(data.settings.currency);
+        if (data.employee) setCurrentEmployee(data.employee as Employee);
       })
       .catch(() => {
         // ignore transient error
@@ -171,11 +177,18 @@ export default function LiveOrdersPage() {
 
   useEffect(() => {
     void loadOrders();
-    const timer = window.setInterval(() => {
-      void loadOrders();
-    }, 5000);
-    return () => window.clearInterval(timer);
   }, [loadOrders]);
+
+  const realtimeSync = useRealtimeKitchenSync({
+    organizationId: currentEmployee?.organizationId,
+    kitchenId:
+      currentEmployee?.role !== "OWNER" && currentEmployee?.kitchenId
+        ? currentEmployee.kitchenId
+        : kitchenFilter !== "ALL"
+          ? kitchenFilter
+          : null,
+    onSync: loadOrders,
+  });
 
   const filteredOrders = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -293,6 +306,11 @@ export default function LiveOrdersPage() {
       subtitle="Find orders by number, see where each one is in the kitchen, and review changes or cancellations."
       actions={
         <>
+          <RealtimeSyncBadge
+            connectionMode={realtimeSync.connectionMode}
+            lastEventAt={realtimeSync.lastEventAt}
+            topic={realtimeSync.topic}
+          />
           <Link
             href="/order-injection"
             className="rounded-xl bg-sky-500 px-3.5 py-2 font-mono text-xs font-bold text-slate-950 hover:bg-sky-400"

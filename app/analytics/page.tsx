@@ -25,11 +25,11 @@ const PERFORMANCE_HOTSPOTS = [
     fix: "Set DATABASE_URL (Supavisor port 6543) & DIRECT_URL (port 5432) in Vercel/Supabase and run npm run db:migrate && npm run db:seed.",
   },
   {
-    title: "HTTP polling vs. sub-second KDS push",
-    severity: "High · Sprint 2",
+    title: "Sub-second KDS & ops Realtime push with polling fallback",
+    severity: "Implemented · Sprint 2",
     detail:
-      "Cook KDS and Dispatch currently poll /api/orders every 5–6 seconds.",
-    fix: "Enable Supabase Realtime channels (<500ms order propagation) with automatic HTTP polling fallback when Wi-Fi drops.",
+      "Kitchen Board (/kds), Dispatch, Live Orders, Inventory, and Owner views subscribe to org:${orgId}:kitchen:${kitchenId} / org:${orgId}:all Supabase Realtime Broadcast channels.",
+    fix: "Automatically switches to 30s heartbeats when REALTIME_LIVE and degrades seamlessly to 3.5s HTTP polling when offline.",
   },
   {
     title: "Cursor pagination for high-volume historical archives",
@@ -52,8 +52,8 @@ const PRODUCTION_MILESTONES = [
     id: "SPRINT-2",
     name: "Sprint 2 · Auth, RBAC & Realtime",
     domain: "Supabase Auth + RLS + Realtime",
-    status: "PLANNED",
-    task: "Email/OTP staff authentication, PostgreSQL Row-Level Security per tenant/kitchen, and <500ms KDS/Dispatch Realtime updates.",
+    status: "COMPLETE",
+    task: "Multi-tenant organizations + PostgreSQL RLS, Email/Password & OTP auth, two-level org+kitchen RBAC with instant revocation, and sub-second Realtime KDS sync.",
   },
   {
     id: "SPRINT-3A",

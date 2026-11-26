@@ -1,9 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { isDemoSandboxEnabled, sanitizeEmployee } from "@/lib/auth";
 import { PERMISSIONS_DB, ROLE_PERMISSIONS_DB, type DbaBrand } from "@/lib/db";
-import { getAuthenticatedEmployee } from "@/lib/domain/auth-service";
+import { requireAuthenticatedEmployee } from "@/lib/domain/auth-service";
 import {
   canAccessKitchen,
+  canAccessOrganization,
+  getAccessibleKitchenIds,
   getRolePermissions,
   hasGlobalScope,
   hasPermission,
@@ -11,6 +13,7 @@ import {
 import {
   clearOrdersStore,
   deleteVirtualFile,
+  getKitchens,
   getStorageMode,
   getStoreSnapshot,
   resetStore,
@@ -25,70 +28,98 @@ import {
 
 export async function GET(request: NextRequest) {
   try {
-    const employee = await getAuthenticatedEmployee(request);
-
-    if (!employee) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+    const auth = await requireAuthenticatedEmployee(request);
+    if (!auth.ok) return auth.response;
+    const employee = auth.employee;
 
     const snapshot = await getStoreSnapshot();
     const isGlobal = hasGlobalScope(employee);
     const isOwnerView = hasPermission(employee, "OWNER_VIEW");
-    const safeSelf = sanitizeEmployee(employee);
+    const safeSelf = sanitizeEmployee(employee, employee.authProvider);
 
-    const scopedOrders = isGlobal
-      ? snapshot.orders
-      : snapshot.orders.filter((o) => o.kitchenId === employee.kitchenId);
+    const accessibleKitchens = getAccessibleKitchenIds(
+      employee,
+      snapshot.kitchens,
+    );
 
-    const scopedInventory = isGlobal
-      ? snapshot.inventory
-      : snapshot.inventory.filter((i) => i.kitchenId === employee.kitchenId);
+    const scopedOrganizations = snapshot.organizations.filter((o) =>
+      canAccessOrganization(employee, o.id),
+    );
 
-    const scopedCancellations = isGlobal
-      ? snapshot.cancellations
-      : snapshot.cancellations.filter(
-          (c) => c.kitchenId === employee.kitchenId,
-        );
+    const scopedKitchens = snapshot.kitchens.filter((k) =>
+      canAccessOrganization(employee, k.organizationId),
+    );
 
-    const scopedMovements = isGlobal
-      ? snapshot.inventoryMovements
-      : snapshot.inventoryMovements.filter(
-          (m) => m.kitchenId === employee.kitchenId,
-        );
+    const scopedBrands = snapshot.brands.filter((b) =>
+      canAccessOrganization(employee, b.organizationId),
+    );
 
-    const scopedActivities = isGlobal
-      ? snapshot.activities
-      : snapshot.activities.filter(
-          (a) => !a.kitchenId || a.kitchenId === employee.kitchenId,
-        );
+    const orgKitchenIds = new Set(scopedKitchens.map((k) => k.id));
+    const scopedBrandKitchens = snapshot.brandKitchens.filter((bk) =>
+      orgKitchenIds.has(bk.kitchenId),
+    );
 
-    const scopedFiles = isGlobal
-      ? snapshot.files
-      : snapshot.files.filter(
-          (f) =>
-            !f.kitchenId ||
+    const scopedOrders = snapshot.orders.filter(
+      (o) =>
+        canAccessOrganization(employee, o.organizationId) &&
+        accessibleKitchens.has(o.kitchenId),
+    );
+
+    const scopedInventory = snapshot.inventory.filter(
+      (i) => i.kitchenId && accessibleKitchens.has(i.kitchenId),
+    );
+
+    const scopedCancellations = snapshot.cancellations.filter((c) =>
+      accessibleKitchens.has(c.kitchenId),
+    );
+
+    const scopedMovements = snapshot.inventoryMovements.filter((m) =>
+      accessibleKitchens.has(m.kitchenId),
+    );
+
+    const scopedActivities = snapshot.activities.filter(
+      (a) =>
+        canAccessOrganization(employee, a.organizationId) &&
+        (isGlobal || !a.kitchenId || accessibleKitchens.has(a.kitchenId)),
+    );
+
+    const scopedFiles = snapshot.files.filter(
+      (f) =>
+        isGlobal
+          ? !f.kitchenId ||
             f.kitchenId === "GLOBAL" ||
-            f.kitchenId === employee.kitchenId,
-        );
+            orgKitchenIds.has(f.kitchenId)
+          : !f.kitchenId ||
+            f.kitchenId === "GLOBAL" ||
+            accessibleKitchens.has(f.kitchenId),
+    );
 
     const scopedEmployees = !isOwnerView
       ? [safeSelf]
       : isGlobal
-        ? snapshot.employees.map(sanitizeEmployee)
+        ? snapshot.employees
+            .filter((e) => canAccessOrganization(employee, e.organizationId))
+            .map((e) => sanitizeEmployee(e))
         : snapshot.employees
-            .filter((e) => e.kitchenId === employee.kitchenId)
-            .map(sanitizeEmployee);
+            .filter(
+              (e) =>
+                canAccessOrganization(employee, e.organizationId) &&
+                e.kitchenId === employee.kitchenId,
+            )
+            .map((e) => sanitizeEmployee(e));
 
     const scopedWebhooks = !isOwnerView
       ? []
-      : isGlobal
-        ? snapshot.webhookEvents
-        : snapshot.webhookEvents.filter(
-            (w) => w.kitchenId === employee.kitchenId,
-          );
+      : snapshot.webhookEvents.filter((w) =>
+          accessibleKitchens.has(w.kitchenId),
+        );
 
     return NextResponse.json({
       ...snapshot,
+      organizations: scopedOrganizations,
+      kitchens: scopedKitchens,
+      brands: scopedBrands,
+      brandKitchens: scopedBrandKitchens,
       orders: scopedOrders,
       inventory: scopedInventory,
       cancellations: scopedCancellations,
@@ -117,11 +148,9 @@ export async function GET(request: NextRequest) {
 
 export async function PATCH(request: NextRequest) {
   try {
-    const employee = await getAuthenticatedEmployee(request);
-
-    if (!employee) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+    const auth = await requireAuthenticatedEmployee(request);
+    if (!auth.ok) return auth.response;
+    const employee = auth.employee;
 
     const body = await request.json();
     if (!body || typeof body !== "object") {
@@ -133,6 +162,7 @@ export async function PATCH(request: NextRequest) {
 
     const action = String(body?.action || "").trim();
     const actor = `${employee.employeeCode} (${employee.name})`;
+    const allKitchens = await getKitchens();
 
     switch (action) {
       case "TOGGLE_BRAND_KITCHEN": {
@@ -149,7 +179,7 @@ export async function PATCH(request: NextRequest) {
             { status: 400 },
           );
         }
-        if (!canAccessKitchen(employee, kitchenId)) {
+        if (!canAccessKitchen(employee, kitchenId, allKitchens)) {
           return NextResponse.json(
             {
               error: `Forbidden: Cannot alter BrandKitchen matrix for kitchen ${kitchenId}`,
@@ -202,7 +232,7 @@ export async function PATCH(request: NextRequest) {
             { status: 400 },
           );
         }
-        if (!canAccessKitchen(employee, kitchenId)) {
+        if (!canAccessKitchen(employee, kitchenId, allKitchens)) {
           return NextResponse.json(
             {
               error: `Forbidden: Cannot toggle kitchen ${kitchenId}`,
@@ -210,7 +240,9 @@ export async function PATCH(request: NextRequest) {
             { status: 403 },
           );
         }
-        const kitchens = await toggleKitchenActive(kitchenId, actor);
+        const kitchens = (await toggleKitchenActive(kitchenId, actor)).filter(
+          (k) => canAccessOrganization(employee, k.organizationId),
+        );
         return NextResponse.json({
           success: true,
           kitchens,
@@ -230,6 +262,17 @@ export async function PATCH(request: NextRequest) {
             { status: 400 },
           );
         }
+        if (
+          body.employee.organizationId &&
+          !canAccessOrganization(employee, body.employee.organizationId)
+        ) {
+          return NextResponse.json(
+            {
+              error: `Forbidden: Cannot manage staff in organization ${body.employee.organizationId}`,
+            },
+            { status: 403 },
+          );
+        }
         if (!hasGlobalScope(employee)) {
           if (body.employee.role === "OWNER") {
             return NextResponse.json(
@@ -241,7 +284,7 @@ export async function PATCH(request: NextRequest) {
             );
           }
           const targetKitchen = body.employee.kitchenId || employee.kitchenId;
-          if (!canAccessKitchen(employee, targetKitchen)) {
+          if (!canAccessKitchen(employee, targetKitchen, allKitchens)) {
             return NextResponse.json(
               {
                 error: `Forbidden: Cannot manage staff outside kitchen ${employee.kitchenId}`,
@@ -249,10 +292,29 @@ export async function PATCH(request: NextRequest) {
               { status: 403 },
             );
           }
+        } else if (
+          body.employee.kitchenId &&
+          body.employee.role !== "OWNER" &&
+          !canAccessKitchen(employee, body.employee.kitchenId, allKitchens)
+        ) {
+          return NextResponse.json(
+            {
+              error: `Forbidden: Kitchen ${body.employee.kitchenId} is outside your organization`,
+            },
+            { status: 403 },
+          );
         }
         const employees = (
-          await upsertCanonicalEmployee(body.employee, actor)
-        ).map(sanitizeEmployee);
+          await upsertCanonicalEmployee(
+            {
+              ...body.employee,
+              organizationId: employee.organizationId,
+            },
+            actor,
+          )
+        )
+          .filter((e) => canAccessOrganization(employee, e.organizationId))
+          .map((e) => sanitizeEmployee(e));
         return NextResponse.json({
           success: true,
           employees,
@@ -359,7 +421,7 @@ export async function PATCH(request: NextRequest) {
           success: true,
           snapshot: {
             ...fresh,
-            employees: fresh.employees.map(sanitizeEmployee),
+            employees: fresh.employees.map((e) => sanitizeEmployee(e)),
           },
         });
       }
@@ -384,7 +446,7 @@ export async function PATCH(request: NextRequest) {
           success: true,
           snapshot: {
             ...fresh,
-            employees: fresh.employees.map(sanitizeEmployee),
+            employees: fresh.employees.map((e) => sanitizeEmployee(e)),
           },
         });
       }

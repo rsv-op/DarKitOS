@@ -1,43 +1,61 @@
 import { NextRequest, NextResponse } from "next/server";
+import { isDemoSandboxEnabled, sanitizeEmployee } from "@/lib/auth";
+import { resolveAuthContext } from "@/lib/domain/auth-service";
 import {
-  isDemoSandboxEnabled,
-  sanitizeEmployee,
-} from "@/lib/auth";
-import { getAuthenticatedEmployee } from "@/lib/domain/auth-service";
-import { getRolePermissions } from "@/lib/domain/permission-service";
-import { getEmployees, getSettings } from "@/lib/store";
+  canAccessOrganization,
+  getRolePermissions,
+} from "@/lib/domain/permission-service";
+import { getEmployees, getOrganizations, getSettings } from "@/lib/store";
+import { isSupabaseServerConfigured } from "@/lib/supabase-server";
 
 export async function GET(request: NextRequest) {
-  const employee = await getAuthenticatedEmployee(request);
+  const auth = await resolveAuthContext(request);
   const demoSandboxEnabled = isDemoSandboxEnabled();
-  const [settings, allEmployees] = await Promise.all([
+  const supabaseConfigured = isSupabaseServerConfigured();
+  const [settings, allEmployees, organizations] = await Promise.all([
     getSettings(),
     getEmployees(),
+    getOrganizations(),
   ]);
-  const safeActiveEmployees = allEmployees
-    .filter((e) => e.active)
-    .map(sanitizeEmployee);
 
-  if (!employee) {
-    return NextResponse.json({
-      authenticated: false,
-      employee: null,
-      permissions: [],
-      // Only expose the demo role-switcher directory when Demo Sandbox Mode is explicitly enabled
-      employees: demoSandboxEnabled ? safeActiveEmployees : [],
-      settings,
-      demoSandboxEnabled,
-    });
+  if (!auth.ok) {
+    const safeActiveEmployees = demoSandboxEnabled
+      ? allEmployees.filter((e) => e.active).map((e) => sanitizeEmployee(e))
+      : [];
+
+    return NextResponse.json(
+      {
+        authenticated: false,
+        employee: null,
+        organization: null,
+        permissions: [],
+        employees: safeActiveEmployees,
+        settings,
+        demoSandboxEnabled,
+        supabaseConfigured,
+        authReason: auth.reason,
+        error: auth.status === 403 ? auth.error : undefined,
+      },
+      { status: auth.status === 403 ? 403 : 200 },
+    );
   }
+
+  const employee = auth.employee;
+  const orgEmployees = allEmployees
+    .filter((e) => e.active && canAccessOrganization(employee, e.organizationId))
+    .map((e) => sanitizeEmployee(e));
+
+  const organization =
+    organizations.find((o) => o.id === employee.organizationId) ?? null;
 
   return NextResponse.json({
     authenticated: true,
-    employee: sanitizeEmployee(employee),
+    employee,
+    organization,
     permissions: getRolePermissions(employee.role),
-    employees: demoSandboxEnabled
-      ? safeActiveEmployees
-      : [sanitizeEmployee(employee)],
+    employees: demoSandboxEnabled ? orgEmployees : [employee],
     settings,
     demoSandboxEnabled,
+    supabaseConfigured,
   });
 }

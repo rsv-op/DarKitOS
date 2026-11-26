@@ -8,9 +8,12 @@ import {
 } from "react";
 import Link from "next/link";
 import AppShell from "@/components/AppShell";
+import RealtimeSyncBadge from "@/components/RealtimeSyncBadge";
+import { useRealtimeKitchenSync } from "@/hooks/useRealtimeKitchenSync";
 import {
   BRANDS_DB,
   KITCHENS_DB,
+  type Employee,
   type KitchenStation,
   type Order,
 } from "@/lib/db";
@@ -59,10 +62,24 @@ export default function CookPage() {
     useState<string>("ALL");
   const [stationFilter, setStationFilter] =
     useState<string>("ALL");
-  const [syncTransport, setSyncTransport] =
-    useState<
-      "WEBSOCKET" | "SSE" | "HTTP_POLLING"
-    >("WEBSOCKET");
+  const [currentEmployee, setCurrentEmployee] =
+    useState<Employee | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    fetch("/api/session", { cache: "no-store" })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (!active || !data?.employee) return;
+        setCurrentEmployee(data.employee as Employee);
+      })
+      .catch(() => {
+        // ignore transient error
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const loadOrders = useCallback(async () => {
     try {
@@ -100,18 +117,18 @@ export default function CookPage() {
 
   useEffect(() => {
     void loadOrders();
-    const intervalMs =
-      syncTransport === "WEBSOCKET"
-        ? 3000
-        : syncTransport === "SSE"
-          ? 4500
-          : 7000;
-    const interval = window.setInterval(() => {
-      void loadOrders();
-    }, intervalMs);
-    return () =>
-      window.clearInterval(interval);
-  }, [loadOrders, syncTransport]);
+  }, [loadOrders]);
+
+  const realtimeSync = useRealtimeKitchenSync({
+    organizationId: currentEmployee?.organizationId,
+    kitchenId:
+      currentEmployee?.role !== "OWNER" && currentEmployee?.kitchenId
+        ? currentEmployee.kitchenId
+        : kitchenFilter !== "ALL"
+          ? kitchenFilter
+          : null,
+    onSync: loadOrders,
+  });
 
   const activeOrders = useMemo(() => {
     return orders.filter((order) => {
@@ -418,36 +435,11 @@ export default function CookPage() {
       subtitle="See which meals need cooking, start preparing an order, and mark it ready for pickup."
       actions={
         <>
-          {/* Resilient Sync Fallback Selector */}
-          <div className="flex items-center gap-1 rounded-xl border border-slate-800 bg-slate-900 p-1 font-mono text-[10px]">
-            <span className="px-2 text-slate-400">
-              Sync Mode:
-            </span>
-            {(
-              [
-                "WEBSOCKET",
-                "SSE",
-                "HTTP_POLLING",
-              ] as const
-            ).map((mode) => (
-              <button
-                key={mode}
-                type="button"
-                onClick={() =>
-                  setSyncTransport(mode)
-                }
-                className={`rounded-lg px-2 py-1 font-bold transition ${
-                  syncTransport === mode
-                    ? "bg-emerald-500 text-slate-950"
-                    : "text-slate-400 hover:text-white"
-                }`}
-              >
-                {mode === "HTTP_POLLING"
-                  ? "POLLING"
-                  : mode}
-              </button>
-            ))}
-          </div>
+          <RealtimeSyncBadge
+            connectionMode={realtimeSync.connectionMode}
+            lastEventAt={realtimeSync.lastEventAt}
+            topic={realtimeSync.topic}
+          />
 
           <Link
             href="/dispatch"

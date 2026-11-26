@@ -6,14 +6,17 @@ import {
   type OrderChannel,
   type OrderSource,
 } from "@/lib/db";
-import { getAuthenticatedEmployee } from "@/lib/domain/auth-service";
+import { requireAuthenticatedEmployee } from "@/lib/domain/auth-service";
 import { executeAuthorizedOrderTransition } from "@/lib/domain/order-transitions";
 import {
   canAccessKitchen,
+  canAccessOrganization,
+  getAccessibleKitchenIds,
   hasGlobalScope,
   hasPermission,
 } from "@/lib/domain/permission-service";
 import {
+  getKitchens,
   getMenuCatalog,
   getOrders,
   injectCanonicalOrder,
@@ -21,34 +24,57 @@ import {
 
 export async function GET(request: NextRequest) {
   try {
-    const employee = await getAuthenticatedEmployee(request);
-
-    if (!employee) {
-      return NextResponse.json(
-        { error: "Unauthorized" },
-        { status: 401 },
-      );
-    }
+    const auth = await requireAuthenticatedEmployee(request);
+    if (!auth.ok) return auth.response;
+    const employee = auth.employee;
 
     const { searchParams } = request.nextUrl;
     const statusFilter = searchParams.get("status") || "";
     const brandFilter = searchParams.get("brandId") || "";
-    const requestedKitchenFilter = searchParams.get("kitchenId") || "";
+    const requestedKitchenFilter = (
+      searchParams.get("kitchenId") || ""
+    ).trim();
     const channelFilter = searchParams.get("channel") || "";
     const search = (searchParams.get("search") || "").trim().toLowerCase();
 
-    let orders = await getOrders();
+    const [allOrders, kitchens] = await Promise.all([
+      getOrders(),
+      getKitchens(),
+    ]);
 
-    // Enforce server-side kitchen isolation for non-global employees
-    if (!hasGlobalScope(employee) && employee.kitchenId) {
-      orders = orders.filter((o) => o.kitchenId === employee.kitchenId);
-    } else if (
+    // Level 1 (Organization) cross-org explicit kitchen probe -> 403 Forbidden
+    if (requestedKitchenFilter && requestedKitchenFilter !== "ALL") {
+      const targetKitchen = kitchens.find(
+        (k) => k.id === requestedKitchenFilter,
+      );
+      if (
+        targetKitchen &&
+        !canAccessOrganization(employee, targetKitchen.organizationId)
+      ) {
+        return NextResponse.json(
+          {
+            error: `Forbidden: Kitchen ${requestedKitchenFilter} belongs to another organization`,
+          },
+          { status: 403 },
+        );
+      }
+    }
+
+    const accessibleKitchens = getAccessibleKitchenIds(employee, kitchens);
+
+    // Enforce two-level tenant + kitchen isolation on every read
+    let orders = allOrders.filter(
+      (o) =>
+        canAccessOrganization(employee, o.organizationId) &&
+        accessibleKitchens.has(o.kitchenId),
+    );
+
+    if (
+      hasGlobalScope(employee) &&
       requestedKitchenFilter &&
       requestedKitchenFilter !== "ALL"
     ) {
-      orders = orders.filter(
-        (o) => o.kitchenId === requestedKitchenFilter,
-      );
+      orders = orders.filter((o) => o.kitchenId === requestedKitchenFilter);
     }
 
     if (statusFilter && statusFilter !== "ALL") {
@@ -67,9 +93,7 @@ export async function GET(request: NextRequest) {
           (o.customerName || "").toLowerCase().includes(search) ||
           (o.externalOrderId || "").toLowerCase().includes(search) ||
           o.brandId.toLowerCase().includes(search) ||
-          o.items.some((item) =>
-            item.name.toLowerCase().includes(search),
-          ),
+          o.items.some((item) => item.name.toLowerCase().includes(search)),
       );
     }
 
@@ -88,14 +112,9 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
-    const employee = await getAuthenticatedEmployee(request);
-
-    if (!employee) {
-      return NextResponse.json(
-        { error: "Unauthorized" },
-        { status: 401 },
-      );
-    }
+    const auth = await requireAuthenticatedEmployee(request);
+    if (!auth.ok) return auth.response;
+    const employee = auth.employee;
 
     // Strict RBAC: Only ORDER_INJECT or OWNER_VIEW may inject orders (KITCHEN_OPERATE is NOT sufficient)
     if (
@@ -130,7 +149,8 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    if (!canAccessKitchen(employee, kitchenId)) {
+    const kitchens = await getKitchens();
+    if (!canAccessKitchen(employee, kitchenId, kitchens)) {
       return NextResponse.json(
         {
           error: `Forbidden: Employee ${employee.employeeCode} cannot inject orders into kitchen ${kitchenId}`,
@@ -145,9 +165,7 @@ export async function POST(request: NextRequest) {
     let items = Array.isArray(body.items) ? body.items : [];
 
     if (items.length === 0) {
-      const defaultMenuItem = catalog.find(
-        (m) => m.brandId === brandId,
-      );
+      const defaultMenuItem = catalog.find((m) => m.brandId === brandId);
       if (defaultMenuItem) {
         items = [
           {
@@ -164,6 +182,7 @@ export async function POST(request: NextRequest) {
 
     const result = await injectCanonicalOrder({
       id: typeof body.id === "string" ? body.id : undefined,
+      organizationId: employee.organizationId,
       externalOrderId:
         typeof body.externalOrderId === "string"
           ? body.externalOrderId
@@ -198,9 +217,7 @@ export async function POST(request: NextRequest) {
     );
   } catch (error) {
     const message =
-      error instanceof Error
-        ? error.message
-        : "Unable to create order";
+      error instanceof Error ? error.message : "Unable to create order";
     const isConflict =
       message.includes("BrandKitchen violation") ||
       message.includes("Invalid or inactive") ||
@@ -215,14 +232,9 @@ export async function POST(request: NextRequest) {
 
 export async function PATCH(request: NextRequest) {
   try {
-    const employee = await getAuthenticatedEmployee(request);
-
-    if (!employee) {
-      return NextResponse.json(
-        { error: "Unauthorized" },
-        { status: 401 },
-      );
-    }
+    const auth = await requireAuthenticatedEmployee(request);
+    if (!auth.ok) return auth.response;
+    const employee = auth.employee;
 
     const body = await request.json();
     const outcome = await executeAuthorizedOrderTransition({
@@ -230,9 +242,7 @@ export async function PATCH(request: NextRequest) {
       orderId: String(body?.orderId || body?.id || ""),
       nextStatusRaw: String(body?.action || body?.status || ""),
       driverName:
-        typeof body?.driverName === "string"
-          ? body.driverName
-          : undefined,
+        typeof body?.driverName === "string" ? body.driverName : undefined,
       courierEtaMins:
         typeof body?.courierEtaMins === "number"
           ? body.courierEtaMins

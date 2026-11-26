@@ -8,6 +8,8 @@ import {
 } from "@/db/seed-runner";
 import { formatCurrency } from "@/lib/currency";
 import {
+  DEFAULT_ORGANIZATION_ID,
+  INVENTORY_DB,
   calculateOrderRecipeCost,
   calculateOrderTotalAmount,
   evaluateOrderInventory,
@@ -30,6 +32,7 @@ import {
   type OrderChannel,
   type OrderEvent,
   type OrderItem,
+  type Organization,
   type OutboxEvent,
   type RevenueLeakageVector,
   type SystemSettings,
@@ -131,6 +134,7 @@ function mapSettingsRow(
 ): SystemSettings {
   if (!row) return { ...DEFAULT_SETTINGS };
   return {
+    organizationId: row.organizationId ?? DEFAULT_ORGANIZATION_ID,
     currency: row.currency,
     timezone: row.timezone,
     theme: row.theme,
@@ -289,6 +293,7 @@ async function loadOrders(
 
   return orderRows.map((o) => ({
     id: o.id,
+    organizationId: o.organizationId ?? DEFAULT_ORGANIZATION_ID,
     externalOrderId: o.externalOrderId ?? undefined,
     idempotencyKey: o.idempotencyKey ?? undefined,
     brandId: o.brandId,
@@ -339,8 +344,10 @@ async function insertActivity(
 ): Promise<OperationalActivity> {
   const id = makeId("ACT");
   const timestamp = entry.timestamp ?? new Date().toISOString();
+  const organizationId = entry.organizationId ?? DEFAULT_ORGANIZATION_ID;
   await runner.insert(schema.activities).values({
     id,
+    organizationId,
     type: entry.type,
     category: entry.category,
     title: entry.title,
@@ -352,7 +359,7 @@ async function insertActivity(
     timestamp: new Date(timestamp),
     severity: entry.severity,
   });
-  return { ...entry, id, timestamp };
+  return { ...entry, organizationId, id, timestamp };
 }
 
 async function loadSettings(runner: QueryRunner): Promise<SystemSettings> {
@@ -453,6 +460,23 @@ export async function getCancellationsPg(): Promise<CancellationRecord[]> {
   }));
 }
 
+export async function getOrganizationsPg(): Promise<Organization[]> {
+  await ensureSeeded();
+  const rows = await getDb()
+    .select()
+    .from(schema.organizations)
+    .orderBy(asc(schema.organizations.id));
+  return rows.map((o) => ({
+    id: o.id,
+    name: o.name,
+    slug: o.slug,
+    gstin: o.gstin ?? undefined,
+    fssaiLicense: o.fssaiLicense ?? undefined,
+    active: o.active,
+    createdAt: o.createdAt.toISOString(),
+  }));
+}
+
 export async function getActivitiesPg(): Promise<OperationalActivity[]> {
   await ensureSeeded();
   const rows = await getDb()
@@ -463,6 +487,7 @@ export async function getActivitiesPg(): Promise<OperationalActivity[]> {
 
   return rows.map((a) => ({
     id: a.id,
+    organizationId: a.organizationId ?? DEFAULT_ORGANIZATION_ID,
     type: a.type,
     category: a.category,
     title: a.title,
@@ -484,6 +509,7 @@ export async function getBrandsPg(): Promise<BrandConfig[]> {
     .orderBy(asc(schema.brands.id));
   return rows.map((b) => ({
     id: b.id,
+    organizationId: b.organizationId ?? DEFAULT_ORGANIZATION_ID,
     name: b.name,
     code: b.code,
     active: b.active,
@@ -501,6 +527,7 @@ export async function getKitchensPg(): Promise<KitchenConfig[]> {
     .orderBy(asc(schema.kitchens.id));
   return rows.map((k) => ({
     id: k.id,
+    organizationId: k.organizationId ?? DEFAULT_ORGANIZATION_ID,
     name: k.name,
     code: k.code,
     location: k.location,
@@ -537,10 +564,14 @@ export async function getEmployeesPg(): Promise<Employee[]> {
     .orderBy(asc(schema.employees.id));
   return rows.map((e) => ({
     id: e.id,
+    organizationId: e.organizationId ?? DEFAULT_ORGANIZATION_ID,
     employeeCode: e.employeeCode,
     name: e.name,
     role: e.role,
     kitchenId: e.kitchenId ?? undefined,
+    email: e.email ?? undefined,
+    phone: e.phone ?? undefined,
+    authUserId: e.authUserId ?? undefined,
     active: e.active,
   }));
 }
@@ -634,6 +665,7 @@ export async function getOutboxEventsPg(): Promise<OutboxEvent[]> {
 export async function getStoreSnapshotPg(): Promise<StoreSnapshot> {
   await ensureSeeded();
   const [
+    organizations,
     orders,
     inventory,
     inventoryMovements,
@@ -650,6 +682,7 @@ export async function getStoreSnapshotPg(): Promise<StoreSnapshot> {
     files,
     settings,
   ] = await Promise.all([
+    getOrganizationsPg(),
     getOrdersPg(),
     getInventoryPg(),
     getInventoryMovementsPg(),
@@ -668,6 +701,7 @@ export async function getStoreSnapshotPg(): Promise<StoreSnapshot> {
   ]);
 
   return {
+    organizations,
     orders,
     inventory,
     inventoryMovements,
@@ -932,8 +966,14 @@ export async function injectCanonicalOrderPg(
       0,
     );
 
+    const resolvedOrganizationId =
+      input.organizationId?.trim() ||
+      kitchen.organizationId ||
+      DEFAULT_ORGANIZATION_ID;
+
     const draftOrder: Order = {
       id: orderId,
+      organizationId: resolvedOrganizationId,
       externalOrderId:
         input.externalOrderId ||
         `${channel.slice(0, 3).toUpperCase()}-${Date.now().toString().slice(-6)}`,
@@ -1017,6 +1057,7 @@ export async function injectCanonicalOrderPg(
     // 7. Persist Order, OrderItems, OrderEvents, Phase 2 Webhook Receipt, Outbox, Activity
     await tx.insert(schema.orders).values({
       id: draftOrder.id,
+      organizationId: resolvedOrganizationId,
       externalOrderId: draftOrder.externalOrderId ?? null,
       idempotencyKey: effectiveIdemKey,
       brandId: draftOrder.brandId,
@@ -1129,6 +1170,7 @@ export async function injectCanonicalOrderPg(
     });
 
     await insertActivity(tx, {
+      organizationId: resolvedOrganizationId,
       type: "ORDER_CREATED",
       category: "ORDER",
       title: `Order ${draftOrder.id} Injected (${draftOrder.brandId})`,
@@ -2452,6 +2494,7 @@ export async function toggleKitchenActivePg(
       .orderBy(asc(schema.kitchens.id));
     return rows.map((k) => ({
       id: k.id,
+      organizationId: k.organizationId ?? DEFAULT_ORGANIZATION_ID,
       name: k.name,
       code: k.code,
       location: k.location,
@@ -2461,6 +2504,152 @@ export async function toggleKitchenActivePg(
       capacityPerHour: k.capacityPerHour,
     }));
   });
+}
+
+export async function upsertOrganizationPg(
+  org: Partial<Organization> & { id: string; name: string; slug: string },
+): Promise<Organization> {
+  await ensureSeeded();
+  const db = getDb();
+  const nowDate = new Date();
+  await db
+    .insert(schema.organizations)
+    .values({
+      id: org.id.trim(),
+      name: org.name.trim(),
+      slug: org.slug.trim().toLowerCase(),
+      gstin: org.gstin ?? null,
+      fssaiLicense: org.fssaiLicense ?? null,
+      active: typeof org.active === "boolean" ? org.active : true,
+      createdAt: org.createdAt ? new Date(org.createdAt) : nowDate,
+    })
+    .onConflictDoUpdate({
+      target: schema.organizations.id,
+      set: {
+        name: org.name.trim(),
+        slug: org.slug.trim().toLowerCase(),
+        gstin: org.gstin ?? null,
+        fssaiLicense: org.fssaiLicense ?? null,
+        active: typeof org.active === "boolean" ? org.active : true,
+      },
+    });
+  const [saved] = await db
+    .select()
+    .from(schema.organizations)
+    .where(eq(schema.organizations.id, org.id.trim()))
+    .limit(1);
+  return {
+    id: saved.id,
+    name: saved.name,
+    slug: saved.slug,
+    gstin: saved.gstin ?? undefined,
+    fssaiLicense: saved.fssaiLicense ?? undefined,
+    active: saved.active,
+    createdAt: saved.createdAt.toISOString(),
+  };
+}
+
+export async function upsertKitchenPg(
+  kitchen: KitchenConfig,
+): Promise<KitchenConfig> {
+  await ensureSeeded();
+  const db = getDb();
+  const orgId = kitchen.organizationId?.trim() || DEFAULT_ORGANIZATION_ID;
+  await db.transaction(async (tx) => {
+    await tx
+      .insert(schema.kitchens)
+      .values({
+        id: kitchen.id.trim(),
+        organizationId: orgId,
+        name: kitchen.name.trim(),
+        code: kitchen.code.trim(),
+        location: kitchen.location?.trim() || "Cloud Unit",
+        areaCode: kitchen.areaCode?.trim() || kitchen.code.trim(),
+        active: kitchen.active,
+        timezone: kitchen.timezone || "Asia/Kolkata",
+        capacityPerHour: kitchen.capacityPerHour ?? 100,
+      })
+      .onConflictDoUpdate({
+        target: schema.kitchens.id,
+        set: {
+          organizationId: orgId,
+          name: kitchen.name.trim(),
+          code: kitchen.code.trim(),
+          location: kitchen.location?.trim() || "Cloud Unit",
+          areaCode: kitchen.areaCode?.trim() || kitchen.code.trim(),
+          active: kitchen.active,
+          timezone: kitchen.timezone || "Asia/Kolkata",
+          capacityPerHour: kitchen.capacityPerHour ?? 100,
+        },
+      });
+
+    // Seed baseline per-kitchen inventory rows idempotently so newly provisioned kitchens work immediately
+    await tx
+      .insert(schema.kitchenInventory)
+      .values(
+        INVENTORY_DB.map((ing) => ({
+          kitchenId: kitchen.id.trim(),
+          ingredientId: ing.id,
+          currentStock: Number(ing.currentStock).toFixed(4),
+          reorderThreshold: Number(ing.reorderThreshold).toFixed(4),
+          lastRestocked: new Date(ing.lastRestocked),
+        })),
+      )
+      .onConflictDoNothing();
+  });
+
+  return {
+    ...kitchen,
+    organizationId: orgId,
+  };
+}
+
+export async function findOrLinkEmployeeByAuthIdentityPg(identity: {
+  authUserId?: string | null;
+  email?: string | null;
+  phone?: string | null;
+}): Promise<Employee | null> {
+  await ensureSeeded();
+  const db = getDb();
+  const cleanAuthId = identity.authUserId?.trim() || null;
+  const cleanEmail = identity.email?.trim().toLowerCase() || null;
+  const cleanPhone = identity.phone?.replace(/[\s-]/g, "").trim() || null;
+
+  const all = await db.select().from(schema.employees);
+  const match =
+    (cleanAuthId
+      ? all.find((e) => e.authUserId === cleanAuthId)
+      : undefined) ??
+    (cleanEmail
+      ? all.find((e) => e.email?.trim().toLowerCase() === cleanEmail)
+      : undefined) ??
+    (cleanPhone
+      ? all.find((e) => e.phone?.replace(/[\s-]/g, "").trim() === cleanPhone)
+      : undefined);
+
+  if (!match) return null;
+
+  // Auto-link Supabase auth_user_id on first verified login if not yet linked
+  if (cleanAuthId && !match.authUserId) {
+    await db
+      .update(schema.employees)
+      .set({ authUserId: cleanAuthId })
+      .where(eq(schema.employees.id, match.id));
+    match.authUserId = cleanAuthId;
+  }
+
+  return {
+    id: match.id,
+    organizationId: match.organizationId ?? DEFAULT_ORGANIZATION_ID,
+    employeeCode: match.employeeCode,
+    name: match.name,
+    role: match.role,
+    kitchenId: match.kitchenId ?? undefined,
+    email: match.email ?? undefined,
+    phone: match.phone ?? undefined,
+    authUserId: match.authUserId ?? undefined,
+    active: match.active,
+  };
 }
 
 export async function upsertCanonicalEmployeePg(
@@ -2493,20 +2682,52 @@ export async function upsertCanonicalEmployeePg(
         e.employeeCode.toLowerCase() === cleanCode.toLowerCase(),
     );
 
+    const normalizedEmail =
+      typeof employee.email === "string"
+        ? employee.email.trim().toLowerCase() || null
+        : undefined;
+    const normalizedPhone =
+      typeof employee.phone === "string"
+        ? employee.phone.trim() || null
+        : undefined;
+    const normalizedAuthUserId =
+      typeof employee.authUserId === "string"
+        ? employee.authUserId.trim() || null
+        : undefined;
+    const targetOrgId =
+      typeof employee.organizationId === "string" &&
+      employee.organizationId.trim()
+        ? employee.organizationId.trim()
+        : existing?.organizationId ?? DEFAULT_ORGANIZATION_ID;
+
     if (existing) {
+      const nextRole = employee.role ?? existing.role;
+      const nextKitchenId =
+        nextRole === "OWNER"
+          ? null
+          : typeof employee.kitchenId === "string" && employee.kitchenId.trim()
+            ? employee.kitchenId.trim()
+            : existing.kitchenId;
+
       await tx
         .update(schema.employees)
         .set({
+          organizationId: targetOrgId,
           employeeCode: cleanCode,
           name:
             typeof employee.name === "string" && employee.name.trim()
               ? employee.name.trim()
               : existing.name,
-          role: employee.role ?? existing.role,
-          kitchenId:
-            typeof employee.kitchenId === "string" && employee.kitchenId.trim()
-              ? employee.kitchenId.trim()
-              : existing.kitchenId,
+          role: nextRole,
+          kitchenId: nextKitchenId,
+          email:
+            normalizedEmail !== undefined ? normalizedEmail : existing.email,
+          phone:
+            normalizedPhone !== undefined ? normalizedPhone : existing.phone,
+          authUserId:
+            normalizedAuthUserId !== undefined
+              ? normalizedAuthUserId
+              : existing.authUserId,
           active:
             typeof employee.active === "boolean"
               ? employee.active
@@ -2514,26 +2735,35 @@ export async function upsertCanonicalEmployeePg(
         })
         .where(eq(schema.employees.id, existing.id));
     } else {
+      const nextRole = employee.role ?? "LINE_COOK";
       await tx.insert(schema.employees).values({
         id:
           typeof employee.id === "string" && employee.id.trim()
             ? employee.id.trim()
             : makeId("EMP"),
+        organizationId: targetOrgId,
         employeeCode: cleanCode,
         name:
           typeof employee.name === "string" && employee.name.trim()
             ? employee.name.trim()
             : "New Operator",
-        role: employee.role ?? "LINE_COOK",
+        role: nextRole,
         kitchenId:
-          typeof employee.kitchenId === "string" && employee.kitchenId.trim()
-            ? employee.kitchenId.trim()
-            : "K1",
+          nextRole === "OWNER"
+            ? null
+            : typeof employee.kitchenId === "string" &&
+                employee.kitchenId.trim()
+              ? employee.kitchenId.trim()
+              : "K1",
+        email: normalizedEmail ?? null,
+        phone: normalizedPhone ?? null,
+        authUserId: normalizedAuthUserId ?? null,
         active: typeof employee.active === "boolean" ? employee.active : true,
       });
     }
 
     await insertActivity(tx, {
+      organizationId: targetOrgId,
       type: "STAFF_UPDATED",
       category: "AUTH",
       title: `Staff Record Updated (${cleanCode})`,
@@ -2549,10 +2779,14 @@ export async function upsertCanonicalEmployeePg(
       .orderBy(asc(schema.employees.id));
     return rows.map((e) => ({
       id: e.id,
+      organizationId: e.organizationId ?? DEFAULT_ORGANIZATION_ID,
       employeeCode: e.employeeCode,
       name: e.name,
       role: e.role,
       kitchenId: e.kitchenId ?? undefined,
+      email: e.email ?? undefined,
+      phone: e.phone ?? undefined,
+      authUserId: e.authUserId ?? undefined,
       active: e.active,
     }));
   });

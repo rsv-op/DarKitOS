@@ -8,9 +8,12 @@ import {
 } from "react";
 import Link from "next/link";
 import AppShell from "@/components/AppShell";
+import RealtimeSyncBadge from "@/components/RealtimeSyncBadge";
+import { useRealtimeKitchenSync } from "@/hooks/useRealtimeKitchenSync";
 import { formatCurrency, type SupportedCurrency } from "@/lib/currency";
 import {
   KITCHENS_DB,
+  type Employee,
   type Order,
   type PermissionCode,
 } from "@/lib/db";
@@ -59,6 +62,8 @@ export default function DispatchPage() {
     useState<boolean>(false);
   const [currency, setCurrency] =
     useState<SupportedCurrency>("INR");
+  const [currentEmployee, setCurrentEmployee] =
+    useState<Employee | null>(null);
 
   // Inline driver assignment state per order
   const [driverInputs, setDriverInputs] =
@@ -79,6 +84,9 @@ export default function DispatchPage() {
         );
         if (data.settings?.currency) {
           setCurrency(data.settings.currency);
+        }
+        if (data.employee) {
+          setCurrentEmployee(data.employee as Employee);
         }
       })
       .catch(() => {
@@ -125,12 +133,18 @@ export default function DispatchPage() {
 
   useEffect(() => {
     void loadOrders();
-    const interval = window.setInterval(() => {
-      void loadOrders();
-    }, 5000);
-    return () =>
-      window.clearInterval(interval);
   }, [loadOrders]);
+
+  const realtimeSync = useRealtimeKitchenSync({
+    organizationId: currentEmployee?.organizationId,
+    kitchenId:
+      currentEmployee?.role !== "OWNER" && currentEmployee?.kitchenId
+        ? currentEmployee.kitchenId
+        : kitchenFilter !== "ALL"
+          ? kitchenFilter
+          : null,
+    onSync: loadOrders,
+  });
 
   const scopedOrders = useMemo(() => {
     return orders.filter(
@@ -489,6 +503,11 @@ export default function DispatchPage() {
       subtitle="Assign a driver to a ready order, confirm pickup, and record the handoff."
       actions={
         <>
+          <RealtimeSyncBadge
+            connectionMode={realtimeSync.connectionMode}
+            lastEventAt={realtimeSync.lastEventAt}
+            topic={realtimeSync.topic}
+          />
           <select
             value={kitchenFilter}
             onChange={(e) =>
