@@ -4,11 +4,14 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 import Link from "next/link";
 import AppShell from "@/components/AppShell";
+import KitchenSlaBadge from "@/components/KitchenSlaBadge";
 import RealtimeSyncBadge from "@/components/RealtimeSyncBadge";
+import { useKitchenAudioAlerts } from "@/hooks/useKitchenAudioAlerts";
 import { useRealtimeKitchenSync } from "@/hooks/useRealtimeKitchenSync";
 import { formatCurrency, type SupportedCurrency } from "@/lib/currency";
 import {
@@ -62,8 +65,13 @@ export default function DispatchPage() {
     useState<boolean>(false);
   const [currency, setCurrency] =
     useState<SupportedCurrency>("INR");
+  const [dispatchSlaMinutes, setDispatchSlaMinutes] =
+    useState<number>(8);
   const [currentEmployee, setCurrentEmployee] =
     useState<Employee | null>(null);
+
+  const audio = useKitchenAudioAlerts();
+  const seenReadyIdsRef = useRef<Set<string> | null>(null);
 
   // Inline driver assignment state per order
   const [driverInputs, setDriverInputs] =
@@ -84,6 +92,9 @@ export default function DispatchPage() {
         );
         if (data.settings?.currency) {
           setCurrency(data.settings.currency);
+        }
+        if (typeof data.settings?.dispatchSlaMinutes === "number") {
+          setDispatchSlaMinutes(data.settings.dispatchSlaMinutes);
         }
         if (data.employee) {
           setCurrentEmployee(data.employee as Employee);
@@ -176,6 +187,21 @@ export default function DispatchPage() {
   const pickedUp = readyOrders.filter(
     (o) => o.status === "PICKED_UP",
   );
+
+  useEffect(() => {
+    if (loading) return;
+    const currentIds = new Set(readyForPickup.map((o) => o.id));
+    if (seenReadyIdsRef.current === null) {
+      seenReadyIdsRef.current = currentIds;
+      return;
+    }
+    for (const id of currentIds) {
+      if (!seenReadyIdsRef.current.has(id)) {
+        audio.playNewOrderChime(id);
+      }
+    }
+    seenReadyIdsRef.current = currentIds;
+  }, [loading, readyForPickup, audio]);
   const recentlyDispatched = useMemo(
     () =>
       scopedOrders
@@ -295,6 +321,15 @@ export default function DispatchPage() {
           </div>
 
           <div className="text-right font-mono text-xs text-slate-400">
+            <div className="mb-1 flex justify-end">
+              <KitchenSlaBadge
+                orderId={order.id}
+                anchorIso={order.readyAt ?? order.createdAt}
+                slaMinutes={dispatchSlaMinutes}
+                labelPrefix="Dispatch SLA"
+                onBreach={audio.playSlaBreachAlert}
+              />
+            </div>
             <p>
               Ready{" "}
               <strong className="text-emerald-400">
@@ -508,6 +543,19 @@ export default function DispatchPage() {
             lastEventAt={realtimeSync.lastEventAt}
             topic={realtimeSync.topic}
           />
+
+          <button
+            type="button"
+            onClick={audio.toggleAudio}
+            className={`rounded-xl border px-3 py-2 font-mono text-xs font-bold transition ${
+              audio.audioEnabled
+                ? "border-emerald-500/50 bg-emerald-500/15 text-emerald-300"
+                : "border-slate-700 bg-slate-900 text-slate-400 hover:text-white"
+            }`}
+          >
+            {audio.audioEnabled ? "🔔 Audio Chimes: ON" : "🔕 Audio Chimes: OFF"}
+          </button>
+
           <select
             value={kitchenFilter}
             onChange={(e) =>

@@ -441,7 +441,9 @@ export interface OperationalActivity {
     | "PAYMENT"
     | "INVOICE"
     | "INTEGRATION"
-    | "WHATSAPP";
+    | "WHATSAPP"
+    | "HARDWARE"
+    | "AI_COPILOT";
   title: string;
   details: string;
   actor: string;

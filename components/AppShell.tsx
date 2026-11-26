@@ -751,12 +751,12 @@ export default function AppShell({
                 </ul>
               </div>
 
-              <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-4">
-                <p className="font-mono text-xs font-bold uppercase text-amber-400">
-                  Go-Live • Sprints 3 &amp; 4
+              <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/5 p-4">
+                <p className="font-mono text-xs font-bold uppercase text-emerald-400">
+                  Complete • Sprints 3 &amp; 4
                 </p>
                 <h3 className="mt-1 font-bold text-white">
-                  India GST, Aggregators &amp; AI
+                  India GST, Aggregators, Hardware &amp; AI
                 </h3>
                 <ul className="mt-2 space-y-1.5 text-xs text-slate-300">
                   <li>
@@ -768,8 +768,9 @@ export default function AppShell({
                     Upstash QStash, Interakt WhatsApp alerts.
                   </li>
                   <li>
-                    • Sprint 4: 80mm thermal KOT print bridge &amp; Gemini{" "}
-                    <code className="text-amber-300">/api/ai/diagnose</code>{" "}
+                    • Sprint 4: 80mm thermal KOT print bridge, Web Audio SLA
+                    chimes, USB scale station &amp; Gemini{" "}
+                    <code className="text-emerald-300">/api/ai/diagnose</code>{" "}
                     copilot.
                   </li>
                 </ul>

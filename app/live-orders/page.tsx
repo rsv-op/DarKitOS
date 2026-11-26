@@ -10,6 +10,7 @@ import {
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import AppShell from "@/components/AppShell";
+import KotPrintTicketModal from "@/components/KotPrintTicketModal";
 import RealtimeSyncBadge from "@/components/RealtimeSyncBadge";
 import { useRealtimeKitchenSync } from "@/hooks/useRealtimeKitchenSync";
 import { formatCurrency, type SupportedCurrency } from "@/lib/currency";
@@ -155,6 +156,8 @@ export default function LiveOrdersPage() {
     useState(true);
   const [submittingId, setSubmittingId] =
     useState<string | null>(null);
+  const [kotOrder, setKotOrder] =
+    useState<Order | null>(null);
 
   const loadOrders = useCallback(async () => {
     try {
@@ -614,15 +617,27 @@ export default function LiveOrdersPage() {
                             </span>
                           )}
                         </div>
-                        <p className="mt-1 font-mono text-sm font-bold text-emerald-400">
-                          {fmt(order.totalAmount ?? 0)}
-                          {typeof order.taxAmount === "number" &&
-                            order.taxAmount > 0 && (
-                              <span className="ml-1.5 text-[10px] font-normal text-slate-400">
-                                (incl. GST {fmt(order.taxAmount)})
-                              </span>
-                            )}
-                        </p>
+                        <div className="mt-1 flex items-center justify-end gap-2">
+                          <p className="font-mono text-sm font-bold text-emerald-400">
+                            {fmt(order.totalAmount ?? 0)}
+                            {typeof order.taxAmount === "number" &&
+                              order.taxAmount > 0 && (
+                                <span className="ml-1.5 text-[10px] font-normal text-slate-400">
+                                  (incl. GST {fmt(order.taxAmount)})
+                                </span>
+                              )}
+                          </p>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setKotOrder(order);
+                            }}
+                            className="rounded-lg border border-slate-700 bg-slate-800 px-2 py-0.5 font-mono text-[10px] font-bold text-sky-300 hover:border-sky-500/50 hover:bg-slate-700"
+                          >
+                            🖨 Print KOT
+                          </button>
+                        </div>
                       </div>
                     </div>
 
@@ -707,11 +722,20 @@ export default function LiveOrdersPage() {
                   </span>
                 </div>
 
-                {(selectedOrder.status === "PENDING" || selectedOrder.status === "PREPARING") && (
-                  <Link href="/kds" className="inline-flex rounded-lg bg-sky-500 px-3 py-2 text-sm font-semibold text-slate-950 hover:bg-sky-400">
-                    Continue on the Kitchen Board →
-                  </Link>
-                )}
+                <div className="flex flex-wrap items-center gap-2">
+                  {(selectedOrder.status === "PENDING" || selectedOrder.status === "PREPARING") && (
+                    <Link href="/kds" className="inline-flex rounded-lg bg-sky-500 px-3 py-2 text-sm font-semibold text-slate-950 hover:bg-sky-400">
+                      Continue on the Kitchen Board →
+                    </Link>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => setKotOrder(selectedOrder)}
+                    className="inline-flex rounded-lg border border-sky-500/40 bg-sky-500/10 px-3 py-2 font-mono text-xs font-bold text-sky-300 hover:bg-sky-500/20"
+                  >
+                    🖨 Print 80mm KOT
+                  </button>
+                </div>
 
                 {/* Inventory & Dispatch Metadata */}
                 <div className="grid grid-cols-2 gap-3 rounded-xl border border-slate-800 bg-slate-950 p-3.5 font-mono text-xs">
@@ -1007,6 +1031,16 @@ export default function LiveOrdersPage() {
           </aside>
         </div>
       </div>
+
+      <KotPrintTicketModal
+        order={kotOrder}
+        onClose={() => setKotOrder(null)}
+        onPrinted={({ orderId, printJobId, mode }) =>
+          setFeedback(
+            `80mm KOT printed for ${orderId} via ${mode} (Job ${printJobId}).`,
+          )
+        }
+      />
     </AppShell>
   );
 }

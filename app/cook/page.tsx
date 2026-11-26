@@ -4,11 +4,15 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 import Link from "next/link";
 import AppShell from "@/components/AppShell";
+import KitchenSlaBadge from "@/components/KitchenSlaBadge";
+import KotPrintTicketModal from "@/components/KotPrintTicketModal";
 import RealtimeSyncBadge from "@/components/RealtimeSyncBadge";
+import { useKitchenAudioAlerts } from "@/hooks/useKitchenAudioAlerts";
 import { useRealtimeKitchenSync } from "@/hooks/useRealtimeKitchenSync";
 import {
   BRANDS_DB,
@@ -64,14 +68,52 @@ export default function CookPage() {
     useState<string>("ALL");
   const [currentEmployee, setCurrentEmployee] =
     useState<Employee | null>(null);
+  const [prepSlaMinutes, setPrepSlaMinutes] =
+    useState<number>(12);
+  const [kotOrder, setKotOrder] =
+    useState<Order | null>(null);
+  const [autoPrintKotOnPrep, setAutoPrintKotOnPrep] =
+    useState<boolean>(false);
+
+  const audio = useKitchenAudioAlerts();
+  const seenPendingIdsRef = useRef<Set<string> | null>(null);
+
+  useEffect(() => {
+    try {
+      if (
+        window.localStorage.getItem("darkit:auto-print-kot-on-prep") === "true"
+      ) {
+        setAutoPrintKotOnPrep(true);
+      }
+    } catch {
+      // ignore storage failures
+    }
+  }, []);
+
+  function toggleAutoPrintKot() {
+    setAutoPrintKotOnPrep((prev) => {
+      const next = !prev;
+      try {
+        window.localStorage.setItem("darkit:auto-print-kot-on-prep", String(next));
+      } catch {
+        // ignore storage failures
+      }
+      return next;
+    });
+  }
 
   useEffect(() => {
     let active = true;
     fetch("/api/session", { cache: "no-store" })
       .then((res) => (res.ok ? res.json() : null))
       .then((data) => {
-        if (!active || !data?.employee) return;
-        setCurrentEmployee(data.employee as Employee);
+        if (!active || !data) return;
+        if (data.employee) {
+          setCurrentEmployee(data.employee as Employee);
+        }
+        if (typeof data.settings?.prepSlaMinutes === "number") {
+          setPrepSlaMinutes(data.settings.prepSlaMinutes);
+        }
       })
       .catch(() => {
         // ignore transient error
@@ -173,6 +215,22 @@ export default function CookPage() {
     (o) => o.status === "READY_FOR_PICKUP",
   );
 
+  // Trigger deduplicated New Ticket Chime whenever a brand-new PENDING order arrives
+  useEffect(() => {
+    if (loading) return;
+    const currentPendingIds = new Set(pendingOrders.map((o) => o.id));
+    if (seenPendingIdsRef.current === null) {
+      seenPendingIdsRef.current = currentPendingIds;
+      return;
+    }
+    for (const id of currentPendingIds) {
+      if (!seenPendingIdsRef.current.has(id)) {
+        audio.playNewOrderChime(id);
+      }
+    }
+    seenPendingIdsRef.current = currentPendingIds;
+  }, [loading, pendingOrders, audio]);
+
   async function updateOrder(
     orderId: string,
     action: "PREPARING" | "READY_FOR_PICKUP",
@@ -217,12 +275,28 @@ export default function CookPage() {
         )
           ? data.lowStockAlerts
           : [];
+        let autoPrintNote = "";
+        if (autoPrintKotOnPrep) {
+          try {
+            const kotRes = await fetch("/api/hardware/kot/print", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ orderId }),
+            });
+            const kotData = await kotRes.json();
+            if (kotRes.ok && kotData?.printJobId) {
+              autoPrintNote = ` • Auto-Printed 80mm KOT [${kotData.printJobId}]`;
+            }
+          } catch {
+            // Non-blocking hardware bridge failure
+          }
+        }
         setDepletionNotice(
           `Atomic Inventory Consumption Executed for ${orderId}: Depleted [${depleted}]${
             alerts.length > 0
               ? ` • Low-Stock Threshold Triggered: ${alerts.join(", ")}`
               : ""
-          }.`,
+          }${autoPrintNote}.`,
         );
       } else {
         setDepletionNotice(
@@ -291,17 +365,24 @@ export default function CookPage() {
           </div>
 
           <div className="text-right font-mono text-xs">
-            <span
-              className={`inline-block rounded-lg px-2 py-0.5 font-bold ${
-                ageMins >= 15
-                  ? "bg-red-500/20 text-red-300"
-                  : ageMins >= 10
-                    ? "bg-amber-500/20 text-amber-300"
-                    : "bg-slate-800 text-slate-300"
-              }`}
-            >
-              ⏱ {ageMins} min
-            </span>
+            <div className="flex flex-col items-end gap-1">
+              <KitchenSlaBadge
+                orderId={order.id}
+                anchorIso={
+                  order.prepStartedAt ?? order.receivedAt ?? order.createdAt
+                }
+                slaMinutes={prepSlaMinutes}
+                labelPrefix="Prep SLA"
+                onBreach={audio.playSlaBreachAlert}
+              />
+              <button
+                type="button"
+                onClick={() => setKotOrder(order)}
+                className="rounded-lg border border-slate-700 bg-slate-800 px-2 py-0.5 text-[10px] font-bold text-sky-300 hover:border-sky-500/50 hover:bg-slate-700"
+              >
+                🖨 Print KOT
+              </button>
+            </div>
             <p className="mt-1 text-[10px] text-slate-500">
               In{" "}
               {formatTime(
@@ -440,6 +521,30 @@ export default function CookPage() {
             lastEventAt={realtimeSync.lastEventAt}
             topic={realtimeSync.topic}
           />
+
+          <button
+            type="button"
+            onClick={audio.toggleAudio}
+            className={`rounded-xl border px-3 py-2 font-mono text-xs font-bold transition ${
+              audio.audioEnabled
+                ? "border-emerald-500/50 bg-emerald-500/15 text-emerald-300"
+                : "border-slate-700 bg-slate-900 text-slate-400 hover:text-white"
+            }`}
+          >
+            {audio.audioEnabled ? "🔔 Audio Chimes: ON" : "🔕 Audio Chimes: OFF"}
+          </button>
+
+          <button
+            type="button"
+            onClick={toggleAutoPrintKot}
+            className={`rounded-xl border px-3 py-2 font-mono text-xs font-bold transition ${
+              autoPrintKotOnPrep
+                ? "border-sky-500/50 bg-sky-500/15 text-sky-300"
+                : "border-slate-700 bg-slate-900 text-slate-400 hover:text-white"
+            }`}
+          >
+            {autoPrintKotOnPrep ? "🖨 Auto-Print KOT: ON" : "🖨 Auto-Print KOT: OFF"}
+          </button>
 
           <Link
             href="/dispatch"
@@ -643,6 +748,16 @@ export default function CookPage() {
           </div>
         )}
       </div>
+
+      <KotPrintTicketModal
+        order={kotOrder}
+        onClose={() => setKotOrder(null)}
+        onPrinted={({ orderId, printJobId, mode }) =>
+          setDepletionNotice(
+            `80mm KOT printed for ${orderId} via ${mode} [${printJobId}].`,
+          )
+        }
+      />
     </AppShell>
   );
 }

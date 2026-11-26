@@ -7,6 +7,30 @@ import {
   type OwnerBriefTelemetry,
   type OwnerBottleneckInput,
 } from "@/lib/bottleneck-brief";
+import { formatCurrency } from "@/lib/currency";
+
+interface AiDiagnosisResult {
+  mode: "GEMINI_LIVE" | "TELEMETRY_OFFLINE_ENGINE";
+  model: string;
+  fallbackReason?: string;
+  telemetrySnapshot: {
+    kitchenScope: string;
+    totalOrders: number;
+    netInrSales: number;
+    totalGstCollectedInr: number;
+    midPrepLossInr: number;
+    postPickupClaimsInr: number;
+    lowStockSkuCount: number;
+    slaBreachingOrdersCount: number;
+  };
+  diagnosis: {
+    executiveDiagnosis: string;
+    estimatedMonthlyImpactInr: number;
+    immediateFloorActions: string[];
+    engineeringNextSteps: string[];
+    enrichedMarkdownBrief: string;
+  };
+}
 
 interface OwnerBottleneckBriefBuilderProps {
   ownerName: string;
@@ -43,6 +67,11 @@ export default function OwnerBottleneckBriefBuilder({
   } | null>(null);
   const [saving, setSaving] = useState(false);
 
+  // Sprint 4 Live Telemetry / Gemini Operational Copilot state
+  const [diagnosing, setDiagnosing] = useState(false);
+  const [aiError, setAiError] = useState<string | null>(null);
+  const [aiResult, setAiResult] = useState<AiDiagnosisResult | null>(null);
+
   const brief = useMemo(
     () =>
       generateOwnerBottleneckBrief({
@@ -73,24 +102,28 @@ export default function OwnerBottleneckBriefBuilder({
     );
   }
 
-  function handleDownloadMarkdown() {
-    const blob = new Blob([brief.markdown], {
+  function downloadTextFile(content: string, fileName: string) {
+    const blob = new Blob([content], {
       type: "text/markdown;charset=utf-8",
     });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
-    link.download = brief.fileName;
+    link.download = fileName;
     document.body.appendChild(link);
     link.click();
     link.remove();
     URL.revokeObjectURL(url);
   }
 
-  async function handleCopyMarkdown() {
+  function handleDownloadMarkdown() {
+    downloadTextFile(brief.markdown, brief.fileName);
+  }
+
+  async function handleCopyText(text: string, label: string) {
     try {
-      await navigator.clipboard.writeText(brief.markdown);
-      setCopyStatus("Copied to clipboard — ready to paste into Gemini / Dev AI");
+      await navigator.clipboard.writeText(text);
+      setCopyStatus(label);
       setTimeout(() => setCopyStatus(null), 3500);
     } catch {
       setCopyStatus("Clipboard unavailable — use Download .md instead");
@@ -98,9 +131,58 @@ export default function OwnerBottleneckBriefBuilder({
     }
   }
 
-  async function handleSaveToExplorer() {
+  async function handleDiagnoseWithAi() {
+    setDiagnosing(true);
+    setAiError(null);
+    try {
+      const selectedLabels = BOTTLENECK_CATALOG.filter((b) =>
+        selectedIds.includes(b.id),
+      ).map((b) => b.label);
+
+      const composedBottleneck = [
+        selectedLabels.length > 0
+          ? `Selected priority bottlenecks: ${selectedLabels.join("; ")}.`
+          : "",
+        `Volume: ${dailyOrderVolume}, Revenue Band: ${monthlyRevenueBand}, Urgency: ${urgency}.`,
+        customNotes.trim() ? `Owner Notes: ${customNotes.trim()}` : "",
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .slice(0, 2000);
+
+      const resolvedKitchenId = /^K\d+/i.test(kitchenScope.trim())
+        ? kitchenScope.trim().split(/\s+/)[0]
+        : "ALL";
+
+      const res = await fetch("/api/ai/diagnose", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          bottleneck:
+            composedBottleneck ||
+            "Analyze current kitchen margin leakage, low-stock risk, and SLA delays.",
+          kitchenId: resolvedKitchenId,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || "Operational Copilot diagnosis failed.");
+      }
+      setAiResult(data as AiDiagnosisResult);
+    } catch (err) {
+      setAiError(
+        err instanceof Error ? err.message : "Failed to run AI diagnosis.",
+      );
+    } finally {
+      setDiagnosing(false);
+    }
+  }
+
+  async function handleSaveToExplorer(markdownOverride?: string, nameOverride?: string) {
     setSaving(true);
     setSaveStatus(null);
+    const targetName = nameOverride ?? brief.fileName;
+    const targetContent = markdownOverride ?? brief.markdown;
     try {
       const res = await fetch("/api/system", {
         method: "PATCH",
@@ -108,14 +190,14 @@ export default function OwnerBottleneckBriefBuilder({
         body: JSON.stringify({
           action: "UPSERT_FILE",
           file: {
-            name: brief.fileName,
+            name: targetName,
             category: "Owner Brief",
             mimeType: "text/markdown",
             kitchenId: kitchenScope.startsWith("K")
               ? kitchenScope.split(" ")[0]
               : "GLOBAL",
             status: "VERIFIED",
-            content: brief.markdown,
+            content: targetContent,
           },
         }),
       });
@@ -128,9 +210,9 @@ export default function OwnerBottleneckBriefBuilder({
       } else {
         setSaveStatus({
           type: "success",
-          text: `Saved "${brief.fileName}" to File Explorer under Owner Brief.`,
+          text: `Saved "${targetName}" to File Explorer under Owner Brief.`,
         });
-        onSavedToExplorer?.(brief.fileName);
+        onSavedToExplorer?.(targetName);
       }
     } catch {
       setSaveStatus({
@@ -150,20 +232,29 @@ export default function OwnerBottleneckBriefBuilder({
       <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
         <div>
           <span className="inline-flex items-center gap-2 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-3 py-1 text-[11px] font-bold uppercase tracking-wider text-emerald-300">
-            Owner Action Brief • Ready for Gemini / Dev AI
+            Owner Action Brief &amp; Live Gemini Copilot • Sprint 4
           </span>
           <h2 className="mt-2 text-lg sm:text-xl font-bold text-white">
-            Capture Your Kitchen Bottlenecks &amp; Export a Dev Brief (.md)
+            Diagnose Kitchen Bottlenecks with Live Telemetry / Gemini AI
           </h2>
           <p className="mt-1 text-sm text-slate-300 max-w-3xl">
             Pick the operational headaches slowing your kitchens down today.
-            DarKIT OS bundles your selections with live INR revenue, stockout,
-            and cancellation telemetry into a clean Markdown brief you can hand
-            directly to an AI engineer or tech team.
+            Run a live telemetry-grounded Gemini diagnosis for immediate floor
+            actions and INR impact, or export a clean Markdown brief directly.
           </p>
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            disabled={diagnosing}
+            onClick={() => void handleDiagnoseWithAi()}
+            className="rounded-xl bg-sky-500 px-4 py-2.5 text-xs font-black text-slate-950 hover:bg-sky-400 disabled:opacity-50 transition-colors shadow-lg shadow-sky-950/40"
+          >
+            {diagnosing
+              ? "Diagnosing Live Telemetry..."
+              : "✨ Diagnose with Live Telemetry / Gemini AI"}
+          </button>
           <button
             type="button"
             onClick={handleDownloadMarkdown}
@@ -173,7 +264,12 @@ export default function OwnerBottleneckBriefBuilder({
           </button>
           <button
             type="button"
-            onClick={handleCopyMarkdown}
+            onClick={() =>
+              void handleCopyText(
+                brief.markdown,
+                "Copied to clipboard — ready to paste into Gemini / Dev AI",
+              )
+            }
             className="rounded-xl border border-slate-700 bg-slate-800 px-3.5 py-2.5 text-xs font-semibold text-slate-100 hover:bg-slate-700 transition-colors"
           >
             Copy for Gemini
@@ -181,7 +277,7 @@ export default function OwnerBottleneckBriefBuilder({
           <button
             type="button"
             disabled={saving}
-            onClick={handleSaveToExplorer}
+            onClick={() => void handleSaveToExplorer()}
             className="rounded-xl border border-indigo-500/40 bg-indigo-500/15 px-3.5 py-2.5 text-xs font-semibold text-indigo-200 hover:bg-indigo-500/25 disabled:opacity-50 transition-colors"
           >
             {saving ? "Saving..." : "Save to Explorer"}
@@ -204,6 +300,148 @@ export default function OwnerBottleneckBriefBuilder({
           }`}
         >
           {saveStatus.text}
+        </div>
+      )}
+
+      {aiError && (
+        <div className="mt-3 rounded-xl border border-rose-500/40 bg-rose-500/10 px-3.5 py-2 text-xs font-medium text-rose-200">
+          {aiError}
+        </div>
+      )}
+
+      {/* Owner Floor Action Plan (Live Gemini / Telemetry Diagnosis Result) */}
+      {aiResult && (
+        <div className="mt-5 rounded-2xl border border-sky-500/40 bg-slate-950/90 p-5 shadow-xl">
+          <div className="flex flex-wrap items-start justify-between gap-3 border-b border-slate-800 pb-4">
+            <div>
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="rounded-full border border-sky-500/40 bg-sky-500/15 px-2.5 py-0.5 font-mono text-[10px] font-bold uppercase text-sky-300">
+                  {aiResult.mode === "GEMINI_LIVE"
+                    ? `Gemini Live (${aiResult.model})`
+                    : "Telemetry Offline Diagnostic Engine"}
+                </span>
+                <span className="font-mono text-[10px] text-slate-400">
+                  Scope: {aiResult.telemetrySnapshot.kitchenScope}
+                </span>
+              </div>
+              <h3 className="mt-1.5 text-base font-black text-white">
+                Owner Floor Action Plan &amp; INR Recovery Diagnosis
+              </h3>
+            </div>
+
+            <div className="text-right">
+              <p className="font-mono text-[10px] uppercase text-emerald-400">
+                Estimated Monthly Impact
+              </p>
+              <p className="font-mono text-2xl font-black text-emerald-300">
+                {formatCurrency(
+                  aiResult.diagnosis.estimatedMonthlyImpactInr,
+                  "INR",
+                )}
+                <span className="text-xs font-normal text-slate-400">/mo</span>
+              </p>
+            </div>
+          </div>
+
+          <p className="mt-3 text-sm leading-relaxed text-slate-200">
+            {aiResult.diagnosis.executiveDiagnosis}
+          </p>
+
+          <div className="mt-4 grid gap-4 md:grid-cols-2">
+            <div className="rounded-xl border border-emerald-500/25 bg-emerald-500/5 p-4">
+              <p className="font-mono text-[11px] font-bold uppercase tracking-wider text-emerald-300">
+                Immediate Floor Actions (Next 2 Hours)
+              </p>
+              <ol className="mt-2 list-decimal space-y-1.5 pl-4 text-xs text-slate-200">
+                {aiResult.diagnosis.immediateFloorActions.map((action, idx) => (
+                  <li key={`floor-${idx}`}>{action}</li>
+                ))}
+              </ol>
+            </div>
+
+            <div className="rounded-xl border border-indigo-500/25 bg-indigo-500/5 p-4">
+              <p className="font-mono text-[11px] font-bold uppercase tracking-wider text-indigo-300">
+                Engineering Next Steps
+              </p>
+              <ol className="mt-2 list-decimal space-y-1.5 pl-4 text-xs text-slate-200">
+                {aiResult.diagnosis.engineeringNextSteps.map((step, idx) => (
+                  <li key={`eng-${idx}`}>{step}</li>
+                ))}
+              </ol>
+            </div>
+          </div>
+
+          <div className="mt-4 flex flex-wrap items-center justify-between gap-2 border-t border-slate-800 pt-3">
+            <div className="flex flex-wrap gap-3 font-mono text-[11px] text-slate-400">
+              <span>
+                Net Sales:{" "}
+                <strong className="text-white">
+                  {formatCurrency(aiResult.telemetrySnapshot.netInrSales, "INR")}
+                </strong>
+              </span>
+              <span>
+                GST:{" "}
+                <strong className="text-emerald-300">
+                  {formatCurrency(
+                    aiResult.telemetrySnapshot.totalGstCollectedInr,
+                    "INR",
+                  )}
+                </strong>
+              </span>
+              <span>
+                Low-Stock SKUs:{" "}
+                <strong className="text-amber-300">
+                  {aiResult.telemetrySnapshot.lowStockSkuCount}
+                </strong>
+              </span>
+              <span>
+                SLA Breaches:{" "}
+                <strong className="text-red-300">
+                  {aiResult.telemetrySnapshot.slaBreachingOrdersCount}
+                </strong>
+              </span>
+            </div>
+
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() =>
+                  void handleCopyText(
+                    aiResult.diagnosis.enrichedMarkdownBrief,
+                    "AI-enriched Markdown brief copied to clipboard!",
+                  )
+                }
+                className="rounded-lg border border-sky-500/40 bg-sky-500/10 px-3 py-1.5 font-mono text-[11px] font-bold text-sky-200 hover:bg-sky-500/20"
+              >
+                Copy AI Brief
+              </button>
+              <button
+                type="button"
+                onClick={() =>
+                  downloadTextFile(
+                    aiResult.diagnosis.enrichedMarkdownBrief,
+                    `ai-enriched-${brief.fileName}`,
+                  )
+                }
+                className="rounded-lg bg-emerald-500 px-3 py-1.5 font-mono text-[11px] font-bold text-slate-950 hover:bg-emerald-400"
+              >
+                ⬇ Download AI Brief (.md)
+              </button>
+              <button
+                type="button"
+                disabled={saving}
+                onClick={() =>
+                  void handleSaveToExplorer(
+                    aiResult.diagnosis.enrichedMarkdownBrief,
+                    `ai-enriched-${brief.fileName}`,
+                  )
+                }
+                className="rounded-lg border border-indigo-500/40 bg-indigo-500/15 px-3 py-1.5 font-mono text-[11px] font-bold text-indigo-200 hover:bg-indigo-500/25 disabled:opacity-50"
+              >
+                Save AI Brief
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
@@ -329,6 +567,7 @@ export default function OwnerBottleneckBriefBuilder({
             value={customNotes}
             onChange={(e) => setCustomNotes(e.target.value)}
             rows={5}
+            maxLength={2000}
             placeholder="Example: Dinner rush between 8 PM and 10 PM in Gurugram K1 causes brioche buns to stock out without updating Swiggy/Zomato menus, leading to ₹8,000+ weekly cancellation penalties..."
             className="w-full flex-1 rounded-xl border border-slate-700 bg-slate-950 p-3 text-xs text-slate-100 placeholder:text-slate-500 outline-none focus:border-emerald-500"
           />
@@ -360,7 +599,7 @@ export default function OwnerBottleneckBriefBuilder({
               {brief.markdown.length} chars
             </span>
           </div>
-          <pre className="max-h-72 overflow-y-auto whitespace-pre-wrap font-mono text-[11px] leading-relaxed text-slate-300">
+          <pre className="max-h-72 overflow-auto whitespace-pre-wrap font-mono text-[11px] leading-relaxed text-slate-300">
             {brief.markdown}
           </pre>
         </div>

@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import AppShell from "@/components/AppShell";
+import HardwareScanScaleInput from "@/components/HardwareScanScaleInput";
 import RealtimeSyncBadge from "@/components/RealtimeSyncBadge";
 import { useRealtimeKitchenSync } from "@/hooks/useRealtimeKitchenSync";
 import { formatCurrency, type SupportedCurrency } from "@/lib/currency";
@@ -437,6 +438,22 @@ export default function InventoryPage() {
             </div>
           </div>
         </section>
+
+        {/* Sprint 4: Hardware Barcode Scanner & USB HID Weighing Scale Station */}
+        {canManageInventory && (
+          <HardwareScanScaleInput
+            kitchenId={
+              selectedKitchenId === "ALL"
+                ? (kitchens[0]?.id ?? "K1")
+                : selectedKitchenId
+            }
+            inventory={inventory}
+            onCommitted={async (msg) => {
+              setNotice(msg);
+              await loadInventory();
+            }}
+          />
+        )}
 
         {/* Summary KPIs */}
         <section className="grid grid-cols-2 gap-3 sm:grid-cols-5">

@@ -66,8 +66,15 @@ const PRODUCTION_MILESTONES = [
     id: "SPRINT-3B",
     name: "Sprint 3B · Aggregators & WhatsApp",
     domain: "UrbanPiper + QStash + Interakt",
-    status: "PLANNED",
-    task: "Signed Swiggy/Zomato webhooks via UrbanPiper, transactional outbox + Upstash QStash retries, auto-86 stockout sync, and Interakt/Gupshup WhatsApp alerts.",
+    status: "COMPLETE",
+    task: "Signed Swiggy/Zomato webhooks via UrbanPiper, transactional outbox + Upstash QStash retries, SKU mapping UI, and cooldown-deduplicated WhatsApp low-stock alerts & IST Daily INR Digests.",
+  },
+  {
+    id: "SPRINT-4",
+    name: "Sprint 4 · Hardware Bridges & AI Copilot",
+    domain: "80mm ESC/POS + USB Scale + Gemini",
+    status: "COMPLETE",
+    task: "80mm thermal KOT formatter & LAN ESC/POS print bridge, zero-dependency Web Audio SLA chimes, USB HID barcode/scale receiving station, and live telemetry-grounded Gemini /api/ai/diagnose copilot.",
   },
 ];
 
