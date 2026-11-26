@@ -6,6 +6,7 @@ import {
   useState,
 } from "react";
 import AppShell from "@/components/AppShell";
+import { IntegrationsPanel } from "@/components/IntegrationsPanel";
 import type { SystemSettings } from "@/lib/db";
 
 export default function SettingsPage() {
@@ -277,7 +278,10 @@ export default function SettingsPage() {
           </section>
         </div>
 
-        {/* 3. Safe Configuration Sanitizer */}
+        {/* 3. Aggregator, Outbox & WhatsApp Integrations (Sprint 3B) */}
+        <IntegrationsPanel />
+
+        {/* 4. Safe Configuration Sanitizer */}
         <section className="rounded-2xl border border-slate-800 bg-slate-900/70 p-6">
           <div className="flex flex-wrap items-center justify-between gap-4">
             <div>

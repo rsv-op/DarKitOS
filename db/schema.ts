@@ -12,6 +12,8 @@ import {
   uniqueIndex,
 } from "drizzle-orm/pg-core";
 import type {
+  AggregatorChannel,
+  AggregatorProvider,
   BrandConfig,
   CancellationRecord,
   CancellationResolution,
@@ -37,6 +39,9 @@ import type {
   TaxInvoiceStatus,
   VirtualFileAsset,
   WebhookIdempotencyEntry,
+  WhatsAppLogStatus,
+  WhatsAppProvider,
+  WhatsAppTemplateName,
 } from "@/lib/db";
 
 // -----------------------------------------------------------------------------
@@ -502,25 +507,47 @@ export const webhookEvents = pgTable("webhook_events", {
 });
 
 // -----------------------------------------------------------------------------
-// 15. Transactional Outbox Events
+// 15. Transactional Outbox Events (Durable UrbanPiper / Integration Delivery)
 // -----------------------------------------------------------------------------
 export const outboxEvents = pgTable(
   "outbox_events",
   {
     id: text("id").primaryKey(),
+    organizationId: text("organization_id")
+      .notNull()
+      .default("ORG-001")
+      .references(() => organizations.id, { onDelete: "restrict" }),
+    kitchenId: text("kitchen_id").references(() => kitchens.id, {
+      onDelete: "set null",
+    }),
+    destination: text("destination").notNull().default("URBANPIPER"),
     eventType: text("event_type").notNull(),
     aggregateId: text("aggregate_id").notNull(),
     payload: text("payload").notNull(),
-    attempt: integer("attempt").notNull().default(1),
-    maxAttempts: integer("max_attempts").notNull().default(6),
+    attempt: integer("attempt").notNull().default(0),
+    maxAttempts: integer("max_attempts").notNull().default(5),
     backoffSchedule: text("backoff_schedule").notNull(),
     status: text("status").$type<OutboxEvent["status"]>().notNull(),
+    nextRetryAt: timestamp("next_retry_at", { withTimezone: true }),
+    lastError: text("last_error"),
+    deliveredAt: timestamp("delivered_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
   },
   (table) => ({
     statusCreatedIdx: index("outbox_events_status_created_idx").on(
       table.status,
       table.createdAt,
+    ),
+    dueStatusRetryIdx: index("outbox_events_due_status_retry_idx").on(
+      table.status,
+      table.nextRetryAt,
+    ),
+    orgKitchenIdx: index("outbox_events_org_kitchen_idx").on(
+      table.organizationId,
+      table.kitchenId,
     ),
   }),
 );
@@ -751,6 +778,91 @@ export const paymentTransactions = pgTable(
   }),
 );
 
+// -----------------------------------------------------------------------------
+// 22. Aggregator Store & SKU Mappings (UrbanPiper Swiggy / Zomato)
+// -----------------------------------------------------------------------------
+export const aggregatorSkuMappings = pgTable(
+  "aggregator_sku_mappings",
+  {
+    id: text("id").primaryKey(),
+    organizationId: text("organization_id")
+      .notNull()
+      .default("ORG-001")
+      .references(() => organizations.id, { onDelete: "restrict" }),
+    kitchenId: text("kitchen_id")
+      .notNull()
+      .references(() => kitchens.id, { onDelete: "cascade" }),
+    brandId: text("brand_id")
+      .$type<DbaBrand>()
+      .notNull()
+      .references(() => brands.id, { onDelete: "cascade" }),
+    menuItemId: text("menu_item_id")
+      .notNull()
+      .references(() => menuItems.id, { onDelete: "cascade" }),
+    provider: text("provider")
+      .$type<AggregatorProvider>()
+      .notNull()
+      .default("URBANPIPER"),
+    channel: text("channel").$type<AggregatorChannel>().notNull(),
+    externalStoreId: text("external_store_id").notNull(),
+    externalItemId: text("external_item_id").notNull(),
+    externalItemName: text("external_item_name"),
+    active: boolean("active").notNull().default(true),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => ({
+    orgProviderStoreItemUnique: uniqueIndex(
+      "agg_sku_mappings_org_provider_store_item_uidx",
+    ).on(
+      table.organizationId,
+      table.provider,
+      table.externalStoreId,
+      table.externalItemId,
+    ),
+    orgKitchenIdx: index("agg_sku_mappings_org_kitchen_idx").on(
+      table.organizationId,
+      table.kitchenId,
+    ),
+  }),
+);
+
+// -----------------------------------------------------------------------------
+// 23. WhatsApp Notification & Digest Audit Logs (Cooldown Deduplication)
+// -----------------------------------------------------------------------------
+export const whatsappNotificationLogs = pgTable(
+  "whatsapp_notification_logs",
+  {
+    id: text("id").primaryKey(),
+    organizationId: text("organization_id")
+      .notNull()
+      .default("ORG-001")
+      .references(() => organizations.id, { onDelete: "restrict" }),
+    kitchenId: text("kitchen_id").references(() => kitchens.id, {
+      onDelete: "set null",
+    }),
+    templateName: text("template_name").$type<WhatsAppTemplateName>().notNull(),
+    recipientPhone: text("recipient_phone").notNull(),
+    dedupeKey: text("dedupe_key"),
+    provider: text("provider").$type<WhatsAppProvider>().notNull(),
+    providerMessageId: text("provider_message_id"),
+    status: text("status").$type<WhatsAppLogStatus>().notNull(),
+    payload: jsonb("payload").$type<Record<string, unknown>>().notNull(),
+    errorMessage: text("error_message"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => ({
+    orgDedupeCreatedIdx: index("whatsapp_logs_org_dedupe_created_idx").on(
+      table.organizationId,
+      table.dedupeKey,
+      table.createdAt,
+    ),
+  }),
+);
+
 export const schema = {
   organizations,
   kitchens,
@@ -774,4 +886,6 @@ export const schema = {
   systemSettings,
   taxInvoices,
   paymentTransactions,
+  aggregatorSkuMappings,
+  whatsappNotificationLogs,
 };

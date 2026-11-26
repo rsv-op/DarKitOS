@@ -595,6 +595,24 @@ export default function LiveOrdersPage() {
                               order.paymentStatus ?? "AGGREGATOR_SETTLED"
                             ).replaceAll("_", " ")}
                           </span>
+                          {order.aggregatorSyncStatus && (
+                            <span
+                              className={`inline-block rounded-full border px-2 py-0.5 font-mono text-[10px] font-bold ${
+                                order.aggregatorSyncStatus === "SYNC_FAILED"
+                                  ? "border-red-500/40 bg-red-500/10 text-red-300"
+                                  : order.aggregatorSyncStatus ===
+                                      "OUTBOX_QUEUED"
+                                    ? "border-amber-500/40 bg-amber-500/10 text-amber-300"
+                                    : "border-emerald-500/30 bg-emerald-500/10 text-emerald-300"
+                              }`}
+                            >
+                              {order.aggregatorSyncStatus === "SYNC_FAILED"
+                                ? "SYNC FAILED"
+                                : order.aggregatorSyncStatus === "OUTBOX_QUEUED"
+                                  ? "OUTBOX QUEUED"
+                                  : "AGGREGATOR SYNCED"}
+                            </span>
+                          )}
                         </div>
                         <p className="mt-1 font-mono text-sm font-bold text-emerald-400">
                           {fmt(order.totalAmount ?? 0)}

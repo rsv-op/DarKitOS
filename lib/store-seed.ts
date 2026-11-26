@@ -13,6 +13,7 @@ import {
   KITCHENS_DB,
   MENU_CATALOG,
   ORGANIZATIONS_DB,
+  type AggregatorSkuMapping,
   type BrandConfig,
   type BrandKitchenConfig,
   type CancellationRecord,
@@ -32,6 +33,7 @@ import {
   type TaxInvoice,
   type VirtualFileAsset,
   type WebhookIdempotencyEntry,
+  type WhatsAppNotificationLog,
 } from "@/lib/db";
 
 export interface SeedDataset {
@@ -39,6 +41,8 @@ export interface SeedDataset {
   orders: Order[];
   taxInvoices: TaxInvoice[];
   paymentTransactions: PaymentTransaction[];
+  aggregatorSkuMappings: AggregatorSkuMapping[];
+  whatsappNotificationLogs: WhatsAppNotificationLog[];
   inventory: InventoryItem[];
   inventoryMovements: InventoryMovement[];
   cancellations: CancellationRecord[];
@@ -1016,21 +1020,30 @@ export function buildInitialSeedState(baseNowMs = Date.now()): SeedDataset {
   const seedOutbox: OutboxEvent[] = [
     {
       id: "OUT-501",
-      eventType: "aggregator.order.accepted",
+      organizationId: DEFAULT_ORGANIZATION_ID,
+      kitchenId: "K1",
+      destination: "URBANPIPER",
+      eventType: "ORDER_ACCEPTED",
       aggregateId: "ORD-901",
       payload: JSON.stringify({
         orderId: "ORD-901",
+        externalOrderId: "SWG-884102",
         channel: "Swiggy",
-        status: "ACCEPTED",
+        status: "PREPARING",
       }),
       attempt: 1,
-      maxAttempts: 6,
-      backoffSchedule: "Immediate (0s)",
+      maxAttempts: 5,
+      backoffSchedule: "30s,2m,10m,30m",
       status: "DELIVERED",
+      deliveredAt: minAgo(6),
       createdAt: minAgo(6),
+      updatedAt: minAgo(6),
     },
     {
       id: "OUT-502",
+      organizationId: DEFAULT_ORGANIZATION_ID,
+      kitchenId: "K1",
+      destination: "SYSTEM",
       eventType: "kds.inventory.low_stock_alert",
       aggregateId: "INV-006",
       payload: JSON.stringify({
@@ -1040,13 +1053,18 @@ export function buildInitialSeedState(baseNowMs = Date.now()): SeedDataset {
         threshold: 600,
       }),
       attempt: 2,
-      maxAttempts: 6,
-      backoffSchedule: "+10 seconds",
+      maxAttempts: 5,
+      backoffSchedule: "30s,2m,10m,30m",
       status: "DELIVERED",
+      deliveredAt: minAgo(9),
       createdAt: minAgo(9),
+      updatedAt: minAgo(9),
     },
     {
       id: "OUT-503",
+      organizationId: DEFAULT_ORGANIZATION_ID,
+      kitchenId: "K1",
+      destination: "SYSTEM",
       eventType: "kitchen.variance.loss_logged",
       aggregateId: "ORD-908",
       payload: JSON.stringify({
@@ -1055,10 +1073,61 @@ export function buildInitialSeedState(baseNowMs = Date.now()): SeedDataset {
         lossInr: 273,
       }),
       attempt: 1,
-      maxAttempts: 6,
-      backoffSchedule: "Immediate (0s)",
+      maxAttempts: 5,
+      backoffSchedule: "30s,2m,10m,30m",
       status: "DELIVERED",
+      deliveredAt: minAgo(29),
       createdAt: minAgo(29),
+      updatedAt: minAgo(29),
+    },
+  ];
+
+  // Seed default UrbanPiper store & item SKU mappings for K1-K4 across all authorized BrandKitchens
+  const seedAggregatorSkuMappings: AggregatorSkuMapping[] = [];
+  for (const kitchen of KITCHENS_DB) {
+    const storeCode = `UP-STORE-${kitchen.code}`;
+    const allowedBrands = new Set(
+      BRAND_KITCHENS_DB.filter(
+        (bk) => bk.kitchenId === kitchen.id && bk.active,
+      ).map((bk) => bk.brandId),
+    );
+    for (const menuItem of MENU_CATALOG) {
+      if (!allowedBrands.has(menuItem.brandId)) continue;
+      seedAggregatorSkuMappings.push({
+        id: `MAP-UP-${kitchen.id}-${menuItem.id}`,
+        organizationId: kitchen.organizationId ?? DEFAULT_ORGANIZATION_ID,
+        kitchenId: kitchen.id,
+        brandId: menuItem.brandId,
+        menuItemId: menuItem.id,
+        provider: "URBANPIPER",
+        channel: "ALL",
+        externalStoreId: storeCode,
+        externalItemId: `UP-SKU-${menuItem.id}`,
+        externalItemName: menuItem.name,
+        active: true,
+        createdAt: "2026-10-01T00:00:00.000Z",
+      });
+    }
+  }
+
+  const seedWhatsAppLogs: WhatsAppNotificationLog[] = [
+    {
+      id: "WA-SEED-001",
+      organizationId: DEFAULT_ORGANIZATION_ID,
+      kitchenId: "K1",
+      templateName: "DAILY_OWNER_INR_DIGEST",
+      recipientPhone: "+919810000001",
+      dedupeKey: "daily-digest:ORG-001:2026-11-24",
+      provider: "SANDBOX_WHATSAPP",
+      providerMessageId: "wa_sbx_seed_digest_20261124",
+      status: "SANDBOX_LOGGED",
+      payload: {
+        istDate: "2026-11-24",
+        totalOrders: 42,
+        netInrSales: 29450,
+        totalGstCollected: 1472.5,
+      },
+      createdAt: "2026-11-24T17:30:00.000Z",
     },
   ];
 
@@ -1164,6 +1233,8 @@ export function buildInitialSeedState(baseNowMs = Date.now()): SeedDataset {
     orders: enrichedOrders,
     taxInvoices: seedTaxInvoices,
     paymentTransactions: seedPaymentTransactions,
+    aggregatorSkuMappings: seedAggregatorSkuMappings,
+    whatsappNotificationLogs: seedWhatsAppLogs,
     inventory: buildPerKitchenSeedInventory(),
     inventoryMovements: seedMovements,
     cancellations: seedCancellations,

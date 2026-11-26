@@ -87,6 +87,9 @@ ALTER TABLE public.cancellations ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.activities ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.tax_invoices ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.payment_transactions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.aggregator_sku_mappings ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.whatsapp_notification_logs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.outbox_events ENABLE ROW LEVEL SECURITY;
 
 -- 4. Organizations tenant policy
 DROP POLICY IF EXISTS darkit_organizations_tenant_isolation ON public.organizations;
@@ -294,4 +297,64 @@ CREATE POLICY darkit_payment_transactions_tenant_isolation
       public.darkit_is_org_owner()
       OR kitchen_id = public.darkit_current_kitchen_id()
     )
+  );
+
+-- 14. Aggregator SKU mappings tenant + kitchen isolation policy
+DROP POLICY IF EXISTS darkit_aggregator_sku_mappings_tenant_isolation ON public.aggregator_sku_mappings;
+CREATE POLICY darkit_aggregator_sku_mappings_tenant_isolation
+  ON public.aggregator_sku_mappings
+  FOR ALL
+  USING (
+    auth.uid() IS NOT NULL
+    AND organization_id = public.darkit_current_org_id()
+    AND (
+      public.darkit_is_org_owner()
+      OR kitchen_id = public.darkit_current_kitchen_id()
+    )
+  )
+  WITH CHECK (
+    auth.uid() IS NOT NULL
+    AND organization_id = public.darkit_current_org_id()
+    AND (
+      public.darkit_is_org_owner()
+      OR kitchen_id = public.darkit_current_kitchen_id()
+    )
+  );
+
+-- 15. WhatsApp notification logs tenant + kitchen isolation policy
+DROP POLICY IF EXISTS darkit_whatsapp_logs_tenant_isolation ON public.whatsapp_notification_logs;
+CREATE POLICY darkit_whatsapp_logs_tenant_isolation
+  ON public.whatsapp_notification_logs
+  FOR ALL
+  USING (
+    auth.uid() IS NOT NULL
+    AND organization_id = public.darkit_current_org_id()
+    AND (
+      public.darkit_is_org_owner()
+      OR kitchen_id IS NULL
+      OR kitchen_id = public.darkit_current_kitchen_id()
+    )
+  )
+  WITH CHECK (
+    auth.uid() IS NOT NULL
+    AND organization_id = public.darkit_current_org_id()
+  );
+
+-- 16. Transactional outbox events tenant + kitchen isolation policy
+DROP POLICY IF EXISTS darkit_outbox_events_tenant_isolation ON public.outbox_events;
+CREATE POLICY darkit_outbox_events_tenant_isolation
+  ON public.outbox_events
+  FOR ALL
+  USING (
+    auth.uid() IS NOT NULL
+    AND organization_id = public.darkit_current_org_id()
+    AND (
+      public.darkit_is_org_owner()
+      OR kitchen_id IS NULL
+      OR kitchen_id = public.darkit_current_kitchen_id()
+    )
+  )
+  WITH CHECK (
+    auth.uid() IS NOT NULL
+    AND organization_id = public.darkit_current_org_id()
   );

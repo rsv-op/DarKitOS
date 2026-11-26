@@ -354,6 +354,9 @@ export async function seedDatabaseIdempotent(db: SeedableDb): Promise<void> {
         .values(
           dataset.outboxEvents.map((o) => ({
             id: o.id,
+            organizationId: o.organizationId ?? DEFAULT_ORGANIZATION_ID,
+            kitchenId: o.kitchenId ?? null,
+            destination: o.destination ?? "URBANPIPER",
             eventType: o.eventType,
             aggregateId: o.aggregateId,
             payload: o.payload,
@@ -361,7 +364,11 @@ export async function seedDatabaseIdempotent(db: SeedableDb): Promise<void> {
             maxAttempts: o.maxAttempts,
             backoffSchedule: o.backoffSchedule,
             status: o.status,
+            nextRetryAt: toDate(o.nextRetryAt),
+            lastError: o.lastError ?? null,
+            deliveredAt: toDate(o.deliveredAt),
             createdAt: new Date(o.createdAt),
+            updatedAt: o.updatedAt ? new Date(o.updatedAt) : new Date(o.createdAt),
           })),
         )
         .onConflictDoNothing();
@@ -522,6 +529,52 @@ export async function seedDatabaseIdempotent(db: SeedableDb): Promise<void> {
         )
         .onConflictDoNothing();
     }
+
+    // 22. Aggregator SKU Mappings (UrbanPiper)
+    if (dataset.aggregatorSkuMappings.length > 0) {
+      await tx
+        .insert(schema.aggregatorSkuMappings)
+        .values(
+          dataset.aggregatorSkuMappings.map((m) => ({
+            id: m.id,
+            organizationId: m.organizationId,
+            kitchenId: m.kitchenId,
+            brandId: m.brandId,
+            menuItemId: m.menuItemId,
+            provider: m.provider,
+            channel: m.channel,
+            externalStoreId: m.externalStoreId,
+            externalItemId: m.externalItemId,
+            externalItemName: m.externalItemName ?? null,
+            active: m.active,
+            createdAt: new Date(m.createdAt),
+          })),
+        )
+        .onConflictDoNothing();
+    }
+
+    // 23. WhatsApp Notification Logs
+    if (dataset.whatsappNotificationLogs.length > 0) {
+      await tx
+        .insert(schema.whatsappNotificationLogs)
+        .values(
+          dataset.whatsappNotificationLogs.map((w) => ({
+            id: w.id,
+            organizationId: w.organizationId,
+            kitchenId: w.kitchenId ?? null,
+            templateName: w.templateName,
+            recipientPhone: w.recipientPhone,
+            dedupeKey: w.dedupeKey ?? null,
+            provider: w.provider,
+            providerMessageId: w.providerMessageId ?? null,
+            status: w.status,
+            payload: w.payload,
+            errorMessage: w.errorMessage ?? null,
+            createdAt: new Date(w.createdAt),
+          })),
+        )
+        .onConflictDoNothing();
+    }
   });
 }
 
@@ -531,6 +584,8 @@ export async function seedDatabaseIdempotent(db: SeedableDb): Promise<void> {
 export async function resetDatabaseToSeed(db: SeedableDb): Promise<void> {
   await db.execute(sql`
     TRUNCATE TABLE
+      whatsapp_notification_logs,
+      aggregator_sku_mappings,
       payment_transactions,
       tax_invoices,
       order_events,

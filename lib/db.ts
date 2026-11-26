@@ -64,6 +64,7 @@ export type CancellationSource =
   | "CUSTOMER"
   | "KITCHEN"
   | "AGGREGATOR"
+  | "AGGREGATOR_WEBHOOK"
   | "SYSTEM"
   | "MANUAL";
 
@@ -335,6 +336,7 @@ export interface Order {
   inventoryUnavailable?: string[];
   inventoryConsumed?: boolean;
   inventoryRestored?: boolean;
+  aggregatorSyncStatus?: "SYNCED" | "OUTBOX_QUEUED" | "SYNC_FAILED";
 
   events: OrderEvent[];
 }
@@ -437,7 +439,9 @@ export interface OperationalActivity {
     | "AUTH"
     | "CLOUD7"
     | "PAYMENT"
-    | "INVOICE";
+    | "INVOICE"
+    | "INTEGRATION"
+    | "WHATSAPP";
   title: string;
   details: string;
   actor: string;
@@ -462,13 +466,65 @@ export interface WebhookIdempotencyEntry {
 
 export interface OutboxEvent {
   id: string;
+  organizationId?: string;
+  kitchenId?: string;
+  destination?: string;
   eventType: string;
   aggregateId: string;
   payload: string;
   attempt: number;
   maxAttempts: number;
   backoffSchedule: string;
-  status: "PENDING" | "DELIVERED" | "RETRYING" | "DLQ";
+  status: "PENDING" | "DELIVERED" | "RETRYING" | "FAILED" | "DLQ";
+  nextRetryAt?: string;
+  lastError?: string;
+  deliveredAt?: string;
+  createdAt: string;
+  updatedAt?: string;
+}
+
+export type AggregatorProvider = "URBANPIPER";
+export type AggregatorChannel = "SWIGGY" | "ZOMATO" | "ALL";
+
+export interface AggregatorSkuMapping {
+  id: string;
+  organizationId: string;
+  kitchenId: string;
+  brandId: DbaBrand;
+  menuItemId: string;
+  provider: AggregatorProvider;
+  channel: AggregatorChannel;
+  externalStoreId: string;
+  externalItemId: string;
+  externalItemName?: string;
+  active: boolean;
+  createdAt: string;
+}
+
+export type WhatsAppTemplateName =
+  | "LOW_STOCK_SUPPLIER_ALERT"
+  | "DAILY_OWNER_INR_DIGEST";
+
+export type WhatsAppProvider = "INTERAKT" | "GUPSHUP" | "SANDBOX_WHATSAPP";
+
+export type WhatsAppLogStatus =
+  | "SENT"
+  | "SKIPPED_COOLDOWN"
+  | "SANDBOX_LOGGED"
+  | "FAILED";
+
+export interface WhatsAppNotificationLog {
+  id: string;
+  organizationId: string;
+  kitchenId?: string;
+  templateName: WhatsAppTemplateName;
+  recipientPhone: string;
+  dedupeKey?: string;
+  provider: WhatsAppProvider;
+  providerMessageId?: string;
+  status: WhatsAppLogStatus;
+  payload: Record<string, unknown>;
+  errorMessage?: string;
   createdAt: string;
 }
 

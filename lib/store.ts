@@ -9,6 +9,9 @@ import {
   evaluateOrderInventory,
   getRequiredIngredients,
   processOrderDepletion,
+  type AggregatorChannel,
+  type AggregatorProvider,
+  type AggregatorSkuMapping,
   type BrandConfig,
   type BrandKitchenConfig,
   type CancellationRecord,
@@ -38,6 +41,10 @@ import {
   type TaxInvoiceStatus,
   type VirtualFileAsset,
   type WebhookIdempotencyEntry,
+  type WhatsAppLogStatus,
+  type WhatsAppNotificationLog,
+  type WhatsAppProvider,
+  type WhatsAppTemplateName,
 } from "@/lib/db";
 import { isPostgresConfigured } from "@/lib/db-client";
 import {
@@ -169,6 +176,11 @@ function cloneState(state: KitchenState): KitchenState {
     paymentTransactions: state.paymentTransactions.map((tx) => ({
       ...tx,
       rawMeta: tx.rawMeta ? { ...tx.rawMeta } : undefined,
+    })),
+    aggregatorSkuMappings: state.aggregatorSkuMappings.map((m) => ({ ...m })),
+    whatsappNotificationLogs: state.whatsappNotificationLogs.map((w) => ({
+      ...w,
+      payload: { ...w.payload },
     })),
     inventory: state.inventory.map(cloneInventoryItem),
     inventoryMovements: state.inventoryMovements.map((m) => ({ ...m })),
@@ -341,9 +353,100 @@ export async function getWebhookEvents(): Promise<WebhookIdempotencyEntry[]> {
   return getGlobalState().webhookEvents.map((w) => ({ ...w }));
 }
 
-export async function getOutboxEvents(): Promise<OutboxEvent[]> {
-  if (isPostgresConfigured()) return pgStore.getOutboxEventsPg();
-  return getGlobalState().outboxEvents.map((o) => ({ ...o }));
+export async function getOutboxEvents(filters?: {
+  organizationId?: string;
+  kitchenId?: string;
+  status?: OutboxEvent["status"];
+}): Promise<OutboxEvent[]> {
+  if (isPostgresConfigured()) return pgStore.getOutboxEventsPg(filters);
+  return getGlobalState()
+    .outboxEvents.filter((o) => {
+      if (
+        filters?.organizationId &&
+        (o.organizationId ?? DEFAULT_ORGANIZATION_ID) !== filters.organizationId
+      ) {
+        return false;
+      }
+      if (
+        filters?.kitchenId &&
+        filters.kitchenId !== "ALL" &&
+        o.kitchenId !== filters.kitchenId
+      ) {
+        return false;
+      }
+      if (filters?.status && o.status !== filters.status) {
+        return false;
+      }
+      return true;
+    })
+    .map((o) => ({ ...o }));
+}
+
+export const listOutboxEvents = getOutboxEvents;
+
+export async function getAggregatorSkuMappings(filters?: {
+  organizationId?: string;
+  kitchenId?: string;
+  externalStoreId?: string;
+  activeOnly?: boolean;
+}): Promise<AggregatorSkuMapping[]> {
+  if (isPostgresConfigured()) return pgStore.getAggregatorSkuMappingsPg(filters);
+  return getGlobalState()
+    .aggregatorSkuMappings.filter((m) => {
+      if (
+        filters?.organizationId &&
+        m.organizationId !== filters.organizationId
+      ) {
+        return false;
+      }
+      if (
+        filters?.kitchenId &&
+        filters.kitchenId !== "ALL" &&
+        m.kitchenId !== filters.kitchenId
+      ) {
+        return false;
+      }
+      if (
+        filters?.externalStoreId &&
+        m.externalStoreId !== filters.externalStoreId
+      ) {
+        return false;
+      }
+      if (filters?.activeOnly && !m.active) {
+        return false;
+      }
+      return true;
+    })
+    .map((m) => ({ ...m }));
+}
+
+export async function getWhatsAppLogs(filters?: {
+  organizationId?: string;
+  kitchenId?: string;
+  templateName?: WhatsAppTemplateName;
+}): Promise<WhatsAppNotificationLog[]> {
+  if (isPostgresConfigured()) return pgStore.getWhatsAppLogsPg(filters);
+  return getGlobalState()
+    .whatsappNotificationLogs.filter((w) => {
+      if (
+        filters?.organizationId &&
+        w.organizationId !== filters.organizationId
+      ) {
+        return false;
+      }
+      if (
+        filters?.kitchenId &&
+        filters.kitchenId !== "ALL" &&
+        w.kitchenId !== filters.kitchenId
+      ) {
+        return false;
+      }
+      if (filters?.templateName && w.templateName !== filters.templateName) {
+        return false;
+      }
+      return true;
+    })
+    .map((w) => ({ ...w, payload: { ...w.payload } }));
 }
 
 export async function getStoreSnapshot(): Promise<StoreSnapshot> {
@@ -354,6 +457,18 @@ export async function getStoreSnapshot(): Promise<StoreSnapshot> {
 export async function findOrder(orderId: string): Promise<Order | undefined> {
   if (isPostgresConfigured()) return pgStore.findOrderPg(orderId);
   const order = getGlobalState().orders.find((item) => item.id === orderId);
+  return order ? cloneOrder(order) : undefined;
+}
+
+export async function findOrderByExternalId(
+  externalOrderId: string,
+): Promise<Order | undefined> {
+  if (isPostgresConfigured()) {
+    return pgStore.findOrderByExternalIdPg(externalOrderId);
+  }
+  const order = getGlobalState().orders.find(
+    (item) => item.externalOrderId === externalOrderId,
+  );
   return order ? cloneOrder(order) : undefined;
 }
 
@@ -506,6 +621,8 @@ export async function recordActivity(
   }
   return withMemoryLock(() => pushMemoryActivity(getGlobalState(), entry));
 }
+
+export const logOperationalActivity = recordActivity;
 
 // -----------------------------------------------------------------------------
 // Order Injection (Canonical Intake + Atomic Deduplication)
@@ -863,19 +980,25 @@ export async function injectCanonicalOrder(
 
           state.outboxEvents.unshift({
             id: makeId("OUT"),
+            organizationId: resolvedOrganizationId,
+            kitchenId: draftOrder.kitchenId,
+            destination: "SYSTEM",
             eventType: "aggregator.order.created",
             aggregateId: draftOrder.id,
             payload: JSON.stringify({
               orderId: draftOrder.id,
+              externalOrderId: draftOrder.externalOrderId,
               brandId: draftOrder.brandId,
               kitchenId: draftOrder.kitchenId,
               inventoryDecision: evaluation.inventoryDecision,
             }),
             attempt: 1,
-            maxAttempts: 6,
-            backoffSchedule: "Immediate (0s)",
+            maxAttempts: 5,
+            backoffSchedule: "30s,2m,10m,30m",
             status: "DELIVERED",
+            deliveredAt: now,
             createdAt: now,
+            updatedAt: now,
           });
 
           pushMemoryActivity(state, {
@@ -1142,7 +1265,50 @@ export async function transitionCanonicalOrder(
 
       state.orders[index] = cloneOrder(currentOrder);
 
+      // Durable transactional outbox enqueue for Swiggy/Zomato status synchronization
+      const isAggregatorOrder =
+        currentOrder.source === "SWIGGY" ||
+        currentOrder.source === "ZOMATO" ||
+        currentOrder.channel === "Swiggy" ||
+        currentOrder.channel === "Zomato";
+      const mappedOutboxEventType =
+        input.nextStatus === "PREPARING"
+          ? "ORDER_ACCEPTED"
+          : input.nextStatus === "READY_FOR_PICKUP"
+            ? "FOOD_READY"
+            : input.nextStatus === "DISPATCHED"
+              ? "ORDER_DISPATCHED"
+              : null;
+
+      if (isAggregatorOrder && mappedOutboxEventType) {
+        state.outboxEvents.unshift({
+          id: makeId("OUT"),
+          organizationId: currentOrder.organizationId ?? DEFAULT_ORGANIZATION_ID,
+          kitchenId: currentOrder.kitchenId,
+          destination: "URBANPIPER",
+          eventType: mappedOutboxEventType,
+          aggregateId: currentOrder.id,
+          payload: JSON.stringify({
+            orderId: currentOrder.id,
+            externalOrderId: currentOrder.externalOrderId ?? currentOrder.id,
+            channel: currentOrder.channel,
+            source: currentOrder.source,
+            newStatus: mappedOutboxEventType,
+            orderStatus: input.nextStatus,
+            details: eventDetails,
+          }),
+          attempt: 0,
+          maxAttempts: 5,
+          backoffSchedule: "30s,2m,10m,30m",
+          status: "PENDING",
+          nextRetryAt: now,
+          createdAt: now,
+          updatedAt: now,
+        });
+      }
+
       pushMemoryActivity(state, {
+        organizationId: currentOrder.organizationId ?? DEFAULT_ORGANIZATION_ID,
         type: `ORDER_${input.nextStatus}`,
         category:
           input.nextStatus === "DRIVER_ASSIGNED" ||
@@ -1253,6 +1419,33 @@ export async function transitionCanonicalOrder(
         orderId: finalResult.order.id,
         details: finalResult.lowStockAlerts.join(", "),
       });
+
+      // Automatically trigger deduplicated supplier low-stock WhatsApp alerts
+      try {
+        const kitchenInv = await getInventory(finalResult.order.kitchenId);
+        const lowNameSet = new Set(finalResult.lowStockAlerts);
+        const { triggerLowStockSupplierAlert } = await import("@/lib/whatsapp");
+        for (const item of kitchenInv) {
+          if (
+            lowNameSet.has(item.name) &&
+            item.currentStock <= item.reorderThreshold
+          ) {
+            await triggerLowStockSupplierAlert({
+              organizationId: orgId,
+              kitchenId: finalResult.order.kitchenId,
+              ingredientId: item.ingredientId ?? item.id,
+              sku: item.sku,
+              itemName: item.name,
+              currentStock: item.currentStock,
+              reorderThreshold: item.reorderThreshold,
+              unit: item.unit,
+              actor: input.actor,
+            });
+          }
+        }
+      } catch (err) {
+        console.warn("[WhatsApp] Low-stock alert trigger failed:", err);
+      }
     }
   }
 
@@ -1501,6 +1694,38 @@ function executeStageAwareCancellationMemory(
   state.orders[orderIndex] = cloneOrder(currentOrder);
   state.cancellations.unshift(cancellationRecord);
 
+  const isAggregatorOrder =
+    currentOrder.source === "SWIGGY" ||
+    currentOrder.source === "ZOMATO" ||
+    currentOrder.channel === "Swiggy" ||
+    currentOrder.channel === "Zomato";
+
+  if (stage === "AFTER_PICKUP" && isAggregatorOrder) {
+    state.outboxEvents.unshift({
+      id: makeId("OUT"),
+      organizationId: currentOrder.organizationId ?? DEFAULT_ORGANIZATION_ID,
+      kitchenId: currentOrder.kitchenId,
+      destination: "URBANPIPER",
+      eventType: "AGGREGATOR_CLAIM_SUBMITTED",
+      aggregateId: currentOrder.id,
+      payload: JSON.stringify({
+        orderId: currentOrder.id,
+        externalOrderId: currentOrder.externalOrderId ?? currentOrder.id,
+        channel: currentOrder.channel,
+        claimAmount,
+        reason,
+        evidence: cancellationRecord.dispatchEvidence ?? {},
+      }),
+      attempt: 0,
+      maxAttempts: 5,
+      backoffSchedule: "30s,2m,10m,30m",
+      status: "PENDING",
+      nextRetryAt: now,
+      createdAt: now,
+      updatedAt: now,
+    });
+  }
+
   pushMemoryActivity(state, {
     organizationId: currentOrder.organizationId ?? DEFAULT_ORGANIZATION_ID,
     type: "ORDER_CANCELLED",
@@ -1669,6 +1894,23 @@ export async function mutateCanonicalInventory(
       reorderThreshold: result.item.reorderThreshold,
       actor: input.actor,
     });
+
+    try {
+      const { triggerLowStockSupplierAlert } = await import("@/lib/whatsapp");
+      await triggerLowStockSupplierAlert({
+        organizationId: orgId,
+        kitchenId,
+        ingredientId: result.item.ingredientId ?? result.item.id,
+        sku: result.item.sku,
+        itemName: result.item.name,
+        currentStock: result.item.currentStock,
+        reorderThreshold: result.item.reorderThreshold,
+        unit: result.item.unit,
+        actor: input.actor,
+      });
+    } catch (err) {
+      console.warn("[WhatsApp] Low-stock alert trigger failed:", err);
+    }
   }
 
   return result;
@@ -2826,5 +3068,333 @@ export async function recordPaymentRefund(input: {
       };
     }),
   );
+}
+
+// -----------------------------------------------------------------------------
+// Sprint 3B: Durable Outbox, UrbanPiper SKU Mappings & WhatsApp Notification Logs
+// -----------------------------------------------------------------------------
+
+export async function enqueueOutboxEvent(input: {
+  organizationId?: string;
+  kitchenId?: string;
+  destination?: string;
+  eventType: string;
+  aggregateId: string;
+  payload: string | Record<string, unknown>;
+  maxAttempts?: number;
+  backoffSchedule?: string;
+}): Promise<OutboxEvent> {
+  if (isPostgresConfigured()) {
+    return pgStore.enqueueOutboxEventPg(input);
+  }
+  return withMemoryLock(() =>
+    runMemoryTransaction((state) => {
+      const now = new Date().toISOString();
+      const created: OutboxEvent = {
+        id: makeId("OUT"),
+        organizationId: input.organizationId ?? DEFAULT_ORGANIZATION_ID,
+        kitchenId: input.kitchenId,
+        destination: input.destination ?? "URBANPIPER",
+        eventType: input.eventType,
+        aggregateId: input.aggregateId,
+        payload:
+          typeof input.payload === "string"
+            ? input.payload
+            : JSON.stringify(input.payload),
+        attempt: 0,
+        maxAttempts: input.maxAttempts ?? 5,
+        backoffSchedule: input.backoffSchedule ?? "30s,2m,10m,30m",
+        status: "PENDING",
+        nextRetryAt: now,
+        createdAt: now,
+        updatedAt: now,
+      };
+      state.outboxEvents.unshift(created);
+      return { ...created };
+    }),
+  );
+}
+
+export async function updateOutboxEventDelivery(
+  eventId: string,
+  update: {
+    status: OutboxEvent["status"];
+    attempt: number;
+    nextRetryAt?: string | null;
+    lastError?: string | null;
+    deliveredAt?: string | null;
+  },
+): Promise<OutboxEvent> {
+  if (isPostgresConfigured()) {
+    return pgStore.updateOutboxEventDeliveryPg(eventId, update);
+  }
+  return withMemoryLock(() =>
+    runMemoryTransaction((state) => {
+      const event = state.outboxEvents.find((o) => o.id === eventId);
+      if (!event) {
+        throw new Error(`Outbox event not found: ${eventId}`);
+      }
+      event.status = update.status;
+      event.attempt = update.attempt;
+      event.nextRetryAt = update.nextRetryAt ?? undefined;
+      event.lastError = update.lastError ?? undefined;
+      event.deliveredAt = update.deliveredAt ?? undefined;
+      event.updatedAt = new Date().toISOString();
+      return { ...event };
+    }),
+  );
+}
+
+export async function retryOutboxEvent(
+  eventId: string,
+  actor: string,
+): Promise<OutboxEvent> {
+  if (isPostgresConfigured()) {
+    return pgStore.retryOutboxEventPg(eventId, actor);
+  }
+  return withMemoryLock(() =>
+    runMemoryTransaction((state) => {
+      const event = state.outboxEvents.find((o) => o.id === eventId);
+      if (!event) {
+        throw new Error(`Outbox event not found: ${eventId}`);
+      }
+      const now = new Date().toISOString();
+      event.status = "PENDING";
+      event.attempt = 0;
+      event.nextRetryAt = now;
+      event.lastError = undefined;
+      event.updatedAt = now;
+
+      pushMemoryActivity(state, {
+        organizationId: event.organizationId ?? DEFAULT_ORGANIZATION_ID,
+        type: "OUTBOX_MANUAL_RETRY",
+        category: "INTEGRATION",
+        title: `Outbox Event Re-Queued (${event.eventType})`,
+        details: `Outbox event ${event.id} (${event.aggregateId}) manually re-queued for delivery.`,
+        actor,
+        kitchenId: event.kitchenId,
+        severity: "info",
+      });
+
+      return { ...event };
+    }),
+  );
+}
+
+export async function upsertAggregatorSkuMapping(
+  input: {
+    id?: string;
+    organizationId?: string;
+    kitchenId: string;
+    brandId: DbaBrand;
+    menuItemId: string;
+    provider?: AggregatorProvider;
+    channel: AggregatorChannel;
+    externalStoreId: string;
+    externalItemId: string;
+    externalItemName?: string;
+    active?: boolean;
+  },
+  actor: string,
+): Promise<AggregatorSkuMapping> {
+  if (isPostgresConfigured()) {
+    return pgStore.upsertAggregatorSkuMappingPg(input, actor);
+  }
+  return withMemoryLock(() =>
+    runMemoryTransaction((state) => {
+      const orgId = input.organizationId ?? DEFAULT_ORGANIZATION_ID;
+      const provider: AggregatorProvider = input.provider ?? "URBANPIPER";
+      const storeId = input.externalStoreId.trim();
+      const itemId = input.externalItemId.trim();
+      if (!storeId || !itemId) {
+        throw new Error("externalStoreId and externalItemId are required.");
+      }
+      const kitchen = state.kitchens.find((k) => k.id === input.kitchenId);
+      if (!kitchen) {
+        throw new Error(`Kitchen not found: ${input.kitchenId}`);
+      }
+      const menuItem = state.menuCatalog.find((m) => m.id === input.menuItemId);
+      if (!menuItem) {
+        throw new Error(`Menu item not found: ${input.menuItemId}`);
+      }
+
+      const existing = state.aggregatorSkuMappings.find(
+        (m) =>
+          m.organizationId === orgId &&
+          m.provider === provider &&
+          m.externalStoreId === storeId &&
+          m.externalItemId === itemId,
+      );
+
+      let saved: AggregatorSkuMapping;
+      if (existing) {
+        existing.kitchenId = input.kitchenId;
+        existing.brandId = input.brandId;
+        existing.menuItemId = input.menuItemId;
+        existing.channel = input.channel;
+        existing.externalItemName =
+          input.externalItemName?.trim() || menuItem.name;
+        existing.active = input.active ?? true;
+        saved = { ...existing };
+      } else {
+        saved = {
+          id: input.id?.trim() || makeId("MAP-UP"),
+          organizationId: orgId,
+          kitchenId: input.kitchenId,
+          brandId: input.brandId,
+          menuItemId: input.menuItemId,
+          provider,
+          channel: input.channel,
+          externalStoreId: storeId,
+          externalItemId: itemId,
+          externalItemName: input.externalItemName?.trim() || menuItem.name,
+          active: input.active ?? true,
+          createdAt: new Date().toISOString(),
+        };
+        state.aggregatorSkuMappings.push(saved);
+      }
+
+      pushMemoryActivity(state, {
+        organizationId: orgId,
+        type: "AGGREGATOR_SKU_MAPPED",
+        category: "INTEGRATION",
+        title: `UrbanPiper SKU Mapped (${storeId} / ${itemId})`,
+        details: `Mapped ${storeId}:${itemId} (${input.channel}) -> ${input.kitchenId} / ${input.brandId} / ${menuItem.name}.`,
+        actor,
+        kitchenId: input.kitchenId,
+        brandId: input.brandId,
+        severity: "success",
+      });
+
+      return { ...saved };
+    }),
+  );
+}
+
+export async function toggleAggregatorSkuMapping(
+  id: string,
+  updates: {
+    active?: boolean;
+    externalStoreId?: string;
+    externalItemId?: string;
+    channel?: AggregatorChannel;
+  },
+  actor: string,
+): Promise<AggregatorSkuMapping> {
+  if (isPostgresConfigured()) {
+    return pgStore.toggleAggregatorSkuMappingPg(id, updates, actor);
+  }
+  return withMemoryLock(() =>
+    runMemoryTransaction((state) => {
+      const existing = state.aggregatorSkuMappings.find((m) => m.id === id);
+      if (!existing) {
+        throw new Error(`Aggregator SKU mapping not found: ${id}`);
+      }
+      if (typeof updates.active === "boolean") {
+        existing.active = updates.active;
+      }
+      if (updates.externalStoreId?.trim()) {
+        existing.externalStoreId = updates.externalStoreId.trim();
+      }
+      if (updates.externalItemId?.trim()) {
+        existing.externalItemId = updates.externalItemId.trim();
+      }
+      if (updates.channel) {
+        existing.channel = updates.channel;
+      }
+
+      pushMemoryActivity(state, {
+        organizationId: existing.organizationId,
+        type: "AGGREGATOR_SKU_UPDATED",
+        category: "INTEGRATION",
+        title: `UrbanPiper Mapping Updated (${existing.externalItemId})`,
+        details: `Mapping ${existing.id} active=${existing.active}, store=${existing.externalStoreId}.`,
+        actor,
+        kitchenId: existing.kitchenId,
+        brandId: existing.brandId,
+        severity: "info",
+      });
+
+      return { ...existing };
+    }),
+  );
+}
+
+export async function findRecentWhatsAppLogByDedupeKey(
+  organizationId: string,
+  dedupeKey: string,
+  sinceIso: string,
+): Promise<WhatsAppNotificationLog | undefined> {
+  if (isPostgresConfigured()) {
+    return pgStore.findRecentWhatsAppLogByDedupeKeyPg(
+      organizationId,
+      dedupeKey,
+      sinceIso,
+    );
+  }
+  const sinceMs = new Date(sinceIso).getTime();
+  const matched = getGlobalState().whatsappNotificationLogs.find(
+    (w) =>
+      w.organizationId === organizationId &&
+      w.dedupeKey === dedupeKey &&
+      (w.status === "SENT" || w.status === "SANDBOX_LOGGED") &&
+      new Date(w.createdAt).getTime() >= sinceMs,
+  );
+  return matched ? { ...matched, payload: { ...matched.payload } } : undefined;
+}
+
+export async function insertWhatsAppLog(input: {
+  organizationId: string;
+  kitchenId?: string;
+  templateName: WhatsAppTemplateName;
+  recipientPhone: string;
+  dedupeKey?: string;
+  provider: WhatsAppProvider;
+  providerMessageId?: string;
+  status: WhatsAppLogStatus;
+  payload: Record<string, unknown>;
+  errorMessage?: string;
+}): Promise<WhatsAppNotificationLog> {
+  if (isPostgresConfigured()) {
+    return pgStore.insertWhatsAppLogPg(input);
+  }
+  return withMemoryLock(() =>
+    runMemoryTransaction((state) => {
+      const created: WhatsAppNotificationLog = {
+        id: makeId("WA"),
+        organizationId: input.organizationId,
+        kitchenId: input.kitchenId,
+        templateName: input.templateName,
+        recipientPhone: input.recipientPhone,
+        dedupeKey: input.dedupeKey,
+        provider: input.provider,
+        providerMessageId: input.providerMessageId,
+        status: input.status,
+        payload: { ...input.payload },
+        errorMessage: input.errorMessage,
+        createdAt: new Date().toISOString(),
+      };
+      state.whatsappNotificationLogs.unshift(created);
+      if (state.whatsappNotificationLogs.length > 300) {
+        state.whatsappNotificationLogs = state.whatsappNotificationLogs.slice(
+          0,
+          300,
+        );
+      }
+      return { ...created, payload: { ...created.payload } };
+    }),
+  );
+}
+
+export async function processOutboxQueue(options?: {
+  limit?: number;
+  now?: Date;
+  organizationId?: string;
+  kitchenId?: string;
+}) {
+  const { processOutboxQueue: runDispatcher } = await import(
+    "@/lib/outbox-dispatcher"
+  );
+  return runDispatcher(options);
 }
 

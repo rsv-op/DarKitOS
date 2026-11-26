@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import type { CancellationSource } from "@/lib/db";
 import { requireAuthenticatedEmployee } from "@/lib/domain/auth-service";
 import { executeAuthorizedOrderTransition } from "@/lib/domain/order-transitions";
+import { triggerQStashOutboxFlush } from "@/lib/outbox-dispatcher";
 
 export async function PATCH(
   request: NextRequest,
@@ -43,9 +44,20 @@ export async function PATCH(
       );
     }
 
+    const updatedOrder = outcome.result.order;
+    if (
+      !outcome.result.idempotentReplay &&
+      (updatedOrder.source === "SWIGGY" ||
+        updatedOrder.source === "ZOMATO" ||
+        updatedOrder.channel === "Swiggy" ||
+        updatedOrder.channel === "Zomato")
+    ) {
+      void triggerQStashOutboxFlush();
+    }
+
     return NextResponse.json({
       success: true,
-      order: outcome.result.order,
+      order: updatedOrder,
       idempotentReplay: outcome.result.idempotentReplay,
       depletedItems: outcome.result.depletedItems,
       lowStockAlerts: outcome.result.lowStockAlerts,

@@ -19,6 +19,7 @@ import {
   getKitchens,
   getMenuCatalog,
   getOrders,
+  getOutboxEvents,
   injectCanonicalOrder,
 } from "@/lib/store";
 
@@ -37,10 +38,19 @@ export async function GET(request: NextRequest) {
     const channelFilter = searchParams.get("channel") || "";
     const search = (searchParams.get("search") || "").trim().toLowerCase();
 
-    const [allOrders, kitchens] = await Promise.all([
+    const [allOrders, kitchens, outboxEvents] = await Promise.all([
       getOrders(),
       getKitchens(),
+      getOutboxEvents({ organizationId: employee.organizationId }),
     ]);
+
+    const urbanPiperOutboxByOrder = new Map<string, typeof outboxEvents>();
+    for (const evt of outboxEvents) {
+      if (evt.destination !== "URBANPIPER") continue;
+      const list = urbanPiperOutboxByOrder.get(evt.aggregateId) ?? [];
+      list.push(evt);
+      urbanPiperOutboxByOrder.set(evt.aggregateId, list);
+    }
 
     // Level 1 (Organization) cross-org explicit kitchen probe -> 403 Forbidden
     if (requestedKitchenFilter && requestedKitchenFilter !== "ALL") {
@@ -97,9 +107,30 @@ export async function GET(request: NextRequest) {
       );
     }
 
+    const enrichedOrders = orders.map((order) => {
+      const isAgg =
+        order.source === "SWIGGY" ||
+        order.source === "ZOMATO" ||
+        order.channel === "Swiggy" ||
+        order.channel === "Zomato";
+      if (!isAgg) return order;
+      const related = urbanPiperOutboxByOrder.get(order.id) ?? [];
+      const aggregatorSyncStatus = related.some((e) => e.status === "FAILED")
+        ? ("SYNC_FAILED" as const)
+        : related.some(
+              (e) => e.status === "PENDING" || e.status === "RETRYING",
+            )
+          ? ("OUTBOX_QUEUED" as const)
+          : ("SYNCED" as const);
+      return {
+        ...order,
+        aggregatorSyncStatus,
+      };
+    });
+
     return NextResponse.json({
-      orders,
-      total: orders.length,
+      orders: enrichedOrders,
+      total: enrichedOrders.length,
     });
   } catch (error) {
     console.error("GET /api/orders failed:", error);

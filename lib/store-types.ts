@@ -1,4 +1,5 @@
 import type {
+  AggregatorSkuMapping,
   BrandConfig,
   BrandKitchenConfig,
   CancellationRecord,
@@ -25,6 +26,7 @@ import type {
   TaxInvoice,
   VirtualFileAsset,
   WebhookIdempotencyEntry,
+  WhatsAppNotificationLog,
 } from "@/lib/db";
 
 export const MID_PREP_LABOR_ALLOWANCE_INR = 75;
@@ -110,6 +112,8 @@ export interface KitchenState {
   orders: Order[];
   taxInvoices: TaxInvoice[];
   paymentTransactions: PaymentTransaction[];
+  aggregatorSkuMappings: AggregatorSkuMapping[];
+  whatsappNotificationLogs: WhatsAppNotificationLog[];
   inventory: InventoryItem[];
   inventoryMovements: InventoryMovement[];
   cancellations: CancellationRecord[];
