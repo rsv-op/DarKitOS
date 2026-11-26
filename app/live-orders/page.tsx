@@ -20,9 +20,18 @@ import {
   type Employee,
   type Order,
   type OrderChannel,
+  type OrderPaymentStatus,
   type OrderStatus,
   type SystemSettings,
 } from "@/lib/db";
+
+const PAYMENT_STATUS_BADGE: Record<OrderPaymentStatus, string> = {
+  CAPTURED: "border-emerald-500/40 bg-emerald-500/10 text-emerald-300",
+  AGGREGATOR_SETTLED: "border-sky-500/40 bg-sky-500/10 text-sky-300",
+  PENDING: "border-amber-500/40 bg-amber-500/10 text-amber-300",
+  UNPAID: "border-rose-500/40 bg-rose-500/10 text-rose-300",
+  REFUNDED: "border-purple-500/40 bg-purple-500/10 text-purple-300",
+};
 
 const STATUSES: OrderStatus[] = [
   "PENDING",
@@ -280,8 +289,14 @@ export default function LiveOrdersPage() {
         );
       } else if (nextStatus === "CANCELLED") {
         const rec = data.cancellationRecord;
+        const cnNote = data.creditNoteInvoice
+          ? ` • GST Invoice ${data.creditNoteInvoice.invoiceNumber} -> CREDIT_NOTE`
+          : "";
+        const refundNote = data.refundTransaction
+          ? ` • Auto-Refund ${data.refundTransaction.providerRefundId} (${fmt(data.refundTransaction.refundedAmount)})`
+          : "";
         setFeedback(
-          `Order ${orderId} cancelled (${rec?.stage || "STAGE"}) → Resolution: ${rec?.resolution || "PROCESSED"} • Loss: ${fmt(rec?.financialLoss ?? 0)} • Claim: ${fmt(rec?.claimAmount ?? 0)}.`,
+          `Order ${orderId} cancelled (${rec?.stage || "STAGE"}) → Resolution: ${rec?.resolution || "PROCESSED"} • Loss: ${fmt(rec?.financialLoss ?? 0)} • Claim: ${fmt(rec?.claimAmount ?? 0)}${cnNote}${refundNote}.`,
         );
       } else {
         setFeedback(
@@ -294,6 +309,37 @@ export default function LiveOrdersPage() {
         err instanceof Error
           ? err.message
           : "Transition failed.",
+      );
+    } finally {
+      setSubmittingId(null);
+    }
+  }
+
+  async function handleSimulateSandboxUpi(orderId: string) {
+    setSubmittingId(orderId);
+    setError("");
+    setFeedback("");
+    try {
+      const res = await fetch("/api/payments/razorpay/order", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          orderId,
+          simulateSandboxCapture: true,
+          method: "upi",
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || "Unable to capture Sandbox UPI payment.");
+      }
+      setFeedback(
+        `Sandbox UPI Payment Captured for ${orderId} (${data.transaction?.providerPaymentId || "pay_sbx"}) — Razorpay HMAC verified.`,
+      );
+      await loadOrders();
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "Sandbox UPI capture failed.",
       );
     } finally {
       setSubmittingId(null);
@@ -529,16 +575,35 @@ export default function LiveOrdersPage() {
                       </div>
 
                       <div className="text-right">
-                        <span
-                          className={`inline-block rounded-full border px-2.5 py-0.5 font-mono text-[10px] font-bold ${STATUS_BADGE[order.status]}`}
-                        >
-                          {order.status.replaceAll(
-                            "_",
-                            " ",
-                          )}
-                        </span>
+                        <div className="flex flex-wrap justify-end gap-1.5">
+                          <span
+                            className={`inline-block rounded-full border px-2.5 py-0.5 font-mono text-[10px] font-bold ${STATUS_BADGE[order.status]}`}
+                          >
+                            {order.status.replaceAll(
+                              "_",
+                              " ",
+                            )}
+                          </span>
+                          <span
+                            className={`inline-block rounded-full border px-2 py-0.5 font-mono text-[10px] font-bold ${
+                              PAYMENT_STATUS_BADGE[
+                                order.paymentStatus ?? "AGGREGATOR_SETTLED"
+                              ]
+                            }`}
+                          >
+                            {(
+                              order.paymentStatus ?? "AGGREGATOR_SETTLED"
+                            ).replaceAll("_", " ")}
+                          </span>
+                        </div>
                         <p className="mt-1 font-mono text-sm font-bold text-emerald-400">
                           {fmt(order.totalAmount ?? 0)}
+                          {typeof order.taxAmount === "number" &&
+                            order.taxAmount > 0 && (
+                              <span className="ml-1.5 text-[10px] font-normal text-slate-400">
+                                (incl. GST {fmt(order.taxAmount)})
+                              </span>
+                            )}
                         </p>
                       </div>
                     </div>
@@ -672,6 +737,82 @@ export default function LiveOrdersPage() {
                       Loss: {fmt(selectedOrder.lossAmount ?? 0)} • Claim:{" "}
                       {fmt(selectedOrder.claimAmount ?? 0)}
                     </p>
+                  </div>
+                </div>
+
+                {/* Indian GST Tax Breakup & Razorpay Payment Status */}
+                <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/5 p-3.5 font-mono text-xs">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <span className="font-bold uppercase text-emerald-300">
+                      Indian GST &amp; Payment Ledger
+                    </span>
+                    <span
+                      className={`rounded-full border px-2 py-0.5 text-[10px] font-bold ${
+                        PAYMENT_STATUS_BADGE[
+                          selectedOrder.paymentStatus ?? "AGGREGATOR_SETTLED"
+                        ]
+                      }`}
+                    >
+                      {(
+                        selectedOrder.paymentStatus ?? "AGGREGATOR_SETTLED"
+                      ).replaceAll("_", " ")}
+                    </span>
+                  </div>
+                  <div className="mt-2.5 space-y-1 text-[11px] text-slate-300">
+                    <div className="flex justify-between">
+                      <span>Taxable Subtotal</span>
+                      <span>
+                        {fmt(
+                          selectedOrder.subtotalAmount ??
+                            selectedOrder.totalAmount ??
+                            0,
+                        )}
+                      </span>
+                    </div>
+                    {(selectedOrder.igstAmount ?? 0) > 0 ? (
+                      <div className="flex justify-between text-cyan-300">
+                        <span>IGST (5%)</span>
+                        <span>{fmt(selectedOrder.igstAmount ?? 0)}</span>
+                      </div>
+                    ) : (
+                      <div className="flex justify-between text-emerald-300">
+                        <span>CGST (2.5%) + SGST (2.5%)</span>
+                        <span>
+                          {fmt(selectedOrder.cgstAmount ?? 0)} +{" "}
+                          {fmt(selectedOrder.sgstAmount ?? 0)}
+                        </span>
+                      </div>
+                    )}
+                    <div className="flex justify-between border-t border-slate-800 pt-1.5 font-bold text-white">
+                      <span>Grand Total (INR)</span>
+                      <span>{fmt(selectedOrder.totalAmount ?? 0)}</span>
+                    </div>
+                  </div>
+                  <div className="mt-3 flex flex-wrap items-center gap-2">
+                    <Link
+                      href={`/invoices?order=${encodeURIComponent(selectedOrder.id)}`}
+                      className="rounded-lg border border-sky-500/40 bg-sky-500/10 px-3 py-1.5 text-[11px] font-bold text-sky-300 hover:bg-sky-500/20"
+                    >
+                      View GST Tax Invoice →
+                    </Link>
+                    {(selectedOrder.source === "DIRECT_WEB" ||
+                      selectedOrder.channel === "Direct Web") &&
+                      selectedOrder.status !== "CANCELLED" &&
+                      (selectedOrder.paymentStatus === "UNPAID" ||
+                        selectedOrder.paymentStatus === "PENDING") && (
+                        <button
+                          type="button"
+                          disabled={submittingId === selectedOrder.id}
+                          onClick={() =>
+                            void handleSimulateSandboxUpi(selectedOrder.id)
+                          }
+                          className="rounded-lg bg-emerald-500 px-3 py-1.5 text-[11px] font-black text-slate-950 hover:bg-emerald-400 disabled:opacity-50"
+                        >
+                          {submittingId === selectedOrder.id
+                            ? "Capturing UPI…"
+                            : "⚡ Simulate Sandbox UPI Capture"}
+                        </button>
+                      )}
                   </div>
                 </div>
 

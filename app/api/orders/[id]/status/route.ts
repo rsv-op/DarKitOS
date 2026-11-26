@@ -50,6 +50,8 @@ export async function PATCH(
       depletedItems: outcome.result.depletedItems,
       lowStockAlerts: outcome.result.lowStockAlerts,
       cancellationRecord: outcome.result.cancellationRecord,
+      creditNoteInvoice: outcome.result.creditNoteInvoice,
+      refundTransaction: outcome.result.refundTransaction,
     });
   } catch (error) {
     console.error("PATCH /api/orders/[id]/status failed:", error);

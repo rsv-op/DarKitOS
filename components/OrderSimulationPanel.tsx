@@ -23,8 +23,13 @@ import {
   type OrderChannel,
   type OutboxEvent,
   type SystemSettings,
+  type TaxInvoice,
   type WebhookIdempotencyEntry,
 } from "@/lib/db";
+import {
+  calculateIndianGstBreakup,
+  getIndianStateName,
+} from "@/lib/gst";
 
 const CHANNELS: OrderChannel[] = [
   "Swiggy",
@@ -119,6 +124,9 @@ export default function OrderSimulationPanel() {
 
   const [message, setMessage] = useState("");
   const [createdOrderId, setCreatedOrderId] = useState<string | null>(null);
+  const [createdOrder, setCreatedOrder] = useState<Order | null>(null);
+  const [createdInvoice, setCreatedInvoice] = useState<TaxInvoice | null>(null);
+  const [isCapturingUpi, setIsCapturingUpi] = useState(false);
   const [messageType, setMessageType] =
     useState<
       "success" | "warning" | "error" | "info"
@@ -253,6 +261,22 @@ export default function OrderSimulationPanel() {
     );
   }, [cartItems]);
 
+  const selectedKitchen = useMemo(
+    () => kitchens.find((k) => k.id === selectedKitchenId) ?? kitchens[0],
+    [kitchens, selectedKitchenId],
+  );
+
+  const gstPreview = useMemo(() => {
+    const sellerState = selectedKitchen?.stateCode || "06";
+    return calculateIndianGstBreakup({
+      itemsSubtotal: orderTotal,
+      packagingFee: 0,
+      sellerStateCode: sellerState,
+      placeOfSupplyStateCode: sellerState,
+      gstRatePct: 5,
+    });
+  }, [orderTotal, selectedKitchen]);
+
   // Live recipe ingredient requirement preview
   const ingredientPreview = useMemo(() => {
     const reqMap = new Map<string, number>();
@@ -321,6 +345,8 @@ export default function OrderSimulationPanel() {
     setIsSubmitting(true);
     setMessage("");
     setCreatedOrderId(null);
+    setCreatedOrder(null);
+    setCreatedInvoice(null);
 
     const activeKey = reuseKey
       ? idempotencyKey
@@ -371,7 +397,11 @@ export default function OrderSimulationPanel() {
 
       const storedOrder =
         data?.order as Order;
+      const storedInvoice =
+        (data?.invoice as TaxInvoice | undefined) ?? null;
       setCreatedOrderId(storedOrder.id);
+      setCreatedOrder(storedOrder);
+      setCreatedInvoice(storedInvoice);
       await loadSystemSnapshot();
 
       if (data?.idempotentReplay) {
@@ -698,18 +728,132 @@ export default function OrderSimulationPanel() {
               }`}
             >
               <p role={messageType === "error" ? "alert" : "status"}>{message}</p>
+              {createdInvoice && (
+                <p className="mt-1.5 text-[11px] text-slate-200">
+                  GST Tax Invoice:{" "}
+                  <strong className="text-emerald-300">
+                    {createdInvoice.invoiceNumber}
+                  </strong>{" "}
+                  • Payment:{" "}
+                  <strong className="text-sky-300">
+                    {createdOrder?.paymentStatus ?? "AGGREGATOR_SETTLED"}
+                  </strong>
+                </p>
+              )}
               {createdOrderId && (
-                <Link
-                  href={`/live-orders?order=${encodeURIComponent(createdOrderId)}`}
-                  className="mt-2 inline-block rounded font-semibold text-white underline underline-offset-4 focus-visible:outline focus-visible:outline-offset-2 focus-visible:outline-sky-400"
-                >
-                  Find this order in Live Orders →
-                </Link>
+                <div className="mt-2.5 flex flex-wrap items-center gap-3">
+                  <Link
+                    href={`/live-orders?order=${encodeURIComponent(createdOrderId)}`}
+                    className="inline-block rounded font-semibold text-white underline underline-offset-4 focus-visible:outline focus-visible:outline-offset-2 focus-visible:outline-sky-400"
+                  >
+                    Find this order in Live Orders →
+                  </Link>
+                  <Link
+                    href={`/invoices?order=${encodeURIComponent(createdOrderId)}`}
+                    className="inline-block rounded font-semibold text-emerald-200 underline underline-offset-4"
+                  >
+                    View GST Tax Invoice →
+                  </Link>
+                  {createdOrder &&
+                    (createdOrder.source === "DIRECT_WEB" ||
+                      createdOrder.channel === "Direct Web") &&
+                    (createdOrder.paymentStatus === "UNPAID" ||
+                      createdOrder.paymentStatus === "PENDING") && (
+                      <button
+                        type="button"
+                        disabled={isCapturingUpi}
+                        onClick={() => {
+                          void (async () => {
+                            setIsCapturingUpi(true);
+                            try {
+                              const res = await fetch(
+                                "/api/payments/razorpay/order",
+                                {
+                                  method: "POST",
+                                  headers: {
+                                    "Content-Type": "application/json",
+                                  },
+                                  body: JSON.stringify({
+                                    orderId: createdOrder.id,
+                                    simulateSandboxCapture: true,
+                                    method: "upi",
+                                  }),
+                                },
+                              );
+                              const data = await res.json();
+                              if (!res.ok) {
+                                setMessage(
+                                  data.error ||
+                                    "Sandbox UPI capture failed.",
+                                );
+                                setMessageType("error");
+                                return;
+                              }
+                              setCreatedOrder(data.order as Order);
+                              setMessage(
+                                `Sandbox UPI Payment Captured for ${createdOrder.id} (${data.transaction?.providerPaymentId || "pay_sbx"}). Status is now CAPTURED.`,
+                              );
+                              setMessageType("success");
+                              await loadSystemSnapshot();
+                            } finally {
+                              setIsCapturingUpi(false);
+                            }
+                          })();
+                        }}
+                        className="rounded-lg bg-emerald-400 px-3 py-1 font-mono text-[11px] font-black text-slate-950 hover:bg-emerald-300 disabled:opacity-50"
+                      >
+                        {isCapturingUpi
+                          ? "Capturing UPI…"
+                          : "⚡ Simulate Sandbox UPI Payment"}
+                      </button>
+                    )}
+                </div>
               )}
             </div>
           )}
 
-          <div className="mt-6 flex flex-wrap gap-3">
+          {/* Live Indian GST Breakup Preview */}
+          <div className="mt-5 rounded-xl border border-emerald-500/25 bg-slate-950/80 p-3.5 font-mono text-xs">
+            <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-slate-400">
+              <span>
+                Indian GST Preview ({selectedKitchen?.code || selectedKitchenId} •{" "}
+                {getIndianStateName(selectedKitchen?.stateCode)})
+              </span>
+              <span className="text-sky-300">
+                {selectedChannel === "Direct Web"
+                  ? "Direct Web · Razorpay UPI (UNPAID -> CAPTURED)"
+                  : `${selectedChannel} · AGGREGATOR_SETTLED`}
+              </span>
+            </div>
+            <div className="mt-2 grid grid-cols-2 gap-2 text-[11px] sm:grid-cols-4">
+              <div>
+                <span className="text-slate-500">Taxable Subtotal</span>
+                <p className="font-bold text-slate-200">
+                  {formatCurrency(gstPreview.taxableSubtotal, currency)}
+                </p>
+              </div>
+              <div>
+                <span className="text-slate-500">CGST ({gstPreview.cgstRate}%)</span>
+                <p className="font-bold text-emerald-300">
+                  {formatCurrency(gstPreview.cgstAmount, currency)}
+                </p>
+              </div>
+              <div>
+                <span className="text-slate-500">SGST ({gstPreview.sgstRate}%)</span>
+                <p className="font-bold text-emerald-300">
+                  {formatCurrency(gstPreview.sgstAmount, currency)}
+                </p>
+              </div>
+              <div>
+                <span className="text-slate-500">Grand Total</span>
+                <p className="font-black text-white">
+                  {formatCurrency(gstPreview.grandTotal, currency)}
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-5 flex flex-wrap gap-3">
             <button
               type="button"
               onClick={() =>
@@ -723,7 +867,7 @@ export default function OrderSimulationPanel() {
             >
               {isSubmitting
                 ? "Creating order…"
-                : `Create sample order (${formatCurrency(orderTotal, currency)})`}
+                : `Create sample order (${formatCurrency(gstPreview.grandTotal, currency)} incl. GST)`}
             </button>
 
           </div>

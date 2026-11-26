@@ -27,14 +27,25 @@ import {
   type OrderChannel,
   type OrderEvent,
   type OrderItem,
+  type OrderPaymentStatus,
   type Organization,
   type OutboxEvent,
+  type PaymentProvider,
+  type PaymentTransaction,
   type RevenueLeakageVector,
   type SystemSettings,
+  type TaxInvoice,
+  type TaxInvoiceStatus,
   type VirtualFileAsset,
   type WebhookIdempotencyEntry,
 } from "@/lib/db";
 import { isPostgresConfigured } from "@/lib/db-client";
+import {
+  calculateIndianGstBreakup,
+  formatTaxInvoiceNumber,
+  getIndianFinancialYear,
+} from "@/lib/gst";
+import { refundRazorpayPayment } from "@/lib/razorpay";
 import { publishKitchenRealtimeEvent } from "@/lib/realtime-publisher";
 import * as pgStore from "@/lib/store-pg";
 import { buildInitialSeedState } from "@/lib/store-seed";
@@ -154,6 +165,11 @@ function cloneState(state: KitchenState): KitchenState {
   return {
     organizations: state.organizations.map((o) => ({ ...o })),
     orders: state.orders.map(cloneOrder),
+    taxInvoices: state.taxInvoices.map((inv) => ({ ...inv })),
+    paymentTransactions: state.paymentTransactions.map((tx) => ({
+      ...tx,
+      rawMeta: tx.rawMeta ? { ...tx.rawMeta } : undefined,
+    })),
     inventory: state.inventory.map(cloneInventoryItem),
     inventoryMovements: state.inventoryMovements.map((m) => ({ ...m })),
     cancellations: state.cancellations.map((c) => ({
@@ -341,6 +357,106 @@ export async function findOrder(orderId: string): Promise<Order | undefined> {
   return order ? cloneOrder(order) : undefined;
 }
 
+export async function getTaxInvoices(filters?: {
+  organizationId?: string;
+  kitchenId?: string;
+  financialYear?: string;
+  status?: TaxInvoiceStatus;
+  from?: string;
+  to?: string;
+}): Promise<TaxInvoice[]> {
+  if (isPostgresConfigured()) return pgStore.getTaxInvoicesPg(filters);
+  const fromMs = filters?.from ? new Date(filters.from).getTime() : null;
+  const toMs = filters?.to ? new Date(filters.to).getTime() : null;
+  return getGlobalState()
+    .taxInvoices.filter((inv) => {
+      if (
+        filters?.organizationId &&
+        inv.organizationId !== filters.organizationId
+      ) {
+        return false;
+      }
+      if (
+        filters?.kitchenId &&
+        filters.kitchenId !== "ALL" &&
+        inv.kitchenId !== filters.kitchenId
+      ) {
+        return false;
+      }
+      if (
+        filters?.financialYear &&
+        inv.financialYear !== filters.financialYear
+      ) {
+        return false;
+      }
+      if (filters?.status && inv.status !== filters.status) {
+        return false;
+      }
+      const ts = new Date(inv.issuedAt).getTime();
+      if (fromMs !== null && Number.isFinite(fromMs) && ts < fromMs) {
+        return false;
+      }
+      if (toMs !== null && Number.isFinite(toMs) && ts > toMs) {
+        return false;
+      }
+      return true;
+    })
+    .sort((a, b) => {
+      const diff =
+        new Date(b.issuedAt).getTime() - new Date(a.issuedAt).getTime();
+      return diff !== 0 ? diff : b.sequenceNumber - a.sequenceNumber;
+    })
+    .map((inv) => ({ ...inv }));
+}
+
+export async function findTaxInvoiceById(
+  invoiceId: string,
+): Promise<TaxInvoice | undefined> {
+  if (isPostgresConfigured()) return pgStore.findTaxInvoiceByIdPg(invoiceId);
+  const inv = getGlobalState().taxInvoices.find((i) => i.id === invoiceId);
+  return inv ? { ...inv } : undefined;
+}
+
+export async function findTaxInvoiceByOrderId(
+  orderId: string,
+): Promise<TaxInvoice | undefined> {
+  if (isPostgresConfigured()) return pgStore.findTaxInvoiceByOrderIdPg(orderId);
+  const inv = getGlobalState().taxInvoices.find((i) => i.orderId === orderId);
+  return inv ? { ...inv } : undefined;
+}
+
+export async function getPaymentTransactions(filters?: {
+  organizationId?: string;
+  kitchenId?: string;
+  orderId?: string;
+}): Promise<PaymentTransaction[]> {
+  if (isPostgresConfigured()) return pgStore.getPaymentTransactionsPg(filters);
+  return getGlobalState()
+    .paymentTransactions.filter((txRow) => {
+      if (
+        filters?.organizationId &&
+        txRow.organizationId !== filters.organizationId
+      ) {
+        return false;
+      }
+      if (
+        filters?.kitchenId &&
+        filters.kitchenId !== "ALL" &&
+        txRow.kitchenId !== filters.kitchenId
+      ) {
+        return false;
+      }
+      if (filters?.orderId && txRow.orderId !== filters.orderId) {
+        return false;
+      }
+      return true;
+    })
+    .map((txRow) => ({
+      ...txRow,
+      rawMeta: txRow.rawMeta ? { ...txRow.rawMeta } : undefined,
+    }));
+}
+
 // -----------------------------------------------------------------------------
 // Lifecycle Reset / Clear / Activity
 // -----------------------------------------------------------------------------
@@ -363,6 +479,8 @@ export async function clearOrdersStore(): Promise<void> {
   await withMemoryLock(() => {
     const state = getGlobalState();
     state.orders = [];
+    state.taxInvoices = [];
+    state.paymentTransactions = [];
     state.cancellations = [];
     state.webhookEvents = [];
     state.outboxEvents = [];
@@ -371,7 +489,7 @@ export async function clearOrdersStore(): Promise<void> {
       category: "SYSTEM",
       title: "Active Order Queue Cleared",
       details:
-        "All orders, cancellations, webhook receipts, and outbox items cleared to demonstrate honest empty states across stations.",
+        "All orders, tax invoices, payment transactions, cancellations, webhook receipts, and outbox items cleared to demonstrate honest empty states across stations.",
       actor: "SYSTEM",
       severity: "warning",
     });
@@ -495,8 +613,12 @@ export async function injectCanonicalOrder(
                   brandId: existingOrder.brandId,
                   severity: "warning",
                 });
+                const existingInvoice = state.taxInvoices.find(
+                  (inv) => inv.orderId === existingOrder.id,
+                );
                 return {
                   order: cloneOrder(existingOrder),
+                  invoice: existingInvoice ? { ...existingInvoice } : undefined,
                   idempotentReplay: true,
                   inventoryDecision:
                     existingOrder.inventoryDecision ?? "AVAILABLE",
@@ -536,9 +658,12 @@ export async function injectCanonicalOrder(
             }),
           );
 
-          const totalAmount = calculateOrderTotalAmount(
+          const itemsSubtotal = calculateOrderTotalAmount(
             resolvedItems,
             state.menuCatalog,
+          );
+          const packagingFee = round2(
+            Math.max(0, Number(input.packagingFee) || 0),
           );
           const itemCount = resolvedItems.reduce(
             (sum, item) => sum + item.quantity,
@@ -548,11 +673,47 @@ export async function injectCanonicalOrder(
           const channel: OrderChannel = CHANNEL_SOURCE_MAP[input.channel]
             ? input.channel
             : "Direct Web";
+          const resolvedSource =
+            input.source || CHANNEL_SOURCE_MAP[channel] || "MANUAL";
+          const resolvedPaymentStatus: OrderPaymentStatus =
+            input.paymentStatus ??
+            (resolvedSource === "DIRECT_WEB" ? "UNPAID" : "AGGREGATOR_SETTLED");
 
           const resolvedOrganizationId =
             input.organizationId?.trim() ||
             kitchen.organizationId ||
             DEFAULT_ORGANIZATION_ID;
+
+          const org = state.organizations.find(
+            (o) => o.id === resolvedOrganizationId,
+          );
+          const sellerStateCode = kitchen.stateCode || "06";
+          const gstBreakup = calculateIndianGstBreakup({
+            itemsSubtotal,
+            packagingFee,
+            sellerStateCode,
+            placeOfSupplyStateCode:
+              input.placeOfSupplyStateCode || sellerStateCode,
+            gstRatePct: 5,
+          });
+          const totalAmount = gstBreakup.grandTotal;
+
+          const financialYear = getIndianFinancialYear(now);
+          const currentMaxSeq = state.taxInvoices
+            .filter(
+              (inv) =>
+                inv.organizationId === resolvedOrganizationId &&
+                inv.financialYear === financialYear &&
+                inv.kitchenId === kitchen.id,
+            )
+            .reduce((max, inv) => Math.max(max, inv.sequenceNumber), 0);
+          const sequenceNumber = currentMaxSeq + 1;
+          const invoiceId = makeId("INV");
+          const invoiceNumber = formatTaxInvoiceNumber({
+            financialYear,
+            kitchenCode: kitchen.code,
+            sequenceNumber,
+          });
 
           const draftOrder: Order = {
             id: orderId,
@@ -564,11 +725,21 @@ export async function injectCanonicalOrder(
             brandId: input.brandId,
             kitchenId: input.kitchenId,
             channel,
-            source: input.source || CHANNEL_SOURCE_MAP[channel] || "MANUAL",
+            source: resolvedSource,
             status: "PENDING",
             priority: input.priority || "NORMAL",
             items: resolvedItems,
+            subtotalAmount: gstBreakup.itemsSubtotal,
+            packagingAmount: gstBreakup.packagingFee,
+            cgstAmount: gstBreakup.cgstAmount,
+            sgstAmount: gstBreakup.sgstAmount,
+            igstAmount: gstBreakup.igstAmount,
+            taxAmount: gstBreakup.totalTax,
             totalAmount,
+            paymentStatus: resolvedPaymentStatus,
+            invoiceId,
+            placeOfSupplyStateCode: gstBreakup.placeOfSupplyStateCode,
+            customerGstin: input.customerGstin?.trim() || undefined,
             itemCount,
             notes: input.notes?.trim() || undefined,
             customerName:
@@ -578,6 +749,37 @@ export async function injectCanonicalOrder(
             receivedAt: now,
             inventoryConsumed: false,
             events: [],
+          };
+
+          const taxInvoice: TaxInvoice = {
+            id: invoiceId,
+            organizationId: resolvedOrganizationId,
+            kitchenId: kitchen.id,
+            orderId,
+            invoiceNumber,
+            financialYear,
+            sequenceNumber,
+            issuedAt: now,
+            sellerGstin:
+              kitchen.gstin || org?.gstin || "06AABCD1234E1Z5",
+            sellerFssai:
+              kitchen.fssaiLicense || org?.fssaiLicense || "10824999000412",
+            sellerStateCode: gstBreakup.sellerStateCode,
+            placeOfSupplyStateCode: gstBreakup.placeOfSupplyStateCode,
+            customerName: draftOrder.customerName,
+            customerGstin: draftOrder.customerGstin,
+            taxableSubtotal: gstBreakup.taxableSubtotal,
+            packagingFee: gstBreakup.packagingFee,
+            cgstRate: gstBreakup.cgstRate,
+            cgstAmount: gstBreakup.cgstAmount,
+            sgstRate: gstBreakup.sgstRate,
+            sgstAmount: gstBreakup.sgstAmount,
+            igstRate: gstBreakup.igstRate,
+            igstAmount: gstBreakup.igstAmount,
+            totalTax: gstBreakup.totalTax,
+            grandTotal: gstBreakup.grandTotal,
+            status: "ISSUED",
+            createdAt: now,
           };
 
           // 6. Per-Kitchen Inventory Availability Evaluation
@@ -612,6 +814,13 @@ export async function injectCanonicalOrder(
               actor: "SYSTEM",
               details: `Inventory evaluation (${input.kitchenId}): ${evaluation.inventoryDecision}.`,
             },
+            {
+              id: `${orderId}-EVT-INV`,
+              type: "INVOICE_ISSUED",
+              timestamp: now,
+              actor: "SYSTEM",
+              details: `GST Tax Invoice ${invoiceNumber} issued (Taxable ₹${gstBreakup.taxableSubtotal.toFixed(2)}, GST ₹${gstBreakup.totalTax.toFixed(2)}, Grand Total ₹${gstBreakup.grandTotal.toFixed(2)}).`,
+            },
           ];
 
           if (evaluation.lowStockItems.length > 0) {
@@ -636,8 +845,9 @@ export async function injectCanonicalOrder(
 
           draftOrder.events = events;
 
-          // 7. Save Order, Webhook Receipt, Outbox, Activity
+          // 7. Save Order, TaxInvoice, Webhook Receipt, Outbox, Activity
           state.orders.unshift(cloneOrder(draftOrder));
+          state.taxInvoices.unshift({ ...taxInvoice });
 
           state.webhookEvents.unshift({
             idempotencyKey: draftOrder.idempotencyKey!,
@@ -689,6 +899,7 @@ export async function injectCanonicalOrder(
 
           return {
             order: cloneOrder(draftOrder),
+            invoice: { ...taxInvoice },
             idempotentReplay: false,
             inventoryDecision: evaluation.inventoryDecision,
             inventoryWarnings: evaluation.lowStockItems,
@@ -966,34 +1177,97 @@ export async function transitionCanonicalOrder(
         return inner;
       });
 
-  if (!result.idempotentReplay) {
+  let finalResult = result;
+
+  if (
+    !result.idempotentReplay &&
+    result.order.status === "CANCELLED" &&
+    result.cancellationRecord?.stage === "BEFORE_PREP" &&
+    (result.order.source === "DIRECT_WEB" ||
+      result.order.channel === "Direct Web") &&
+    result.order.paymentStatus === "CAPTURED"
+  ) {
+    const txs = await getPaymentTransactions({ orderId: result.order.id });
+    const capturedTx = txs.find(
+      (t) => t.status === "CAPTURED" && Boolean(t.providerPaymentId),
+    );
+    if (capturedTx?.providerPaymentId) {
+      const refund = await refundRazorpayPayment({
+        paymentId: capturedTx.providerPaymentId,
+        amountInr: capturedTx.amount,
+        notes: {
+          orderId: result.order.id,
+          reason: result.cancellationRecord.reason,
+        },
+      });
+      const refunded = await recordPaymentRefund({
+        transactionId: capturedTx.id,
+        orderId: result.order.id,
+        providerRefundId: refund.providerRefundId,
+        refundedAmount: refund.amountInr,
+        actor: input.actor,
+        reason: result.cancellationRecord.reason,
+        rawMeta: { mode: refund.mode, status: refund.status },
+      });
+      finalResult = {
+        ...result,
+        order: refunded.order,
+        refundTransaction: refunded.transaction,
+      };
+    }
+  }
+
+  if (!finalResult.idempotentReplay) {
     const orgId =
-      result.order.organizationId ??
-      (await resolveKitchenOrganizationId(result.order.kitchenId));
+      finalResult.order.organizationId ??
+      (await resolveKitchenOrganizationId(finalResult.order.kitchenId));
     await publishKitchenRealtimeEvent({
       type:
-        result.order.status === "CANCELLED"
+        finalResult.order.status === "CANCELLED"
           ? "ORDER_CANCELLED"
           : "ORDER_STATUS_CHANGED",
       organizationId: orgId,
-      kitchenId: result.order.kitchenId,
-      orderId: result.order.id,
-      status: result.order.status,
-      brandId: result.order.brandId,
+      kitchenId: finalResult.order.kitchenId,
+      orderId: finalResult.order.id,
+      status: finalResult.order.status,
+      brandId: finalResult.order.brandId,
       actor: input.actor,
     });
-    if (result.lowStockAlerts && result.lowStockAlerts.length > 0) {
+    if (finalResult.refundTransaction) {
+      await publishKitchenRealtimeEvent({
+        type: "PAYMENT_REFUNDED",
+        organizationId: orgId,
+        kitchenId: finalResult.order.kitchenId,
+        orderId: finalResult.order.id,
+        status: finalResult.order.paymentStatus,
+        brandId: finalResult.order.brandId,
+        actor: input.actor,
+        details: `Refund ${finalResult.refundTransaction.providerRefundId} processed`,
+      });
+    }
+    if (finalResult.lowStockAlerts && finalResult.lowStockAlerts.length > 0) {
       await publishKitchenRealtimeEvent({
         type: "STOCK_LOW_ALERT",
         organizationId: orgId,
-        kitchenId: result.order.kitchenId,
-        orderId: result.order.id,
-        details: result.lowStockAlerts.join(", "),
+        kitchenId: finalResult.order.kitchenId,
+        orderId: finalResult.order.id,
+        details: finalResult.lowStockAlerts.join(", "),
       });
     }
   }
 
-  return result;
+  return finalResult;
+}
+
+export const createCanonicalOrder = injectCanonicalOrder;
+
+export async function cancelCanonicalOrder(
+  input: Omit<TransitionOrderInput, "nextStatus">,
+): Promise<TransitionOrderResult> {
+  return transitionCanonicalOrder({
+    ...input,
+    nextStatus: "CANCELLED",
+  });
 }
 
 function executeStageAwareCancellationMemory(
@@ -1204,14 +1478,35 @@ function executeStageAwareCancellationMemory(
         : undefined,
   };
 
+  let creditNoteInvoice: TaxInvoice | undefined;
+  if (stage === "BEFORE_PREP") {
+    const inv = state.taxInvoices.find(
+      (i) => i.orderId === currentOrder.id && i.status === "ISSUED",
+    );
+    if (inv) {
+      inv.status = "CREDIT_NOTE";
+      inv.voidedAt = now;
+      inv.voidReason = reason;
+      creditNoteInvoice = { ...inv };
+      currentOrder.events.push({
+        id: makeId(`${currentOrder.id}-CN`),
+        type: "INVOICE_CREDITED",
+        timestamp: now,
+        actor: input.actor,
+        details: `GST Tax Invoice ${inv.invoiceNumber} converted to CREDIT_NOTE (pre-prep cancellation). Reason: ${reason}.`,
+      });
+    }
+  }
+
   state.orders[orderIndex] = cloneOrder(currentOrder);
   state.cancellations.unshift(cancellationRecord);
 
   pushMemoryActivity(state, {
+    organizationId: currentOrder.organizationId ?? DEFAULT_ORGANIZATION_ID,
     type: "ORDER_CANCELLED",
     category: "CANCELLATION",
     title: `${currentOrder.id} Cancelled (${stage.replaceAll("_", " ")})`,
-    details: `Resolution: ${resolution.replaceAll("_", " ")} • Loss: ${formattedLoss} • Claim: ${formattedClaim}.`,
+    details: `Resolution: ${resolution.replaceAll("_", " ")} • Loss: ${formattedLoss} • Claim: ${formattedClaim}.${creditNoteInvoice ? ` • GST Invoice ${creditNoteInvoice.invoiceNumber} -> CREDIT_NOTE.` : ""}`,
     actor: input.actor,
     orderId: currentOrder.id,
     kitchenId: currentOrder.kitchenId,
@@ -1224,6 +1519,7 @@ function executeStageAwareCancellationMemory(
     order: cloneOrder(currentOrder),
     idempotentReplay: false,
     cancellationRecord,
+    creditNoteInvoice,
   };
 }
 
@@ -2239,3 +2535,296 @@ export async function updateLeakageVectorStatus(
     }),
   );
 }
+
+// -----------------------------------------------------------------------------
+// Payment Transactions & Razorpay Direct Web Capture / Refund
+// -----------------------------------------------------------------------------
+
+export async function createPaymentIntentRecord(input: {
+  organizationId: string;
+  kitchenId: string;
+  orderId: string;
+  provider: PaymentProvider;
+  providerOrderId: string;
+  amount: number;
+  currency?: string;
+  method?: string;
+  rawMeta?: Record<string, unknown>;
+  actor?: string;
+}): Promise<{ transaction: PaymentTransaction; order: Order }> {
+  if (isPostgresConfigured()) {
+    return pgStore.createPaymentIntentRecordPg(input);
+  }
+  return withMemoryLock(() =>
+    runMemoryTransaction((state) => {
+      const order = state.orders.find((o) => o.id === input.orderId);
+      if (!order) {
+        throw new Error(`Order not found: ${input.orderId}`);
+      }
+      const now = new Date().toISOString();
+      const txRow: PaymentTransaction = {
+        id: makeId("PAY"),
+        organizationId: input.organizationId,
+        kitchenId: input.kitchenId,
+        orderId: input.orderId,
+        provider: input.provider,
+        providerOrderId: input.providerOrderId,
+        amount: round2(input.amount),
+        refundedAmount: 0,
+        currency: input.currency ?? "INR",
+        status: "CREATED",
+        method: input.method,
+        rawMeta: input.rawMeta ? { ...input.rawMeta } : undefined,
+        createdAt: now,
+        updatedAt: now,
+      };
+      state.paymentTransactions.unshift(txRow);
+      if (order.paymentStatus === "UNPAID" || !order.paymentStatus) {
+        order.paymentStatus = "PENDING";
+        order.updatedAt = now;
+      }
+      return {
+        transaction: { ...txRow },
+        order: cloneOrder(order),
+      };
+    }),
+  );
+}
+
+export async function recordRazorpayPaymentCapture(input: {
+  webhookEventId?: string;
+  providerOrderId?: string;
+  providerPaymentId: string;
+  orderId?: string;
+  amount?: number;
+  method?: string;
+  rawMeta?: Record<string, unknown>;
+  actor?: string;
+}): Promise<{
+  transaction: PaymentTransaction;
+  order: Order;
+  idempotentReplay: boolean;
+}> {
+  const result = isPostgresConfigured()
+    ? await pgStore.recordRazorpayPaymentCapturePg(input)
+    : await withMemoryLock(() =>
+        runMemoryTransaction((state) => {
+          const now = new Date().toISOString();
+          const actor = input.actor || "RAZORPAY_WEBHOOK";
+
+          if (input.webhookEventId) {
+            const byEvent = state.paymentTransactions.find(
+              (t) => t.webhookEventId === input.webhookEventId,
+            );
+            if (byEvent) {
+              const ord = state.orders.find((o) => o.id === byEvent.orderId);
+              if (!ord) {
+                throw new Error(`Order not found: ${byEvent.orderId}`);
+              }
+              return {
+                transaction: { ...byEvent },
+                order: cloneOrder(ord),
+                idempotentReplay: true,
+              };
+            }
+          }
+
+          const byPayment = state.paymentTransactions.find(
+            (t) => t.providerPaymentId === input.providerPaymentId,
+          );
+          if (
+            byPayment &&
+            (byPayment.status === "CAPTURED" || byPayment.status === "REFUNDED")
+          ) {
+            const ord = state.orders.find((o) => o.id === byPayment.orderId);
+            if (!ord) {
+              throw new Error(`Order not found: ${byPayment.orderId}`);
+            }
+            return {
+              transaction: { ...byPayment },
+              order: cloneOrder(ord),
+              idempotentReplay: true,
+            };
+          }
+
+          let matchedTx = byPayment;
+          if (!matchedTx && input.providerOrderId) {
+            matchedTx = state.paymentTransactions.find(
+              (t) => t.providerOrderId === input.providerOrderId,
+            );
+          }
+
+          const targetOrderId = matchedTx?.orderId || input.orderId;
+          if (!targetOrderId) {
+            throw new Error(
+              `Unable to resolve order for Razorpay payment ${input.providerPaymentId}.`,
+            );
+          }
+          const order = state.orders.find((o) => o.id === targetOrderId);
+          if (!order) {
+            throw new Error(
+              `Order not found for payment capture: ${targetOrderId}`,
+            );
+          }
+
+          let savedTx: PaymentTransaction;
+          if (matchedTx) {
+            matchedTx.providerPaymentId = input.providerPaymentId;
+            matchedTx.webhookEventId =
+              input.webhookEventId ?? matchedTx.webhookEventId;
+            matchedTx.status = "CAPTURED";
+            matchedTx.method = input.method ?? matchedTx.method ?? "upi";
+            if (typeof input.amount === "number" && input.amount > 0) {
+              matchedTx.amount = round2(input.amount);
+            }
+            matchedTx.rawMeta = {
+              ...(matchedTx.rawMeta ?? {}),
+              ...(input.rawMeta ?? {}),
+            };
+            matchedTx.updatedAt = now;
+            savedTx = matchedTx;
+          } else {
+            const resolvedAmount =
+              typeof input.amount === "number" && input.amount > 0
+                ? round2(input.amount)
+                : round2(order.totalAmount ?? 0);
+            savedTx = {
+              id: makeId("PAY"),
+              organizationId: order.organizationId ?? DEFAULT_ORGANIZATION_ID,
+              kitchenId: order.kitchenId,
+              orderId: order.id,
+              provider: "RAZORPAY",
+              providerOrderId: input.providerOrderId,
+              providerPaymentId: input.providerPaymentId,
+              webhookEventId: input.webhookEventId,
+              amount: resolvedAmount,
+              refundedAmount: 0,
+              currency: "INR",
+              status: "CAPTURED",
+              method: input.method ?? "upi",
+              rawMeta: input.rawMeta ? { ...input.rawMeta } : undefined,
+              createdAt: now,
+              updatedAt: now,
+            };
+            state.paymentTransactions.unshift(savedTx);
+          }
+
+          order.paymentStatus = "CAPTURED";
+          order.updatedAt = now;
+          order.events.push({
+            id: makeId(`${order.id}-PAY`),
+            type: "PAYMENT_CAPTURED",
+            timestamp: now,
+            actor,
+            details: `Razorpay payment ${input.providerPaymentId} captured (${formatCurrency(savedTx.amount, "INR")} via ${(savedTx.method ?? "upi").toUpperCase()}).`,
+          });
+
+          pushMemoryActivity(state, {
+            organizationId: order.organizationId ?? DEFAULT_ORGANIZATION_ID,
+            type: "PAYMENT_CAPTURED",
+            category: "PAYMENT",
+            title: `Payment Captured (${order.id})`,
+            details: `${formatCurrency(savedTx.amount, "INR")} captured via ${(savedTx.method ?? "upi").toUpperCase()} (${input.providerPaymentId}).`,
+            actor,
+            orderId: order.id,
+            kitchenId: order.kitchenId,
+            brandId: order.brandId,
+            timestamp: now,
+            severity: "success",
+          });
+
+          return {
+            transaction: { ...savedTx },
+            order: cloneOrder(order),
+            idempotentReplay: false,
+          };
+        }),
+      );
+
+  if (!result.idempotentReplay) {
+    const orgId =
+      result.order.organizationId ??
+      (await resolveKitchenOrganizationId(result.order.kitchenId));
+    await publishKitchenRealtimeEvent({
+      type: "PAYMENT_CAPTURED",
+      organizationId: orgId,
+      kitchenId: result.order.kitchenId,
+      orderId: result.order.id,
+      status: result.order.paymentStatus,
+      brandId: result.order.brandId,
+      actor: input.actor || "RAZORPAY_WEBHOOK",
+      details: `Payment ${result.transaction.providerPaymentId} captured`,
+    });
+  }
+
+  return result;
+}
+
+export async function recordPaymentRefund(input: {
+  transactionId: string;
+  orderId: string;
+  providerRefundId: string;
+  refundedAmount: number;
+  actor: string;
+  reason: string;
+  rawMeta?: Record<string, unknown>;
+}): Promise<{ transaction: PaymentTransaction; order: Order }> {
+  if (isPostgresConfigured()) {
+    return pgStore.recordPaymentRefundPg(input);
+  }
+  return withMemoryLock(() =>
+    runMemoryTransaction((state) => {
+      const now = new Date().toISOString();
+      const txRow = state.paymentTransactions.find(
+        (t) => t.id === input.transactionId,
+      );
+      if (!txRow) {
+        throw new Error(`Payment transaction not found: ${input.transactionId}`);
+      }
+      const order = state.orders.find((o) => o.id === input.orderId);
+      if (!order) {
+        throw new Error(`Order not found: ${input.orderId}`);
+      }
+
+      txRow.providerRefundId = input.providerRefundId;
+      txRow.refundedAmount = round2(input.refundedAmount);
+      txRow.status = "REFUNDED";
+      txRow.rawMeta = {
+        ...(txRow.rawMeta ?? {}),
+        ...(input.rawMeta ?? {}),
+        refundReason: input.reason,
+      };
+      txRow.updatedAt = now;
+
+      order.paymentStatus = "REFUNDED";
+      order.updatedAt = now;
+      order.events.push({
+        id: makeId(`${order.id}-RFND`),
+        type: "PAYMENT_REFUNDED",
+        timestamp: now,
+        actor: input.actor,
+        details: `Automatic Razorpay refund ${input.providerRefundId} processed (${formatCurrency(input.refundedAmount, "INR")}). Reason: ${input.reason}.`,
+      });
+
+      pushMemoryActivity(state, {
+        organizationId: order.organizationId ?? DEFAULT_ORGANIZATION_ID,
+        type: "PAYMENT_REFUNDED",
+        category: "PAYMENT",
+        title: `Payment Refunded (${order.id})`,
+        details: `Refunded ${formatCurrency(input.refundedAmount, "INR")} (${input.providerRefundId}) after pre-prep cancellation.`,
+        actor: input.actor,
+        orderId: order.id,
+        kitchenId: order.kitchenId,
+        brandId: order.brandId,
+        timestamp: now,
+        severity: "warning",
+      });
+
+      return {
+        transaction: { ...txRow },
+        order: cloneOrder(order),
+      };
+    }),
+  );
+}
+

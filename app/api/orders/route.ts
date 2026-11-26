@@ -197,6 +197,14 @@ export async function POST(request: NextRequest) {
       source: body.source as OrderSource | undefined,
       priority: body.priority,
       customerName: body.customerName,
+      customerGstin:
+        typeof body.customerGstin === "string" ? body.customerGstin : undefined,
+      placeOfSupplyStateCode:
+        typeof body.placeOfSupplyStateCode === "string"
+          ? body.placeOfSupplyStateCode
+          : undefined,
+      packagingFee:
+        typeof body.packagingFee === "number" ? body.packagingFee : undefined,
       notes: body.notes,
       items,
       actor: actorLabel,
@@ -206,6 +214,7 @@ export async function POST(request: NextRequest) {
       {
         success: true,
         order: result.order,
+        invoice: result.invoice,
         idempotentReplay: result.idempotentReplay,
         inventoryDecision: result.inventoryDecision,
         inventoryWarnings: result.inventoryWarnings,
@@ -274,6 +283,8 @@ export async function PATCH(request: NextRequest) {
       depletedItems: outcome.result.depletedItems,
       lowStockAlerts: outcome.result.lowStockAlerts,
       cancellationRecord: outcome.result.cancellationRecord,
+      creditNoteInvoice: outcome.result.creditNoteInvoice,
+      refundTransaction: outcome.result.refundTransaction,
     });
   } catch (error) {
     console.error("PATCH /api/orders failed:", error);

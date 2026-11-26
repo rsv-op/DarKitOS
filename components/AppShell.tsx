@@ -112,6 +112,13 @@ const NAV_ITEMS: NavItem[] = [
     icon: "home",
   },
   {
+    label: "GST Invoices",
+    href: "/invoices",
+    group: "enterprise",
+    permission: "OWNER_VIEW",
+    icon: "ticket",
+  },
+  {
     label: "Staff & Access",
     href: "/staff",
     group: "enterprise",

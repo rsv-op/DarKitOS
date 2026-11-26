@@ -88,6 +88,28 @@ export type InventoryMovementType =
   | "TRANSFER_OUT"
   | "TRANSFER_IN";
 
+export type OrderPaymentStatus =
+  | "UNPAID"
+  | "PENDING"
+  | "CAPTURED"
+  | "REFUNDED"
+  | "AGGREGATOR_SETTLED";
+
+export type TaxInvoiceStatus = "ISSUED" | "VOIDED" | "CREDIT_NOTE";
+
+export type PaymentProvider =
+  | "RAZORPAY"
+  | "AGGREGATOR_PREPAID"
+  | "SANDBOX_UPI";
+
+export type PaymentTransactionStatus =
+  | "CREATED"
+  | "AUTHORIZED"
+  | "CAPTURED"
+  | "REFUND_PENDING"
+  | "REFUNDED"
+  | "FAILED";
+
 export type OrderEventType =
   | "RECEIVED"
   | "INVENTORY_CHECKED"
@@ -103,7 +125,11 @@ export type OrderEventType =
   | "INVENTORY_DEPLETED"
   | "INVENTORY_RESTORED"
   | "LOSS_RECORDED"
-  | "CLAIM_LOGGED";
+  | "CLAIM_LOGGED"
+  | "INVOICE_ISSUED"
+  | "INVOICE_CREDITED"
+  | "PAYMENT_CAPTURED"
+  | "PAYMENT_REFUNDED";
 
 export const DEFAULT_ORGANIZATION_ID = "ORG-001";
 
@@ -135,6 +161,9 @@ export interface KitchenConfig {
   code: string;
   location?: string;
   areaCode?: string;
+  stateCode?: string;
+  gstin?: string;
+  fssaiLicense?: string;
   active: boolean;
   timezone: string;
   capacityPerHour?: number;
@@ -262,7 +291,17 @@ export interface Order {
   priority?: "NORMAL" | "RUSH" | "VIP";
 
   items: OrderItem[];
+  subtotalAmount?: number;
+  packagingAmount?: number;
+  cgstAmount?: number;
+  sgstAmount?: number;
+  igstAmount?: number;
+  taxAmount?: number;
   totalAmount?: number;
+  paymentStatus?: OrderPaymentStatus;
+  invoiceId?: string;
+  placeOfSupplyStateCode?: string;
+  customerGstin?: string;
   itemCount?: number;
   notes?: string;
 
@@ -298,6 +337,57 @@ export interface Order {
   inventoryRestored?: boolean;
 
   events: OrderEvent[];
+}
+
+export interface TaxInvoice {
+  id: string;
+  organizationId: string;
+  kitchenId: string;
+  orderId: string;
+  invoiceNumber: string;
+  financialYear: string;
+  sequenceNumber: number;
+  issuedAt: string;
+  sellerGstin: string;
+  sellerFssai: string;
+  sellerStateCode: string;
+  placeOfSupplyStateCode: string;
+  customerName?: string;
+  customerGstin?: string;
+  taxableSubtotal: number;
+  packagingFee: number;
+  cgstRate: number;
+  cgstAmount: number;
+  sgstRate: number;
+  sgstAmount: number;
+  igstRate: number;
+  igstAmount: number;
+  totalTax: number;
+  grandTotal: number;
+  status: TaxInvoiceStatus;
+  voidedAt?: string;
+  voidReason?: string;
+  createdAt: string;
+}
+
+export interface PaymentTransaction {
+  id: string;
+  organizationId: string;
+  kitchenId: string;
+  orderId: string;
+  provider: PaymentProvider;
+  providerOrderId?: string;
+  providerPaymentId?: string;
+  providerRefundId?: string;
+  webhookEventId?: string;
+  amount: number;
+  refundedAmount: number;
+  currency: string;
+  status: PaymentTransactionStatus;
+  method?: string;
+  rawMeta?: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface CancellationRecord {
@@ -345,7 +435,9 @@ export interface OperationalActivity {
     | "DISPATCH"
     | "SYSTEM"
     | "AUTH"
-    | "CLOUD7";
+    | "CLOUD7"
+    | "PAYMENT"
+    | "INVOICE";
   title: string;
   details: string;
   actor: string;
@@ -449,8 +541,8 @@ export const ORGANIZATIONS_DB: Organization[] = [
     id: DEFAULT_ORGANIZATION_ID,
     name: "DarKit Hospitality Pvt. Ltd.",
     slug: "darkit-hospitality",
-    gstin: "06AABCD4921E1Z5",
-    fssaiLicense: "10824005001942",
+    gstin: "06AABCD1234E1Z5",
+    fssaiLicense: "10824999000412",
     active: true,
     createdAt: "2026-01-01T00:00:00.000Z",
   },
@@ -507,6 +599,9 @@ export const KITCHENS_DB: KitchenConfig[] = [
     code: "GGN-01",
     location: "Sector 29, Gurugram",
     areaCode: "GGN-01",
+    stateCode: "06",
+    gstin: "06AABCD1234E1Z5",
+    fssaiLicense: "10824999000412",
     active: true,
     timezone: "Asia/Kolkata",
     capacityPerHour: 120,
@@ -518,6 +613,9 @@ export const KITCHENS_DB: KitchenConfig[] = [
     code: "NDA-02",
     location: "Sector 62, Noida",
     areaCode: "NDA-02",
+    stateCode: "09",
+    gstin: "09AABCD1234E1Z9",
+    fssaiLicense: "12724999000518",
     active: true,
     timezone: "Asia/Kolkata",
     capacityPerHour: 95,
@@ -529,6 +627,9 @@ export const KITCHENS_DB: KitchenConfig[] = [
     code: "DEL-03",
     location: "Greater Kailash, New Delhi",
     areaCode: "DEL-03",
+    stateCode: "07",
+    gstin: "07AABCD1234E1Z3",
+    fssaiLicense: "13324999000624",
     active: true,
     timezone: "Asia/Kolkata",
     capacityPerHour: 110,
@@ -540,6 +641,9 @@ export const KITCHENS_DB: KitchenConfig[] = [
     code: "CYB-04",
     location: "DLF Phase 3, Gurugram",
     areaCode: "CYB-04",
+    stateCode: "06",
+    gstin: "06AABCD1234E1Z5",
+    fssaiLicense: "10824999000419",
     active: true,
     timezone: "Asia/Kolkata",
     capacityPerHour: 85,

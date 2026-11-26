@@ -22,6 +22,8 @@ export const REALTIME_EVENT_TYPES = [
   "ORDER_CANCELLED",
   "INVENTORY_UPDATED",
   "STOCK_LOW_ALERT",
+  "PAYMENT_CAPTURED",
+  "PAYMENT_REFUNDED",
 ] as const;
 
 export type KitchenRealtimeEventType = (typeof REALTIME_EVENT_TYPES)[number];

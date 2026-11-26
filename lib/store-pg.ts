@@ -32,13 +32,23 @@ import {
   type OrderChannel,
   type OrderEvent,
   type OrderItem,
+  type OrderPaymentStatus,
   type Organization,
   type OutboxEvent,
+  type PaymentProvider,
+  type PaymentTransaction,
   type RevenueLeakageVector,
   type SystemSettings,
+  type TaxInvoice,
+  type TaxInvoiceStatus,
   type VirtualFileAsset,
   type WebhookIdempotencyEntry,
 } from "@/lib/db";
+import {
+  calculateIndianGstBreakup,
+  formatTaxInvoiceNumber,
+  getIndianFinancialYear,
+} from "@/lib/gst";
 import { getDb, type DarKitDb } from "@/lib/db-client";
 import { DEFAULT_SETTINGS } from "@/lib/store-seed";
 import {
@@ -303,7 +313,15 @@ async function loadOrders(
     status: o.status,
     priority: o.priority ?? undefined,
     items: itemsByOrder.get(o.id) ?? [],
+    subtotalAmount: optNum(o.subtotalAmount),
+    packagingAmount: optNum(o.packagingAmount),
+    cgstAmount: optNum(o.cgstAmount),
+    sgstAmount: optNum(o.sgstAmount),
+    igstAmount: optNum(o.igstAmount),
+    taxAmount: optNum(o.taxAmount),
     totalAmount: optNum(o.totalAmount),
+    paymentStatus: o.paymentStatus ?? "AGGREGATOR_SETTLED",
+    invoiceId: o.invoiceId ?? undefined,
     itemCount: o.itemCount ?? undefined,
     notes: o.notes ?? undefined,
     customerName: o.customerName ?? undefined,
@@ -532,6 +550,9 @@ export async function getKitchensPg(): Promise<KitchenConfig[]> {
     code: k.code,
     location: k.location,
     areaCode: k.areaCode,
+    stateCode: k.stateCode ?? "06",
+    gstin: k.gstin ?? undefined,
+    fssaiLicense: k.fssaiLicense ?? undefined,
     active: k.active,
     timezone: k.timezone,
     capacityPerHour: k.capacityPerHour,
@@ -662,11 +683,170 @@ export async function getOutboxEventsPg(): Promise<OutboxEvent[]> {
   }));
 }
 
+function mapTaxInvoiceRow(
+  row: typeof schema.taxInvoices.$inferSelect,
+): TaxInvoice {
+  return {
+    id: row.id,
+    organizationId: row.organizationId ?? DEFAULT_ORGANIZATION_ID,
+    kitchenId: row.kitchenId,
+    orderId: row.orderId,
+    invoiceNumber: row.invoiceNumber,
+    financialYear: row.financialYear,
+    sequenceNumber: row.sequenceNumber,
+    issuedAt: row.issuedAt.toISOString(),
+    sellerGstin: row.sellerGstin,
+    sellerFssai: row.sellerFssai,
+    sellerStateCode: row.sellerStateCode,
+    placeOfSupplyStateCode: row.placeOfSupplyStateCode,
+    customerName: row.customerName ?? undefined,
+    customerGstin: row.customerGstin ?? undefined,
+    taxableSubtotal: num(row.taxableSubtotal),
+    packagingFee: num(row.packagingFee),
+    cgstRate: num(row.cgstRate),
+    cgstAmount: num(row.cgstAmount),
+    sgstRate: num(row.sgstRate),
+    sgstAmount: num(row.sgstAmount),
+    igstRate: num(row.igstRate),
+    igstAmount: num(row.igstAmount),
+    totalTax: num(row.totalTax),
+    grandTotal: num(row.grandTotal),
+    status: row.status,
+    voidedAt: iso(row.voidedAt),
+    voidReason: row.voidReason ?? undefined,
+    createdAt: row.createdAt.toISOString(),
+  };
+}
+
+function mapPaymentTransactionRow(
+  row: typeof schema.paymentTransactions.$inferSelect,
+): PaymentTransaction {
+  return {
+    id: row.id,
+    organizationId: row.organizationId ?? DEFAULT_ORGANIZATION_ID,
+    kitchenId: row.kitchenId,
+    orderId: row.orderId,
+    provider: row.provider,
+    providerOrderId: row.providerOrderId ?? undefined,
+    providerPaymentId: row.providerPaymentId ?? undefined,
+    providerRefundId: row.providerRefundId ?? undefined,
+    webhookEventId: row.webhookEventId ?? undefined,
+    amount: num(row.amount),
+    refundedAmount: num(row.refundedAmount),
+    currency: row.currency,
+    status: row.status,
+    method: row.method ?? undefined,
+    rawMeta: row.rawMeta ?? undefined,
+    createdAt: row.createdAt.toISOString(),
+    updatedAt: row.updatedAt.toISOString(),
+  };
+}
+
+export async function getTaxInvoicesPg(filters?: {
+  organizationId?: string;
+  kitchenId?: string;
+  financialYear?: string;
+  status?: TaxInvoiceStatus;
+  from?: string;
+  to?: string;
+}): Promise<TaxInvoice[]> {
+  await ensureSeeded();
+  const rows = await getDb()
+    .select()
+    .from(schema.taxInvoices)
+    .orderBy(desc(schema.taxInvoices.issuedAt), desc(schema.taxInvoices.sequenceNumber));
+
+  const fromMs = filters?.from ? new Date(filters.from).getTime() : null;
+  const toMs = filters?.to ? new Date(filters.to).getTime() : null;
+
+  return rows
+    .map(mapTaxInvoiceRow)
+    .filter((inv) => {
+      if (filters?.organizationId && inv.organizationId !== filters.organizationId) {
+        return false;
+      }
+      if (
+        filters?.kitchenId &&
+        filters.kitchenId !== "ALL" &&
+        inv.kitchenId !== filters.kitchenId
+      ) {
+        return false;
+      }
+      if (filters?.financialYear && inv.financialYear !== filters.financialYear) {
+        return false;
+      }
+      if (filters?.status && inv.status !== filters.status) {
+        return false;
+      }
+      const ts = new Date(inv.issuedAt).getTime();
+      if (fromMs !== null && Number.isFinite(fromMs) && ts < fromMs) return false;
+      if (toMs !== null && Number.isFinite(toMs) && ts > toMs) return false;
+      return true;
+    });
+}
+
+export async function findTaxInvoiceByIdPg(
+  invoiceId: string,
+): Promise<TaxInvoice | undefined> {
+  await ensureSeeded();
+  const rows = await getDb()
+    .select()
+    .from(schema.taxInvoices)
+    .where(eq(schema.taxInvoices.id, invoiceId))
+    .limit(1);
+  return rows[0] ? mapTaxInvoiceRow(rows[0]) : undefined;
+}
+
+export async function findTaxInvoiceByOrderIdPg(
+  orderId: string,
+): Promise<TaxInvoice | undefined> {
+  await ensureSeeded();
+  const rows = await getDb()
+    .select()
+    .from(schema.taxInvoices)
+    .where(eq(schema.taxInvoices.orderId, orderId))
+    .limit(1);
+  return rows[0] ? mapTaxInvoiceRow(rows[0]) : undefined;
+}
+
+export async function getPaymentTransactionsPg(filters?: {
+  organizationId?: string;
+  kitchenId?: string;
+  orderId?: string;
+}): Promise<PaymentTransaction[]> {
+  await ensureSeeded();
+  const rows = await getDb()
+    .select()
+    .from(schema.paymentTransactions)
+    .orderBy(desc(schema.paymentTransactions.createdAt));
+
+  return rows
+    .map(mapPaymentTransactionRow)
+    .filter((txRow) => {
+      if (filters?.organizationId && txRow.organizationId !== filters.organizationId) {
+        return false;
+      }
+      if (
+        filters?.kitchenId &&
+        filters.kitchenId !== "ALL" &&
+        txRow.kitchenId !== filters.kitchenId
+      ) {
+        return false;
+      }
+      if (filters?.orderId && txRow.orderId !== filters.orderId) {
+        return false;
+      }
+      return true;
+    });
+}
+
 export async function getStoreSnapshotPg(): Promise<StoreSnapshot> {
   await ensureSeeded();
   const [
     organizations,
     orders,
+    taxInvoices,
+    paymentTransactions,
     inventory,
     inventoryMovements,
     cancellations,
@@ -684,6 +864,8 @@ export async function getStoreSnapshotPg(): Promise<StoreSnapshot> {
   ] = await Promise.all([
     getOrganizationsPg(),
     getOrdersPg(),
+    getTaxInvoicesPg(),
+    getPaymentTransactionsPg(),
     getInventoryPg(),
     getInventoryMovementsPg(),
     getCancellationsPg(),
@@ -703,6 +885,8 @@ export async function getStoreSnapshotPg(): Promise<StoreSnapshot> {
   return {
     organizations,
     orders,
+    taxInvoices,
+    paymentTransactions,
     inventory,
     inventoryMovements,
     cancellations,
@@ -734,6 +918,8 @@ export async function clearOrdersStorePg(): Promise<void> {
   await ensureSeeded();
   const db = getDb();
   await db.transaction(async (tx) => {
+    await tx.delete(schema.paymentTransactions);
+    await tx.delete(schema.taxInvoices);
     await tx.delete(schema.cancellations);
     await tx.delete(schema.orderEvents);
     await tx.delete(schema.orderItems);
@@ -745,7 +931,7 @@ export async function clearOrdersStorePg(): Promise<void> {
       category: "SYSTEM",
       title: "Active Order Queue Cleared",
       details:
-        "All orders, cancellations, webhook receipts, and outbox items cleared to demonstrate honest empty states across stations.",
+        "All orders, tax invoices, payment transactions, cancellations, webhook receipts, and outbox items cleared to demonstrate honest empty states across stations.",
       actor: "SYSTEM",
       severity: "warning",
     });
@@ -888,7 +1074,14 @@ export async function injectCanonicalOrderPg(
         if (existingOrderId) {
           const [existingOrder] = await loadOrders(tx, existingOrderId);
           if (existingOrder) {
+            const [existingInvoiceRow] = await tx
+              .select()
+              .from(schema.taxInvoices)
+              .where(eq(schema.taxInvoices.orderId, existingOrder.id))
+              .limit(1);
+
             await insertActivity(tx, {
+              organizationId: existingOrder.organizationId,
               type: "WEBHOOK_DEDUPLICATED",
               category: "CLOUD7",
               title: `Idempotent Replay Blocked (${rawIdemKey})`,
@@ -902,6 +1095,9 @@ export async function injectCanonicalOrderPg(
 
             return {
               order: existingOrder,
+              invoice: existingInvoiceRow
+                ? mapTaxInvoiceRow(existingInvoiceRow)
+                : undefined,
               idempotentReplay: true,
               inventoryDecision: existingOrder.inventoryDecision ?? "AVAILABLE",
               inventoryWarnings: existingOrder.inventoryWarnings ?? [],
@@ -960,7 +1156,8 @@ export async function injectCanonicalOrderPg(
       }),
     );
 
-    const totalAmount = calculateOrderTotalAmount(resolvedItems, menuCatalog);
+    const itemsSubtotal = calculateOrderTotalAmount(resolvedItems, menuCatalog);
+    const packagingFee = round2(Math.max(0, Number(input.packagingFee) || 0));
     const itemCount = resolvedItems.reduce(
       (sum, item) => sum + item.quantity,
       0,
@@ -970,6 +1167,59 @@ export async function injectCanonicalOrderPg(
       input.organizationId?.trim() ||
       kitchen.organizationId ||
       DEFAULT_ORGANIZATION_ID;
+
+    const [orgRow] = await tx
+      .select()
+      .from(schema.organizations)
+      .where(eq(schema.organizations.id, resolvedOrganizationId))
+      .limit(1);
+
+    const sellerStateCode = kitchen.stateCode || "06";
+    const gstBreakup = calculateIndianGstBreakup({
+      itemsSubtotal,
+      packagingFee,
+      sellerStateCode,
+      placeOfSupplyStateCode: input.placeOfSupplyStateCode || sellerStateCode,
+      gstRatePct: 5,
+    });
+    const totalAmount = gstBreakup.grandTotal;
+    const resolvedSource =
+      input.source || CHANNEL_SOURCE_MAP[channel] || "MANUAL";
+    const resolvedPaymentStatus: OrderPaymentStatus =
+      input.paymentStatus ??
+      (resolvedSource === "DIRECT_WEB" ? "UNPAID" : "AGGREGATOR_SETTLED");
+
+    // Atomic gapless per-(org, financialYear, kitchen) invoice sequence allocation
+    const financialYear = getIndianFinancialYear(nowDate);
+    const seqLockKey = `tax_invoice:${resolvedOrganizationId}:${financialYear}:${kitchen.id}`;
+    await tx.execute(
+      sql`SELECT pg_advisory_xact_lock(hashtext(${seqLockKey})::bigint)`,
+    );
+
+    const [maxSeqRow] = await tx
+      .select({
+        maxSeq: sql<number>`COALESCE(MAX(${schema.taxInvoices.sequenceNumber}), 0)::int`,
+      })
+      .from(schema.taxInvoices)
+      .where(
+        and(
+          eq(schema.taxInvoices.organizationId, resolvedOrganizationId),
+          eq(schema.taxInvoices.financialYear, financialYear),
+          eq(schema.taxInvoices.kitchenId, kitchen.id),
+        ),
+      );
+
+    const sequenceNumber = (maxSeqRow?.maxSeq ?? 0) + 1;
+    const invoiceId = makeId("INV");
+    const invoiceNumber = formatTaxInvoiceNumber({
+      financialYear,
+      kitchenCode: kitchen.code,
+      sequenceNumber,
+    });
+    const sellerGstin =
+      kitchen.gstin || orgRow?.gstin || "06AABCD1234E1Z5";
+    const sellerFssai =
+      kitchen.fssaiLicense || orgRow?.fssaiLicense || "10824999000412";
 
     const draftOrder: Order = {
       id: orderId,
@@ -981,11 +1231,21 @@ export async function injectCanonicalOrderPg(
       brandId: input.brandId,
       kitchenId: input.kitchenId,
       channel,
-      source: input.source || CHANNEL_SOURCE_MAP[channel] || "MANUAL",
+      source: resolvedSource,
       status: "PENDING",
       priority: input.priority || "NORMAL",
       items: resolvedItems,
+      subtotalAmount: gstBreakup.itemsSubtotal,
+      packagingAmount: gstBreakup.packagingFee,
+      cgstAmount: gstBreakup.cgstAmount,
+      sgstAmount: gstBreakup.sgstAmount,
+      igstAmount: gstBreakup.igstAmount,
+      taxAmount: gstBreakup.totalTax,
       totalAmount,
+      paymentStatus: resolvedPaymentStatus,
+      invoiceId,
+      placeOfSupplyStateCode: gstBreakup.placeOfSupplyStateCode,
+      customerGstin: input.customerGstin?.trim() || undefined,
       itemCount,
       notes: input.notes?.trim() || undefined,
       customerName:
@@ -995,6 +1255,35 @@ export async function injectCanonicalOrderPg(
       receivedAt: now,
       inventoryConsumed: false,
       events: [],
+    };
+
+    const taxInvoice: TaxInvoice = {
+      id: invoiceId,
+      organizationId: resolvedOrganizationId,
+      kitchenId: kitchen.id,
+      orderId,
+      invoiceNumber,
+      financialYear,
+      sequenceNumber,
+      issuedAt: now,
+      sellerGstin,
+      sellerFssai,
+      sellerStateCode: gstBreakup.sellerStateCode,
+      placeOfSupplyStateCode: gstBreakup.placeOfSupplyStateCode,
+      customerName: draftOrder.customerName,
+      customerGstin: draftOrder.customerGstin,
+      taxableSubtotal: gstBreakup.taxableSubtotal,
+      packagingFee: gstBreakup.packagingFee,
+      cgstRate: gstBreakup.cgstRate,
+      cgstAmount: gstBreakup.cgstAmount,
+      sgstRate: gstBreakup.sgstRate,
+      sgstAmount: gstBreakup.sgstAmount,
+      igstRate: gstBreakup.igstRate,
+      igstAmount: gstBreakup.igstAmount,
+      totalTax: gstBreakup.totalTax,
+      grandTotal: gstBreakup.grandTotal,
+      status: "ISSUED",
+      createdAt: now,
     };
 
     // 6. Evaluate Inventory Availability Strictly Against This Order's Kitchen
@@ -1030,6 +1319,13 @@ export async function injectCanonicalOrderPg(
         actor: "SYSTEM",
         details: `Inventory evaluation (${input.kitchenId}): ${evaluation.inventoryDecision}.`,
       },
+      {
+        id: `${orderId}-EVT-INV`,
+        type: "INVOICE_ISSUED",
+        timestamp: now,
+        actor: "SYSTEM",
+        details: `GST Tax Invoice ${invoiceNumber} issued (Taxable ₹${gstBreakup.taxableSubtotal.toFixed(2)}, GST ₹${gstBreakup.totalTax.toFixed(2)}, Grand Total ₹${gstBreakup.grandTotal.toFixed(2)}).`,
+      },
     ];
 
     if (evaluation.lowStockItems.length > 0) {
@@ -1054,7 +1350,7 @@ export async function injectCanonicalOrderPg(
 
     draftOrder.events = events;
 
-    // 7. Persist Order, OrderItems, OrderEvents, Phase 2 Webhook Receipt, Outbox, Activity
+    // 7. Persist Order, TaxInvoice, OrderItems, OrderEvents, Phase 2 Webhook Receipt, Outbox, Activity
     await tx.insert(schema.orders).values({
       id: draftOrder.id,
       organizationId: resolvedOrganizationId,
@@ -1066,7 +1362,15 @@ export async function injectCanonicalOrderPg(
       source: draftOrder.source,
       status: draftOrder.status,
       priority: draftOrder.priority ?? null,
+      subtotalAmount: round2(gstBreakup.itemsSubtotal).toFixed(2),
+      packagingAmount: round2(gstBreakup.packagingFee).toFixed(2),
+      cgstAmount: round2(gstBreakup.cgstAmount).toFixed(2),
+      sgstAmount: round2(gstBreakup.sgstAmount).toFixed(2),
+      igstAmount: round2(gstBreakup.igstAmount).toFixed(2),
+      taxAmount: round2(gstBreakup.totalTax).toFixed(2),
       totalAmount: round2(totalAmount).toFixed(2),
+      paymentStatus: resolvedPaymentStatus,
+      invoiceId,
       itemCount,
       notes: draftOrder.notes ?? null,
       customerName: draftOrder.customerName ?? null,
@@ -1095,6 +1399,37 @@ export async function injectCanonicalOrderPg(
       inventoryUnavailable: draftOrder.inventoryUnavailable ?? null,
       inventoryConsumed: false,
       inventoryRestored: false,
+    });
+
+    await tx.insert(schema.taxInvoices).values({
+      id: taxInvoice.id,
+      organizationId: taxInvoice.organizationId,
+      kitchenId: taxInvoice.kitchenId,
+      orderId: taxInvoice.orderId,
+      invoiceNumber: taxInvoice.invoiceNumber,
+      financialYear: taxInvoice.financialYear,
+      sequenceNumber: taxInvoice.sequenceNumber,
+      issuedAt: nowDate,
+      sellerGstin: taxInvoice.sellerGstin,
+      sellerFssai: taxInvoice.sellerFssai,
+      sellerStateCode: taxInvoice.sellerStateCode,
+      placeOfSupplyStateCode: taxInvoice.placeOfSupplyStateCode,
+      customerName: taxInvoice.customerName ?? null,
+      customerGstin: taxInvoice.customerGstin ?? null,
+      taxableSubtotal: round2(taxInvoice.taxableSubtotal).toFixed(2),
+      packagingFee: round2(taxInvoice.packagingFee).toFixed(2),
+      cgstRate: round2(taxInvoice.cgstRate).toFixed(2),
+      cgstAmount: round2(taxInvoice.cgstAmount).toFixed(2),
+      sgstRate: round2(taxInvoice.sgstRate).toFixed(2),
+      sgstAmount: round2(taxInvoice.sgstAmount).toFixed(2),
+      igstRate: round2(taxInvoice.igstRate).toFixed(2),
+      igstAmount: round2(taxInvoice.igstAmount).toFixed(2),
+      totalTax: round2(taxInvoice.totalTax).toFixed(2),
+      grandTotal: round2(taxInvoice.grandTotal).toFixed(2),
+      status: taxInvoice.status,
+      voidedAt: null,
+      voidReason: null,
+      createdAt: nowDate,
     });
 
     await tx.insert(schema.orderItems).values(
@@ -1190,6 +1525,7 @@ export async function injectCanonicalOrderPg(
 
     return {
       order: draftOrder,
+      invoice: taxInvoice,
       idempotentReplay: false,
       inventoryDecision: evaluation.inventoryDecision,
       inventoryWarnings: evaluation.lowStockItems,
@@ -1844,11 +2180,45 @@ async function executeStageAwareCancellationPg(
     dispatchEvidence: dispatchEvidence ?? null,
   });
 
+  let creditNoteInvoice: TaxInvoice | undefined;
+  if (stage === "BEFORE_PREP") {
+    const [existingInv] = await tx
+      .select()
+      .from(schema.taxInvoices)
+      .where(eq(schema.taxInvoices.orderId, currentOrder.id))
+      .limit(1);
+
+    if (existingInv && existingInv.status === "ISSUED") {
+      const [updatedInv] = await tx
+        .update(schema.taxInvoices)
+        .set({
+          status: "CREDIT_NOTE",
+          voidedAt: nowDate,
+          voidReason: reason,
+        })
+        .where(eq(schema.taxInvoices.id, existingInv.id))
+        .returning();
+
+      if (updatedInv) {
+        creditNoteInvoice = mapTaxInvoiceRow(updatedInv);
+        await tx.insert(schema.orderEvents).values({
+          id: makeId(`${currentOrder.id}-CN`),
+          orderId: currentOrder.id,
+          type: "INVOICE_CREDITED",
+          timestamp: nowDate,
+          actor: input.actor,
+          details: `GST Tax Invoice ${updatedInv.invoiceNumber} converted to CREDIT_NOTE (pre-prep cancellation). Reason: ${reason}.`,
+        });
+      }
+    }
+  }
+
   await insertActivity(tx, {
+    organizationId: currentOrder.organizationId,
     type: "ORDER_CANCELLED",
     category: "CANCELLATION",
     title: `${currentOrder.id} Cancelled (${stage.replaceAll("_", " ")})`,
-    details: `Resolution: ${resolution.replaceAll("_", " ")} • Loss: ${formattedLoss} • Claim: ${formattedClaim}.`,
+    details: `Resolution: ${resolution.replaceAll("_", " ")} • Loss: ${formattedLoss} • Claim: ${formattedClaim}.${creditNoteInvoice ? ` • GST Invoice ${creditNoteInvoice.invoiceNumber} -> CREDIT_NOTE.` : ""}`,
     actor: input.actor,
     orderId: currentOrder.id,
     kitchenId: currentOrder.kitchenId,
@@ -1863,6 +2233,7 @@ async function executeStageAwareCancellationPg(
     order: updatedOrder,
     idempotentReplay: false,
     cancellationRecord,
+    creditNoteInvoice,
   };
 }
 
@@ -2565,6 +2936,9 @@ export async function upsertKitchenPg(
         code: kitchen.code.trim(),
         location: kitchen.location?.trim() || "Cloud Unit",
         areaCode: kitchen.areaCode?.trim() || kitchen.code.trim(),
+        stateCode: kitchen.stateCode?.trim() || "06",
+        gstin: kitchen.gstin?.trim() || null,
+        fssaiLicense: kitchen.fssaiLicense?.trim() || null,
         active: kitchen.active,
         timezone: kitchen.timezone || "Asia/Kolkata",
         capacityPerHour: kitchen.capacityPerHour ?? 100,
@@ -2577,6 +2951,9 @@ export async function upsertKitchenPg(
           code: kitchen.code.trim(),
           location: kitchen.location?.trim() || "Cloud Unit",
           areaCode: kitchen.areaCode?.trim() || kitchen.code.trim(),
+          stateCode: kitchen.stateCode?.trim() || "06",
+          gstin: kitchen.gstin?.trim() || null,
+          fssaiLicense: kitchen.fssaiLicense?.trim() || null,
           active: kitchen.active,
           timezone: kitchen.timezone || "Asia/Kolkata",
           capacityPerHour: kitchen.capacityPerHour ?? 100,
@@ -3133,3 +3510,328 @@ export async function updateLeakageVectorStatusPg(
     }));
   });
 }
+
+// -----------------------------------------------------------------------------
+// Payment Ledger & Razorpay Capture / Refund Operations
+// -----------------------------------------------------------------------------
+
+export async function createPaymentIntentRecordPg(input: {
+  organizationId: string;
+  kitchenId: string;
+  orderId: string;
+  provider: PaymentProvider;
+  providerOrderId: string;
+  amount: number;
+  currency?: string;
+  method?: string;
+  rawMeta?: Record<string, unknown>;
+  actor?: string;
+}): Promise<{ transaction: PaymentTransaction; order: Order }> {
+  await ensureSeeded();
+  const db = getDb();
+  return db.transaction(async (tx) => {
+    const [existingOrder] = await loadOrders(tx, input.orderId);
+    if (!existingOrder) {
+      throw new Error(`Order not found: ${input.orderId}`);
+    }
+
+    const nowDate = new Date();
+    const txId = makeId("PAY");
+    const [inserted] = await tx
+      .insert(schema.paymentTransactions)
+      .values({
+        id: txId,
+        organizationId: input.organizationId,
+        kitchenId: input.kitchenId,
+        orderId: input.orderId,
+        provider: input.provider,
+        providerOrderId: input.providerOrderId,
+        providerPaymentId: null,
+        providerRefundId: null,
+        webhookEventId: null,
+        amount: round2(input.amount).toFixed(2),
+        refundedAmount: "0.00",
+        currency: input.currency ?? "INR",
+        status: "CREATED",
+        method: input.method ?? null,
+        rawMeta: input.rawMeta ?? null,
+        createdAt: nowDate,
+        updatedAt: nowDate,
+      })
+      .returning();
+
+    if (
+      existingOrder.paymentStatus === "UNPAID" ||
+      !existingOrder.paymentStatus
+    ) {
+      await tx
+        .update(schema.orders)
+        .set({
+          paymentStatus: "PENDING",
+          updatedAt: nowDate,
+        })
+        .where(eq(schema.orders.id, input.orderId));
+    }
+
+    const [updatedOrder] = await loadOrders(tx, input.orderId);
+    return {
+      transaction: mapPaymentTransactionRow(inserted),
+      order: updatedOrder,
+    };
+  });
+}
+
+export async function recordRazorpayPaymentCapturePg(input: {
+  webhookEventId?: string;
+  providerOrderId?: string;
+  providerPaymentId: string;
+  orderId?: string;
+  amount?: number;
+  method?: string;
+  rawMeta?: Record<string, unknown>;
+  actor?: string;
+}): Promise<{
+  transaction: PaymentTransaction;
+  order: Order;
+  idempotentReplay: boolean;
+}> {
+  await ensureSeeded();
+  const db = getDb();
+
+  return db.transaction(async (tx) => {
+    const nowDate = new Date();
+    const now = nowDate.toISOString();
+    const actor = input.actor || "RAZORPAY_WEBHOOK";
+
+    // 1. Idempotency check by webhookEventId or providerPaymentId
+    if (input.webhookEventId) {
+      const [byEvent] = await tx
+        .select()
+        .from(schema.paymentTransactions)
+        .where(eq(schema.paymentTransactions.webhookEventId, input.webhookEventId))
+        .limit(1);
+      if (byEvent) {
+        const [order] = await loadOrders(tx, byEvent.orderId);
+        return {
+          transaction: mapPaymentTransactionRow(byEvent),
+          order,
+          idempotentReplay: true,
+        };
+      }
+    }
+
+    const [byPayment] = await tx
+      .select()
+      .from(schema.paymentTransactions)
+      .where(
+        eq(schema.paymentTransactions.providerPaymentId, input.providerPaymentId),
+      )
+      .limit(1);
+    if (byPayment && (byPayment.status === "CAPTURED" || byPayment.status === "REFUNDED")) {
+      const [order] = await loadOrders(tx, byPayment.orderId);
+      return {
+        transaction: mapPaymentTransactionRow(byPayment),
+        order,
+        idempotentReplay: true,
+      };
+    }
+
+    // 2. Locate pending transaction by providerOrderId or orderId
+    let matchedTx = byPayment;
+    if (!matchedTx && input.providerOrderId) {
+      const [byProvOrder] = await tx
+        .select()
+        .from(schema.paymentTransactions)
+        .where(
+          eq(schema.paymentTransactions.providerOrderId, input.providerOrderId),
+        )
+        .limit(1);
+      matchedTx = byProvOrder;
+    }
+
+    const targetOrderId = matchedTx?.orderId || input.orderId;
+    if (!targetOrderId) {
+      throw new Error(
+        `Unable to resolve order for Razorpay payment ${input.providerPaymentId}.`,
+      );
+    }
+
+    const [targetOrder] = await loadOrders(tx, targetOrderId);
+    if (!targetOrder) {
+      throw new Error(`Order not found for payment capture: ${targetOrderId}`);
+    }
+
+    let savedRow: typeof schema.paymentTransactions.$inferSelect;
+    if (matchedTx) {
+      const [updated] = await tx
+        .update(schema.paymentTransactions)
+        .set({
+          providerPaymentId: input.providerPaymentId,
+          webhookEventId: input.webhookEventId ?? matchedTx.webhookEventId,
+          status: "CAPTURED",
+          method: input.method ?? matchedTx.method ?? "upi",
+          amount:
+            typeof input.amount === "number" && input.amount > 0
+              ? round2(input.amount).toFixed(2)
+              : matchedTx.amount,
+          rawMeta: {
+            ...(matchedTx.rawMeta ?? {}),
+            ...(input.rawMeta ?? {}),
+          },
+          updatedAt: nowDate,
+        })
+        .where(eq(schema.paymentTransactions.id, matchedTx.id))
+        .returning();
+      savedRow = updated;
+    } else {
+      const resolvedAmount =
+        typeof input.amount === "number" && input.amount > 0
+          ? input.amount
+          : (targetOrder.totalAmount ?? 0);
+      const [inserted] = await tx
+        .insert(schema.paymentTransactions)
+        .values({
+          id: makeId("PAY"),
+          organizationId: targetOrder.organizationId ?? DEFAULT_ORGANIZATION_ID,
+          kitchenId: targetOrder.kitchenId,
+          orderId: targetOrder.id,
+          provider: "RAZORPAY",
+          providerOrderId: input.providerOrderId ?? null,
+          providerPaymentId: input.providerPaymentId,
+          providerRefundId: null,
+          webhookEventId: input.webhookEventId ?? null,
+          amount: round2(resolvedAmount).toFixed(2),
+          refundedAmount: "0.00",
+          currency: "INR",
+          status: "CAPTURED",
+          method: input.method ?? "upi",
+          rawMeta: input.rawMeta ?? null,
+          createdAt: nowDate,
+          updatedAt: nowDate,
+        })
+        .returning();
+      savedRow = inserted;
+    }
+
+    await tx
+      .update(schema.orders)
+      .set({
+        paymentStatus: "CAPTURED",
+        updatedAt: nowDate,
+      })
+      .where(eq(schema.orders.id, targetOrder.id));
+
+    await tx.insert(schema.orderEvents).values({
+      id: makeId(`${targetOrder.id}-PAY`),
+      orderId: targetOrder.id,
+      type: "PAYMENT_CAPTURED",
+      timestamp: nowDate,
+      actor,
+      details: `Razorpay payment ${input.providerPaymentId} captured (${formatCurrency(num(savedRow.amount), "INR")} via ${(savedRow.method ?? "upi").toUpperCase()}).`,
+    });
+
+    await insertActivity(tx, {
+      organizationId: targetOrder.organizationId ?? DEFAULT_ORGANIZATION_ID,
+      type: "PAYMENT_CAPTURED",
+      category: "PAYMENT",
+      title: `Payment Captured (${targetOrder.id})`,
+      details: `${formatCurrency(num(savedRow.amount), "INR")} captured via ${(savedRow.method ?? "upi").toUpperCase()} (${input.providerPaymentId}).`,
+      actor,
+      orderId: targetOrder.id,
+      kitchenId: targetOrder.kitchenId,
+      brandId: targetOrder.brandId,
+      timestamp: now,
+      severity: "success",
+    });
+
+    const [updatedOrder] = await loadOrders(tx, targetOrder.id);
+    return {
+      transaction: mapPaymentTransactionRow(savedRow),
+      order: updatedOrder,
+      idempotentReplay: false,
+    };
+  });
+}
+
+export async function recordPaymentRefundPg(input: {
+  transactionId: string;
+  orderId: string;
+  providerRefundId: string;
+  refundedAmount: number;
+  actor: string;
+  reason: string;
+  rawMeta?: Record<string, unknown>;
+}): Promise<{ transaction: PaymentTransaction; order: Order }> {
+  await ensureSeeded();
+  const db = getDb();
+
+  return db.transaction(async (tx) => {
+    const nowDate = new Date();
+    const now = nowDate.toISOString();
+
+    const [existingTx] = await tx
+      .select()
+      .from(schema.paymentTransactions)
+      .where(eq(schema.paymentTransactions.id, input.transactionId))
+      .limit(1);
+    if (!existingTx) {
+      throw new Error(`Payment transaction not found: ${input.transactionId}`);
+    }
+
+    const [updatedTx] = await tx
+      .update(schema.paymentTransactions)
+      .set({
+        providerRefundId: input.providerRefundId,
+        refundedAmount: round2(input.refundedAmount).toFixed(2),
+        status: "REFUNDED",
+        rawMeta: {
+          ...(existingTx.rawMeta ?? {}),
+          ...(input.rawMeta ?? {}),
+          refundReason: input.reason,
+        },
+        updatedAt: nowDate,
+      })
+      .where(eq(schema.paymentTransactions.id, existingTx.id))
+      .returning();
+
+    await tx
+      .update(schema.orders)
+      .set({
+        paymentStatus: "REFUNDED",
+        updatedAt: nowDate,
+      })
+      .where(eq(schema.orders.id, input.orderId));
+
+    const [targetOrder] = await loadOrders(tx, input.orderId);
+
+    await tx.insert(schema.orderEvents).values({
+      id: makeId(`${input.orderId}-RFND`),
+      orderId: input.orderId,
+      type: "PAYMENT_REFUNDED",
+      timestamp: nowDate,
+      actor: input.actor,
+      details: `Automatic Razorpay refund ${input.providerRefundId} processed (${formatCurrency(input.refundedAmount, "INR")}). Reason: ${input.reason}.`,
+    });
+
+    await insertActivity(tx, {
+      organizationId: targetOrder?.organizationId ?? DEFAULT_ORGANIZATION_ID,
+      type: "PAYMENT_REFUNDED",
+      category: "PAYMENT",
+      title: `Payment Refunded (${input.orderId})`,
+      details: `Refunded ${formatCurrency(input.refundedAmount, "INR")} (${input.providerRefundId}) after pre-prep cancellation.`,
+      actor: input.actor,
+      orderId: input.orderId,
+      kitchenId: targetOrder?.kitchenId,
+      brandId: targetOrder?.brandId,
+      timestamp: now,
+      severity: "warning",
+    });
+
+    const [updatedOrder] = await loadOrders(tx, input.orderId);
+    return {
+      transaction: mapPaymentTransactionRow(updatedTx),
+      order: updatedOrder,
+    };
+  });
+}
+

@@ -59,8 +59,8 @@ const PRODUCTION_MILESTONES = [
     id: "SPRINT-3A",
     name: "Sprint 3A · India GST & Razorpay",
     domain: "Compliance & Direct UPI",
-    status: "PLANNED",
-    task: "5% GST invoices (CGST/SGST/IGST), GSTIN & FSSAI stamps, FY sequential invoice numbers, Tally/Zoho CSV, and Razorpay Direct Web UPI/refunds.",
+    status: "COMPLETE",
+    task: "5% GST invoices (CGST/SGST/IGST), GSTIN & FSSAI stamps, gapless FY sequential invoice numbers, Tally/Zoho CSV exports, and Razorpay Direct Web UPI/auto-refunds.",
   },
   {
     id: "SPRINT-3B",

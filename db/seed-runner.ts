@@ -54,6 +54,9 @@ export async function seedDatabaseIdempotent(db: SeedableDb): Promise<void> {
           code: k.code,
           location: k.location ?? "",
           areaCode: k.areaCode ?? k.code,
+          stateCode: k.stateCode ?? "06",
+          gstin: k.gstin ?? null,
+          fssaiLicense: k.fssaiLicense ?? null,
           active: k.active,
           timezone: k.timezone,
           capacityPerHour: k.capacityPerHour ?? 100,
@@ -187,7 +190,15 @@ export async function seedDatabaseIdempotent(db: SeedableDb): Promise<void> {
             source: o.source,
             status: o.status,
             priority: o.priority ?? null,
+            subtotalAmount: toMoneyStr(o.subtotalAmount),
+            packagingAmount: toMoneyStr(o.packagingAmount),
+            cgstAmount: toMoneyStr(o.cgstAmount),
+            sgstAmount: toMoneyStr(o.sgstAmount),
+            igstAmount: toMoneyStr(o.igstAmount),
+            taxAmount: toMoneyStr(o.taxAmount),
             totalAmount: toMoneyStr(o.totalAmount),
+            paymentStatus: o.paymentStatus ?? "AGGREGATOR_SETTLED",
+            invoiceId: o.invoiceId ?? null,
             itemCount: o.itemCount ?? null,
             notes: o.notes ?? null,
             customerName: o.customerName ?? null,
@@ -444,6 +455,73 @@ export async function seedDatabaseIdempotent(db: SeedableDb): Promise<void> {
         updatedAt: new Date(),
       })
       .onConflictDoNothing();
+
+    // 20. GST Tax Invoices
+    if (dataset.taxInvoices.length > 0) {
+      await tx
+        .insert(schema.taxInvoices)
+        .values(
+          dataset.taxInvoices.map((inv) => ({
+            id: inv.id,
+            organizationId: inv.organizationId,
+            kitchenId: inv.kitchenId,
+            orderId: inv.orderId,
+            invoiceNumber: inv.invoiceNumber,
+            financialYear: inv.financialYear,
+            sequenceNumber: inv.sequenceNumber,
+            issuedAt: new Date(inv.issuedAt),
+            sellerGstin: inv.sellerGstin,
+            sellerFssai: inv.sellerFssai,
+            sellerStateCode: inv.sellerStateCode,
+            placeOfSupplyStateCode: inv.placeOfSupplyStateCode,
+            customerName: inv.customerName ?? null,
+            customerGstin: inv.customerGstin ?? null,
+            taxableSubtotal: Number(inv.taxableSubtotal).toFixed(2),
+            packagingFee: Number(inv.packagingFee).toFixed(2),
+            cgstRate: Number(inv.cgstRate).toFixed(2),
+            cgstAmount: Number(inv.cgstAmount).toFixed(2),
+            sgstRate: Number(inv.sgstRate).toFixed(2),
+            sgstAmount: Number(inv.sgstAmount).toFixed(2),
+            igstRate: Number(inv.igstRate).toFixed(2),
+            igstAmount: Number(inv.igstAmount).toFixed(2),
+            totalTax: Number(inv.totalTax).toFixed(2),
+            grandTotal: Number(inv.grandTotal).toFixed(2),
+            status: inv.status,
+            voidedAt: toDate(inv.voidedAt),
+            voidReason: inv.voidReason ?? null,
+            createdAt: new Date(inv.createdAt),
+          })),
+        )
+        .onConflictDoNothing();
+    }
+
+    // 21. Payment Transactions
+    if (dataset.paymentTransactions.length > 0) {
+      await tx
+        .insert(schema.paymentTransactions)
+        .values(
+          dataset.paymentTransactions.map((txRow) => ({
+            id: txRow.id,
+            organizationId: txRow.organizationId,
+            kitchenId: txRow.kitchenId,
+            orderId: txRow.orderId,
+            provider: txRow.provider,
+            providerOrderId: txRow.providerOrderId ?? null,
+            providerPaymentId: txRow.providerPaymentId ?? null,
+            providerRefundId: txRow.providerRefundId ?? null,
+            webhookEventId: txRow.webhookEventId ?? null,
+            amount: Number(txRow.amount).toFixed(2),
+            refundedAmount: Number(txRow.refundedAmount).toFixed(2),
+            currency: txRow.currency,
+            status: txRow.status,
+            method: txRow.method ?? null,
+            rawMeta: txRow.rawMeta ?? null,
+            createdAt: new Date(txRow.createdAt),
+            updatedAt: new Date(txRow.updatedAt),
+          })),
+        )
+        .onConflictDoNothing();
+    }
   });
 }
 
@@ -453,6 +531,8 @@ export async function seedDatabaseIdempotent(db: SeedableDb): Promise<void> {
 export async function resetDatabaseToSeed(db: SeedableDb): Promise<void> {
   await db.execute(sql`
     TRUNCATE TABLE
+      payment_transactions,
+      tax_invoices,
       order_events,
       order_items,
       cancellations,

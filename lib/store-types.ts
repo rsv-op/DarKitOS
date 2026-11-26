@@ -14,12 +14,15 @@ import type {
   OperationalActivity,
   Order,
   OrderChannel,
+  OrderPaymentStatus,
   OrderSource,
   OrderStatus,
   Organization,
   OutboxEvent,
+  PaymentTransaction,
   RevenueLeakageVector,
   SystemSettings,
+  TaxInvoice,
   VirtualFileAsset,
   WebhookIdempotencyEntry,
 } from "@/lib/db";
@@ -105,6 +108,8 @@ export const ALLOWED_CIRCUIT_STATES: SystemSettings["circuitBreakerState"][] = [
 export interface KitchenState {
   organizations: Organization[];
   orders: Order[];
+  taxInvoices: TaxInvoice[];
+  paymentTransactions: PaymentTransaction[];
   inventory: InventoryItem[];
   inventoryMovements: InventoryMovement[];
   cancellations: CancellationRecord[];
@@ -134,6 +139,10 @@ export interface InjectOrderInput {
   source?: OrderSource;
   priority?: "NORMAL" | "RUSH" | "VIP";
   customerName?: string;
+  customerGstin?: string;
+  placeOfSupplyStateCode?: string;
+  packagingFee?: number;
+  paymentStatus?: OrderPaymentStatus;
   notes?: string;
   items: {
     id?: string;
@@ -147,6 +156,7 @@ export interface InjectOrderInput {
 
 export interface InjectOrderResult {
   order: Order;
+  invoice?: TaxInvoice;
   idempotentReplay: boolean;
   inventoryDecision: InventoryDecision;
   inventoryWarnings: string[];
@@ -170,6 +180,8 @@ export interface TransitionOrderResult {
   depletedItems?: string[];
   lowStockAlerts?: string[];
   cancellationRecord?: CancellationRecord;
+  creditNoteInvoice?: TaxInvoice;
+  refundTransaction?: PaymentTransaction;
 }
 
 export interface InventoryMutationInput {

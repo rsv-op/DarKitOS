@@ -26,11 +26,15 @@ import type {
   OperationalActivity,
   OrderChannel,
   OrderEventType,
+  OrderPaymentStatus,
   OrderSource,
   OrderStatus,
   OutboxEvent,
+  PaymentProvider,
+  PaymentTransactionStatus,
   RevenueLeakageVector,
   SystemSettings,
+  TaxInvoiceStatus,
   VirtualFileAsset,
   WebhookIdempotencyEntry,
 } from "@/lib/db";
@@ -65,6 +69,9 @@ export const kitchens = pgTable(
     code: text("code").notNull().unique(),
     location: text("location").notNull(),
     areaCode: text("area_code").notNull(),
+    stateCode: text("state_code").notNull().default("06"),
+    gstin: text("gstin"),
+    fssaiLicense: text("fssai_license"),
     active: boolean("active").notNull().default(true),
     timezone: text("timezone").notNull().default("Asia/Kolkata"),
     capacityPerHour: integer("capacity_per_hour").notNull().default(100),
@@ -263,7 +270,18 @@ export const orders = pgTable(
     source: text("source").$type<OrderSource>().notNull(),
     status: text("status").$type<OrderStatus>().notNull(),
     priority: text("priority").$type<"NORMAL" | "RUSH" | "VIP">(),
+    subtotalAmount: numeric("subtotal_amount", { precision: 12, scale: 2 }),
+    packagingAmount: numeric("packaging_amount", { precision: 12, scale: 2 }),
+    cgstAmount: numeric("cgst_amount", { precision: 12, scale: 2 }),
+    sgstAmount: numeric("sgst_amount", { precision: 12, scale: 2 }),
+    igstAmount: numeric("igst_amount", { precision: 12, scale: 2 }),
+    taxAmount: numeric("tax_amount", { precision: 12, scale: 2 }),
     totalAmount: numeric("total_amount", { precision: 12, scale: 2 }),
+    paymentStatus: text("payment_status")
+      .$type<OrderPaymentStatus>()
+      .notNull()
+      .default("AGGREGATOR_SETTLED"),
+    invoiceId: text("invoice_id"),
     itemCount: integer("item_count"),
     notes: text("notes"),
     customerName: text("customer_name"),
@@ -616,6 +634,123 @@ export const systemSettings = pgTable("system_settings", {
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull(),
 });
 
+// -----------------------------------------------------------------------------
+// 20. GST Tax Invoices (Gapless Per-Kitchen Financial Year Sequence)
+// -----------------------------------------------------------------------------
+export const taxInvoices = pgTable(
+  "tax_invoices",
+  {
+    id: text("id").primaryKey(),
+    organizationId: text("organization_id")
+      .notNull()
+      .default("ORG-001")
+      .references(() => organizations.id, { onDelete: "restrict" }),
+    kitchenId: text("kitchen_id")
+      .notNull()
+      .references(() => kitchens.id, { onDelete: "restrict" }),
+    orderId: text("order_id")
+      .notNull()
+      .unique()
+      .references(() => orders.id, { onDelete: "cascade" }),
+    invoiceNumber: text("invoice_number").notNull().unique(),
+    financialYear: text("financial_year").notNull(),
+    sequenceNumber: integer("sequence_number").notNull(),
+    issuedAt: timestamp("issued_at", { withTimezone: true }).notNull(),
+    sellerGstin: text("seller_gstin").notNull(),
+    sellerFssai: text("seller_fssai").notNull(),
+    sellerStateCode: text("seller_state_code").notNull(),
+    placeOfSupplyStateCode: text("place_of_supply_state_code").notNull(),
+    customerName: text("customer_name"),
+    customerGstin: text("customer_gstin"),
+    taxableSubtotal: numeric("taxable_subtotal", {
+      precision: 12,
+      scale: 2,
+    }).notNull(),
+    packagingFee: numeric("packaging_fee", { precision: 12, scale: 2 })
+      .notNull()
+      .default("0"),
+    cgstRate: numeric("cgst_rate", { precision: 5, scale: 2 }).notNull(),
+    cgstAmount: numeric("cgst_amount", { precision: 12, scale: 2 }).notNull(),
+    sgstRate: numeric("sgst_rate", { precision: 5, scale: 2 }).notNull(),
+    sgstAmount: numeric("sgst_amount", { precision: 12, scale: 2 }).notNull(),
+    igstRate: numeric("igst_rate", { precision: 5, scale: 2 }).notNull(),
+    igstAmount: numeric("igst_amount", { precision: 12, scale: 2 }).notNull(),
+    totalTax: numeric("total_tax", { precision: 12, scale: 2 }).notNull(),
+    grandTotal: numeric("grand_total", { precision: 12, scale: 2 }).notNull(),
+    status: text("status")
+      .$type<TaxInvoiceStatus>()
+      .notNull()
+      .default("ISSUED"),
+    voidedAt: timestamp("voided_at", { withTimezone: true }),
+    voidReason: text("void_reason"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => ({
+    orgFyKitchenSeqUnique: uniqueIndex(
+      "tax_invoices_org_fy_kitchen_seq_uidx",
+    ).on(
+      table.organizationId,
+      table.financialYear,
+      table.kitchenId,
+      table.sequenceNumber,
+    ),
+    orgKitchenIssuedIdx: index("tax_invoices_org_kitchen_issued_idx").on(
+      table.organizationId,
+      table.kitchenId,
+      table.issuedAt,
+    ),
+  }),
+);
+
+// -----------------------------------------------------------------------------
+// 21. Payment Transactions Ledger (Razorpay / Direct Web / Sandbox UPI)
+// -----------------------------------------------------------------------------
+export const paymentTransactions = pgTable(
+  "payment_transactions",
+  {
+    id: text("id").primaryKey(),
+    organizationId: text("organization_id")
+      .notNull()
+      .default("ORG-001")
+      .references(() => organizations.id, { onDelete: "restrict" }),
+    kitchenId: text("kitchen_id")
+      .notNull()
+      .references(() => kitchens.id, { onDelete: "restrict" }),
+    orderId: text("order_id")
+      .notNull()
+      .references(() => orders.id, { onDelete: "cascade" }),
+    provider: text("provider").$type<PaymentProvider>().notNull(),
+    providerOrderId: text("provider_order_id").unique(),
+    providerPaymentId: text("provider_payment_id").unique(),
+    providerRefundId: text("provider_refund_id").unique(),
+    webhookEventId: text("webhook_event_id").unique(),
+    amount: numeric("amount", { precision: 12, scale: 2 }).notNull(),
+    refundedAmount: numeric("refunded_amount", { precision: 12, scale: 2 })
+      .notNull()
+      .default("0"),
+    currency: text("currency").notNull().default("INR"),
+    status: text("status").$type<PaymentTransactionStatus>().notNull(),
+    method: text("method"),
+    rawMeta: jsonb("raw_meta").$type<Record<string, unknown> | null>(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => ({
+    orderIdx: index("payment_transactions_order_idx").on(table.orderId),
+    orgKitchenIdx: index("payment_transactions_org_kitchen_idx").on(
+      table.organizationId,
+      table.kitchenId,
+      table.createdAt,
+    ),
+  }),
+);
+
 export const schema = {
   organizations,
   kitchens,
@@ -637,4 +772,6 @@ export const schema = {
   leakageVectors,
   virtualFiles,
   systemSettings,
+  taxInvoices,
+  paymentTransactions,
 };

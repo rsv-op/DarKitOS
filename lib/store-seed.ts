@@ -1,5 +1,10 @@
 import { formatCurrency } from "@/lib/currency";
 import {
+  formatTaxInvoiceNumber,
+  getIndianFinancialYear,
+  roundCurrency2,
+} from "@/lib/gst";
+import {
   BRANDS_DB,
   BRAND_KITCHENS_DB,
   DEFAULT_ORGANIZATION_ID,
@@ -18,10 +23,13 @@ import {
   type MenuItem,
   type OperationalActivity,
   type Order,
+  type OrderPaymentStatus,
   type Organization,
   type OutboxEvent,
+  type PaymentTransaction,
   type RevenueLeakageVector,
   type SystemSettings,
+  type TaxInvoice,
   type VirtualFileAsset,
   type WebhookIdempotencyEntry,
 } from "@/lib/db";
@@ -29,6 +37,8 @@ import {
 export interface SeedDataset {
   organizations: Organization[];
   orders: Order[];
+  taxInvoices: TaxInvoice[];
+  paymentTransactions: PaymentTransaction[];
   inventory: InventoryItem[];
   inventoryMovements: InventoryMovement[];
   cancellations: CancellationRecord[];
@@ -1052,12 +1062,108 @@ export function buildInitialSeedState(baseNowMs = Date.now()): SeedDataset {
     },
   ];
 
+  const orgById = new Map(ORGANIZATIONS_DB.map((o) => [o.id, o]));
+  const kitchenById = new Map(KITCHENS_DB.map((k) => [k.id, k]));
+  const seqCounters = new Map<string, number>();
+  const seedTaxInvoices: TaxInvoice[] = [];
+  const seedPaymentTransactions: PaymentTransaction[] = [];
+
+  const enrichedOrders: Order[] = seedOrders.map((o) => {
+    const orgId = o.organizationId ?? DEFAULT_ORGANIZATION_ID;
+    const org = orgById.get(orgId) ?? ORGANIZATIONS_DB[0];
+    const kitchen = kitchenById.get(o.kitchenId) ?? KITCHENS_DB[0];
+    const grandTotal = roundCurrency2(o.totalAmount ?? 0);
+    // Preserve exact seeded grand total (e.g., ORD-906 = ₹798) with tax-inclusive 5% GST breakup
+    const taxableSubtotal = roundCurrency2(grandTotal / 1.05);
+    const cgstAmount = roundCurrency2(taxableSubtotal * 0.025);
+    const sgstAmount = roundCurrency2(grandTotal - taxableSubtotal - cgstAmount);
+    const totalTax = roundCurrency2(cgstAmount + sgstAmount);
+    const sellerStateCode = kitchen.stateCode ?? "06";
+    const financialYear = getIndianFinancialYear(o.createdAt);
+    const seqKey = `${orgId}:${financialYear}:${o.kitchenId}`;
+    const sequenceNumber = (seqCounters.get(seqKey) ?? 0) + 1;
+    seqCounters.set(seqKey, sequenceNumber);
+
+    const invoiceId = `INV-${o.id}`;
+    const invoiceNumber = formatTaxInvoiceNumber({
+      financialYear,
+      kitchenCode: kitchen.code,
+      sequenceNumber,
+    });
+
+    const paymentStatus: OrderPaymentStatus =
+      o.source === "DIRECT_WEB" ? "CAPTURED" : "AGGREGATOR_SETTLED";
+
+    seedTaxInvoices.push({
+      id: invoiceId,
+      organizationId: orgId,
+      kitchenId: o.kitchenId,
+      orderId: o.id,
+      invoiceNumber,
+      financialYear,
+      sequenceNumber,
+      issuedAt: o.createdAt,
+      sellerGstin: kitchen.gstin ?? org.gstin ?? "06AABCD1234E1Z5",
+      sellerFssai: kitchen.fssaiLicense ?? org.fssaiLicense ?? "10824999000412",
+      sellerStateCode,
+      placeOfSupplyStateCode: sellerStateCode,
+      customerName: o.customerName,
+      taxableSubtotal,
+      packagingFee: 0,
+      cgstRate: 2.5,
+      cgstAmount,
+      sgstRate: 2.5,
+      sgstAmount,
+      igstRate: 0,
+      igstAmount: 0,
+      totalTax,
+      grandTotal,
+      status: "ISSUED",
+      createdAt: o.createdAt,
+    });
+
+    if (o.source === "DIRECT_WEB") {
+      seedPaymentTransactions.push({
+        id: `PAY-${o.id}`,
+        organizationId: orgId,
+        kitchenId: o.kitchenId,
+        orderId: o.id,
+        provider: "RAZORPAY",
+        providerOrderId: `order_sbx_seed_${o.id.toLowerCase()}`,
+        providerPaymentId: `pay_sbx_seed_${o.id.toLowerCase()}`,
+        webhookEventId: `evt_sbx_seed_${o.id.toLowerCase()}`,
+        amount: grandTotal,
+        refundedAmount: 0,
+        currency: "INR",
+        status: "CAPTURED",
+        method: "upi",
+        rawMeta: { seeded: true, vpa: "customer@okaxis" },
+        createdAt: o.createdAt,
+        updatedAt: o.updatedAt,
+      });
+    }
+
+    return {
+      ...o,
+      organizationId: orgId,
+      subtotalAmount: taxableSubtotal,
+      packagingAmount: 0,
+      cgstAmount,
+      sgstAmount,
+      igstAmount: 0,
+      taxAmount: totalTax,
+      totalAmount: grandTotal,
+      paymentStatus,
+      invoiceId,
+      placeOfSupplyStateCode: sellerStateCode,
+    };
+  });
+
   return {
     organizations: ORGANIZATIONS_DB.map((o) => ({ ...o })),
-    orders: seedOrders.map((o) => ({
-      ...o,
-      organizationId: o.organizationId ?? DEFAULT_ORGANIZATION_ID,
-    })),
+    orders: enrichedOrders,
+    taxInvoices: seedTaxInvoices,
+    paymentTransactions: seedPaymentTransactions,
     inventory: buildPerKitchenSeedInventory(),
     inventoryMovements: seedMovements,
     cancellations: seedCancellations,

@@ -85,6 +85,8 @@ ALTER TABLE public.kitchen_inventory ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.orders ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.cancellations ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.activities ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.tax_invoices ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.payment_transactions ENABLE ROW LEVEL SECURITY;
 
 -- 4. Organizations tenant policy
 DROP POLICY IF EXISTS darkit_organizations_tenant_isolation ON public.organizations;
@@ -248,4 +250,48 @@ CREATE POLICY darkit_activities_tenant_isolation
   WITH CHECK (
     auth.uid() IS NOT NULL
     AND organization_id = public.darkit_current_org_id()
+  );
+
+-- 12. Tax invoices tenant + kitchen isolation policy
+DROP POLICY IF EXISTS darkit_tax_invoices_tenant_isolation ON public.tax_invoices;
+CREATE POLICY darkit_tax_invoices_tenant_isolation
+  ON public.tax_invoices
+  FOR ALL
+  USING (
+    auth.uid() IS NOT NULL
+    AND organization_id = public.darkit_current_org_id()
+    AND (
+      public.darkit_is_org_owner()
+      OR kitchen_id = public.darkit_current_kitchen_id()
+    )
+  )
+  WITH CHECK (
+    auth.uid() IS NOT NULL
+    AND organization_id = public.darkit_current_org_id()
+    AND (
+      public.darkit_is_org_owner()
+      OR kitchen_id = public.darkit_current_kitchen_id()
+    )
+  );
+
+-- 13. Payment transactions tenant + kitchen isolation policy
+DROP POLICY IF EXISTS darkit_payment_transactions_tenant_isolation ON public.payment_transactions;
+CREATE POLICY darkit_payment_transactions_tenant_isolation
+  ON public.payment_transactions
+  FOR ALL
+  USING (
+    auth.uid() IS NOT NULL
+    AND organization_id = public.darkit_current_org_id()
+    AND (
+      public.darkit_is_org_owner()
+      OR kitchen_id = public.darkit_current_kitchen_id()
+    )
+  )
+  WITH CHECK (
+    auth.uid() IS NOT NULL
+    AND organization_id = public.darkit_current_org_id()
+    AND (
+      public.darkit_is_org_owner()
+      OR kitchen_id = public.darkit_current_kitchen_id()
+    )
   );
