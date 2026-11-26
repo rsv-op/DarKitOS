@@ -6,25 +6,28 @@ import {
   useState,
 } from "react";
 import AppShell from "@/components/AppShell";
+import { IntegrationsPanel } from "@/components/IntegrationsPanel";
 import type { SystemSettings } from "@/lib/db";
 
 export default function SettingsPage() {
-  const [settings, setSettings] =
-    useState<SystemSettings>({
-      currency: "USD",
-      timezone: "Asia/Kolkata",
-      theme: "obsidian",
-      fluidAnimations: true,
-      syncMode: "WEBSOCKET",
-      autoAcceptOrders: true,
-      lowStockMultiplier: 1.0,
-      prepSlaMinutes: 12,
-      dispatchSlaMinutes: 15,
-      rlsEnforcement: "STRICT_LOCAL_TX",
-      circuitBreakerState: "CLOSED",
-      rateLimitRps: 250,
-    });
+  const [settings, setSettings] = useState<SystemSettings>({
+    currency: "INR",
+    timezone: "Asia/Kolkata",
+    theme: "obsidian",
+    fluidAnimations: true,
+    syncMode: "HTTP_POLLING",
+    autoAcceptOrders: true,
+    lowStockMultiplier: 1.0,
+    prepSlaMinutes: 12,
+    dispatchSlaMinutes: 15,
+    rlsEnforcement: "STRICT_LOCAL_TX",
+    circuitBreakerState: "CLOSED",
+    rateLimitRps: 250,
+  });
+  const [prepInput, setPrepInput] = useState<string>("12");
+  const [dispatchInput, setDispatchInput] = useState<string>("15");
   const [notice, setNotice] = useState("");
+  const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
 
   const loadSettings = useCallback(async () => {
@@ -32,13 +35,19 @@ export default function SettingsPage() {
       const res = await fetch("/api/system", {
         cache: "no-store",
       });
-      if (!res.ok) return;
       const data = await res.json();
+      if (!res.ok) {
+        setError(data.error || "Unable to load settings.");
+        return;
+      }
       if (data.settings) {
         setSettings(data.settings);
+        setPrepInput(String(data.settings.prepSlaMinutes));
+        setDispatchInput(String(data.settings.dispatchSlaMinutes));
       }
+      setError("");
     } catch {
-      // ignore
+      setError("Network error while loading settings.");
     }
   }, []);
 
@@ -46,14 +55,12 @@ export default function SettingsPage() {
     void loadSettings();
   }, [loadSettings]);
 
-  async function saveSettings(
-    partial: Partial<SystemSettings>,
-  ) {
+  async function saveSettings(partial: Partial<SystemSettings>) {
     setSaving(true);
     setNotice("");
+    setError("");
     try {
       const next = { ...settings, ...partial };
-      setSettings(next);
       const res = await fetch("/api/system", {
         method: "PATCH",
         headers: {
@@ -64,24 +71,47 @@ export default function SettingsPage() {
           settings: next,
         }),
       });
-      if (res.ok) {
-        const data = await res.json();
-        setSettings(data.settings);
-        setNotice(
-          "System configuration persisted to canonical store and emitted to OS Shell.",
-        );
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error || "Unable to save settings.");
+        return;
       }
+      setSettings(data.settings);
+      setPrepInput(String(data.settings.prepSlaMinutes));
+      setDispatchInput(String(data.settings.dispatchSlaMinutes));
+      window.dispatchEvent(
+        new CustomEvent("darkit:settings-updated", { detail: data.settings }),
+      );
+      setNotice(
+        "Preferences saved and applied live across the workspace.",
+      );
+    } catch {
+      setError("Network error while saving settings.");
     } finally {
       setSaving(false);
     }
   }
 
+  function handleSaveSlaTargets(e: React.FormEvent) {
+    e.preventDefault();
+    void saveSettings({
+      prepSlaMinutes: Number(prepInput),
+      dispatchSlaMinutes: Number(dispatchInput),
+    });
+  }
+
   return (
     <AppShell
       title="Settings"
-      subtitle="Adjust the workspace appearance, regional preferences, and kitchen timing targets."
+      subtitle="Adjust currency reporting (INR default), workspace appearance, and kitchen timing targets."
     >
       <div className="space-y-6">
+        {error && (
+          <div className="rounded-xl border border-red-500/40 bg-red-500/10 px-4 py-3 font-mono text-xs text-red-300">
+            ⚠ {error}
+          </div>
+        )}
+
         {notice && (
           <div className="rounded-xl border border-emerald-500/40 bg-emerald-500/10 px-4 py-3 font-mono text-xs text-emerald-300">
             ✓ {notice}
@@ -89,16 +119,16 @@ export default function SettingsPage() {
         )}
 
         <div className="grid gap-6 lg:grid-cols-2">
-          {/* 1. OS Theme & Fluidic Personalization */}
+          {/* 1. Workspace Theme */}
           <section className="rounded-2xl border border-slate-800 bg-slate-900/70 p-6">
             <span className="font-mono text-xs font-bold uppercase text-sky-400">
-              Live-Preview OS Theme Engine
+              Live-Preview Workspace Theme
             </span>
             <h2 className="mt-1 text-lg font-black text-white">
-              Desktop & Workspace Personalization
+              Workspace Personalization
             </h2>
             <p className="text-xs text-slate-400">
-              Changes emit global state updates that update the OS Shell without hard refreshes.
+              Updates the workspace shell live without a page refresh.
             </p>
 
             <div className="mt-4 grid grid-cols-2 gap-3">
@@ -117,7 +147,7 @@ export default function SettingsPage() {
                   {
                     id: "cyber-emerald",
                     label: "Cyber Emerald",
-                    desc: "Matrix green operations",
+                    desc: "Emerald green operations",
                   },
                   {
                     id: "titanium",
@@ -130,23 +160,15 @@ export default function SettingsPage() {
                   key={t.id}
                   type="button"
                   disabled={saving}
-                  onClick={() =>
-                    void saveSettings({
-                      theme: t.id,
-                    })
-                  }
+                  onClick={() => void saveSettings({ theme: t.id })}
                   className={`rounded-xl border p-3.5 text-left transition ${
                     settings.theme === t.id
                       ? "border-sky-500 bg-sky-500/15 text-white"
                       : "border-slate-800 bg-slate-950 text-slate-300 hover:border-slate-700"
                   }`}
                 >
-                  <p className="font-mono text-xs font-bold">
-                    {t.label}
-                  </p>
-                  <p className="mt-0.5 text-[11px] text-slate-400">
-                    {t.desc}
-                  </p>
+                  <p className="font-mono text-xs font-bold">{t.label}</p>
+                  <p className="mt-0.5 text-[11px] text-slate-400">{t.desc}</p>
                 </button>
               ))}
             </div>
@@ -155,10 +177,10 @@ export default function SettingsPage() {
           {/* 2. Business & Order SLA Rules */}
           <section className="rounded-2xl border border-slate-800 bg-slate-900/70 p-6">
             <span className="font-mono text-xs font-bold uppercase text-emerald-400">
-              Business & Kitchen SLA Rules
+              Business &amp; Kitchen SLA Rules
             </span>
             <h2 className="mt-1 text-lg font-black text-white">
-              Currency, Timezone & KDS Synchronization
+              Currency, Sync &amp; Prep Targets
             </h2>
 
             <div className="mt-4 grid grid-cols-2 gap-4 text-xs">
@@ -168,6 +190,7 @@ export default function SettingsPage() {
                 </span>
                 <select
                   value={settings.currency}
+                  disabled={saving}
                   onChange={(e) =>
                     void saveSettings({
                       currency: e.target
@@ -176,24 +199,19 @@ export default function SettingsPage() {
                   }
                   className="mt-1 w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-white"
                 >
-                  <option value="USD">
-                    USD ($)
-                  </option>
-                  <option value="INR">
-                    INR (₹)
-                  </option>
-                  <option value="EUR">
-                    EUR (€)
-                  </option>
+                  <option value="INR">INR (₹) — Indian Rupee</option>
+                  <option value="USD">USD ($) — US Dollar</option>
+                  <option value="EUR">EUR (€) — Euro</option>
                 </select>
               </label>
 
               <label className="block">
                 <span className="font-mono text-[10px] uppercase text-slate-400">
-                  Default KDS Sync Transport
+                  KDS Sync Transport
                 </span>
                 <select
                   value={settings.syncMode}
+                  disabled={saving}
                   onChange={(e) =>
                     void saveSettings({
                       syncMode: e.target
@@ -202,18 +220,23 @@ export default function SettingsPage() {
                   }
                   className="mt-1 w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-white"
                 >
-                  <option value="WEBSOCKET">
-                    WebSocket Full-Duplex
+                  <option value="HTTP_POLLING">
+                    HTTP Polling (Sprint 0 Active)
                   </option>
                   <option value="SSE">
-                    Server-Sent Events (SSE)
+                    Server-Sent Events (Sprint 2 Target)
                   </option>
-                  <option value="HTTP_POLLING">
-                    HTTP Long-Polling Fallback
+                  <option value="WEBSOCKET">
+                    Supabase Realtime WebSocket (Sprint 2 Target)
                   </option>
                 </select>
               </label>
+            </div>
 
+            <form
+              onSubmit={handleSaveSlaTargets}
+              className="mt-4 grid grid-cols-2 gap-4 text-xs items-end"
+            >
               <label className="block">
                 <span className="font-mono text-[10px] uppercase text-slate-400">
                   Prep SLA Target (Minutes)
@@ -222,16 +245,8 @@ export default function SettingsPage() {
                   type="number"
                   min={3}
                   max={60}
-                  value={
-                    settings.prepSlaMinutes
-                  }
-                  onChange={(e) =>
-                    void saveSettings({
-                      prepSlaMinutes: Number(
-                        e.target.value,
-                      ),
-                    })
-                  }
+                  value={prepInput}
+                  onChange={(e) => setPrepInput(e.target.value)}
                   className="mt-1 w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 font-mono text-white"
                 />
               </label>
@@ -244,49 +259,56 @@ export default function SettingsPage() {
                   type="number"
                   min={3}
                   max={60}
-                  value={
-                    settings.dispatchSlaMinutes
-                  }
-                  onChange={(e) =>
-                    void saveSettings({
-                      dispatchSlaMinutes:
-                        Number(e.target.value),
-                    })
-                  }
+                  value={dispatchInput}
+                  onChange={(e) => setDispatchInput(e.target.value)}
                   className="mt-1 w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 font-mono text-white"
                 />
               </label>
-            </div>
+
+              <div className="col-span-2">
+                <button
+                  type="submit"
+                  disabled={saving}
+                  className="rounded-xl bg-emerald-500 px-4 py-2 text-xs font-bold text-slate-950 hover:bg-emerald-400 disabled:opacity-50"
+                >
+                  {saving ? "Saving..." : "Save SLA Targets"}
+                </button>
+              </div>
+            </form>
           </section>
         </div>
 
-        {/* 3. Cloud7 Security & Self-Healing Config Verification */}
+        {/* 3. Aggregator, Outbox & WhatsApp Integrations (Sprint 3B) */}
+        <IntegrationsPanel />
+
+        {/* 4. Safe Configuration Sanitizer */}
         <section className="rounded-2xl border border-slate-800 bg-slate-900/70 p-6">
           <div className="flex flex-wrap items-center justify-between gap-4">
             <div>
               <span className="font-mono text-xs font-bold uppercase text-amber-400">
-                Self-Healing Configuration & Cloud7 Security
+                Configuration Validation &amp; Safe Fallback
               </span>
               <h2 className="mt-1 text-lg font-black text-white">
-                Resilience Against Malformed Configuration Payloads
+                Resilience Against Malformed SLA Payloads
               </h2>
               <p className="text-xs text-slate-400">
-                If malformed or out-of-range configuration values (such as NaN or negative SLA thresholds) are submitted, the store sanitizer automatically falls back to safe operational parameters.
+                Out-of-range or NaN configuration payloads are rejected by the
+                store sanitizer, preserving the last valid operational settings.
               </p>
             </div>
 
             <button
               type="button"
+              disabled={saving}
               onClick={() =>
                 void saveSettings({
                   prepSlaMinutes: -999,
-                  lowStockMultiplier:
-                    Number.NaN,
+                  lowStockMultiplier: Number.NaN,
                 })
               }
               className="rounded-xl border border-amber-500/40 bg-amber-500/10 px-4 py-2.5 font-mono text-xs font-bold text-amber-300 hover:bg-amber-500/20"
             >
-              ⚡ Test Self-Healing Config Sanitizer
+              ⚡ Test Safe Config Fallback
             </button>
           </div>
         </section>

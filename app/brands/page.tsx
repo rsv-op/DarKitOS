@@ -7,6 +7,11 @@ import {
 } from "react";
 import AppShell from "@/components/AppShell";
 import {
+  formatCurrency,
+  getCurrencySymbol,
+  type SupportedCurrency,
+} from "@/lib/currency";
+import {
   BRANDS_DB,
   KITCHENS_DB,
   type BrandConfig,
@@ -16,6 +21,7 @@ import {
   type KitchenConfig,
   type KitchenStation,
   type MenuItem,
+  type SystemSettings,
 } from "@/lib/db";
 
 const STATIONS: KitchenStation[] = [
@@ -41,13 +47,15 @@ export default function BrandsPage() {
   const [loading, setLoading] = useState(true);
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
+  const [currency, setCurrency] =
+    useState<SupportedCurrency>("INR");
 
   // New / Edit Menu Item form
   const [newBrandId, setNewBrandId] =
     useState<DbaBrand>("BurgerForge");
   const [newName, setNewName] = useState("");
   const [newPrice, setNewPrice] =
-    useState(13.99);
+    useState(299);
   const [newStation, setNewStation] =
     useState<KitchenStation>("Grill");
   const [newIngredientId, setNewIngredientId] =
@@ -77,6 +85,8 @@ export default function BrandsPage() {
         setMenuCatalog(data.menuCatalog);
       if (Array.isArray(data.inventory))
         setInventory(data.inventory);
+      if (data.settings?.currency)
+        setCurrency(data.settings.currency);
     } catch (err) {
       setError(
         err instanceof Error
@@ -90,6 +100,13 @@ export default function BrandsPage() {
 
   useEffect(() => {
     void loadData();
+    const onSettingsUpdated = (event: Event) => {
+      const custom = event as CustomEvent<SystemSettings>;
+      if (custom.detail?.currency) setCurrency(custom.detail.currency);
+    };
+    window.addEventListener("darkit:settings-updated", onSettingsUpdated);
+    return () =>
+      window.removeEventListener("darkit:settings-updated", onSettingsUpdated);
   }, [loadData]);
 
   async function toggleMatrixCell(
@@ -142,7 +159,7 @@ export default function BrandsPage() {
         id: `MENU-${newBrandId.slice(0, 2).toUpperCase()}-${Date.now().toString().slice(-3)}`,
         brandId: newBrandId,
         name: newName.trim(),
-        price: Number(newPrice) || 12.99,
+        price: Number(newPrice) || 299,
         station: newStation,
         active: true,
         recipe:
@@ -177,7 +194,7 @@ export default function BrandsPage() {
       setMenuCatalog(data.menuCatalog);
       setNewName("");
       setNotice(
-        `Added "${item.name}" ($${item.price.toFixed(2)}) to ${item.brandId} catalog.`,
+        `Added "${item.name}" (${formatCurrency(item.price, currency)}) to ${item.brandId} catalog.`,
       );
     } catch (err) {
       setError(
@@ -398,7 +415,7 @@ export default function BrandsPage() {
 
                   <div className="text-right font-mono">
                     <span className="text-base font-black text-emerald-400">
-                      ${item.price.toFixed(2)}
+                      {formatCurrency(item.price, currency)}
                     </span>
                     <p className="text-[10px] text-slate-500">
                       {item.id}
@@ -461,11 +478,12 @@ export default function BrandsPage() {
               <div className="grid grid-cols-2 gap-2">
                 <div>
                   <label className="block font-mono text-[10px] uppercase text-slate-400">
-                    Price ($)
+                    Price ({getCurrencySymbol(currency)})
                   </label>
                   <input
                     type="number"
-                    step="0.01"
+                    step="1"
+                    min="1"
                     value={newPrice}
                     onChange={(e) =>
                       setNewPrice(
@@ -512,7 +530,9 @@ export default function BrandsPage() {
                     }
                     className="mt-1 w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-white"
                   >
-                    {inventory.map((inv) => (
+                    {Array.from(
+                      new Map(inventory.map((i) => [i.id, i])).values(),
+                    ).map((inv) => (
                       <option
                         key={inv.id}
                         value={inv.id}

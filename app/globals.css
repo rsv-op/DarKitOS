@@ -1,3 +1,32 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+@media print {
+  @page {
+    size: 80mm auto;
+    margin: 2mm;
+  }
+
+  body.kot-printing * {
+    visibility: hidden !important;
+  }
+
+  body.kot-printing #kot-thermal-print-area,
+  body.kot-printing #kot-thermal-print-area * {
+    visibility: visible !important;
+  }
+
+  body.kot-printing #kot-thermal-print-area {
+    position: fixed !important;
+    inset: 0 auto auto 0 !important;
+    width: 76mm !important;
+    max-width: 76mm !important;
+    margin: 0 !important;
+    padding: 4mm !important;
+    background: #ffffff !important;
+    color: #000000 !important;
+    box-shadow: none !important;
+    border: none !important;
+  }
+}

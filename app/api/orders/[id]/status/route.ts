@@ -1,157 +1,75 @@
 import { NextRequest, NextResponse } from "next/server";
-import type {
-  CancellationSource,
-  OrderStatus,
-} from "@/lib/db";
-import { getAuthenticatedEmployee } from "@/lib/domain/auth-service";
-import { hasPermission } from "@/lib/domain/permission-service";
-import { transitionCanonicalOrder } from "@/lib/store";
+import type { CancellationSource } from "@/lib/db";
+import { requireAuthenticatedEmployee } from "@/lib/domain/auth-service";
+import { executeAuthorizedOrderTransition } from "@/lib/domain/order-transitions";
+import { triggerQStashOutboxFlush } from "@/lib/outbox-dispatcher";
 
 export async function PATCH(
   request: NextRequest,
   { params }: { params: { id: string } },
 ) {
   try {
-    const employee =
-      await getAuthenticatedEmployee(request);
-
-    if (!employee) {
-      return NextResponse.json(
-        { error: "Unauthorized" },
-        { status: 401 },
-      );
-    }
+    const auth = await requireAuthenticatedEmployee(request);
+    if (!auth.ok) return auth.response;
+    const employee = auth.employee;
 
     const body = await request.json();
-    const nextStatus = String(
-      body?.status || body?.action || "",
-    ).trim() as OrderStatus;
-
-    if (!nextStatus) {
-      return NextResponse.json(
-        { error: "status is required" },
-        { status: 400 },
-      );
-    }
-
-    if (
-      nextStatus === "PREPARING" ||
-      nextStatus === "READY_FOR_PICKUP"
-    ) {
-      if (
-        !hasPermission(
-          employee,
-          "COOK_ORDERS",
-        ) &&
-        !hasPermission(
-          employee,
-          "OWNER_VIEW",
-        )
-      ) {
-        return NextResponse.json(
-          {
-            error:
-              "Forbidden: Requires COOK_ORDERS permission",
-          },
-          { status: 403 },
-        );
-      }
-    } else if (
-      nextStatus === "DRIVER_ASSIGNED" ||
-      nextStatus === "PICKED_UP" ||
-      nextStatus === "DISPATCHED"
-    ) {
-      if (
-        !hasPermission(
-          employee,
-          "DISPATCH_ORDERS",
-        ) &&
-        !hasPermission(
-          employee,
-          "OWNER_VIEW",
-        )
-      ) {
-        return NextResponse.json(
-          {
-            error:
-              "Forbidden: Requires DISPATCH_ORDERS permission",
-          },
-          { status: 403 },
-        );
-      }
-    } else if (nextStatus === "CANCELLED") {
-      if (
-        !hasPermission(
-          employee,
-          "ORDER_CANCEL",
-        ) &&
-        !hasPermission(
-          employee,
-          "OWNER_VIEW",
-        )
-      ) {
-        return NextResponse.json(
-          {
-            error:
-              "Forbidden: Requires ORDER_CANCEL permission",
-          },
-          { status: 403 },
-        );
-      }
-    }
-
-    const actorLabel = `${employee.employeeCode} (${employee.name})`;
-
-    const result = transitionCanonicalOrder({
+    const outcome = await executeAuthorizedOrderTransition({
+      employee,
       orderId: params.id,
-      nextStatus,
-      actor: actorLabel,
-      driverName: body?.driverName,
+      nextStatusRaw: String(body?.status || body?.action || ""),
+      driverName:
+        typeof body?.driverName === "string" ? body.driverName : undefined,
       courierEtaMins:
         typeof body?.courierEtaMins === "number"
           ? body.courierEtaMins
           : undefined,
-      cancellationSource:
-        body?.cancellationSource as
-          | CancellationSource
-          | undefined,
+      cancellationSource: body?.cancellationSource as
+        | CancellationSource
+        | undefined,
       cancellationReason:
-        body?.cancellationReason,
+        typeof body?.cancellationReason === "string"
+          ? body.cancellationReason
+          : undefined,
       restoreInventoryOnPrePrepCancel:
-        body?.restoreInventoryOnPrePrepCancel,
+        typeof body?.restoreInventoryOnPrePrepCancel === "boolean"
+          ? body.restoreInventoryOnPrePrepCancel
+          : undefined,
     });
+
+    if (!outcome.ok) {
+      return NextResponse.json(
+        { error: outcome.error },
+        { status: outcome.status },
+      );
+    }
+
+    const updatedOrder = outcome.result.order;
+    if (
+      !outcome.result.idempotentReplay &&
+      (updatedOrder.source === "SWIGGY" ||
+        updatedOrder.source === "ZOMATO" ||
+        updatedOrder.channel === "Swiggy" ||
+        updatedOrder.channel === "Zomato")
+    ) {
+      void triggerQStashOutboxFlush();
+    }
 
     return NextResponse.json({
       success: true,
-      order: result.order,
-      idempotentReplay:
-        result.idempotentReplay,
-      depletedItems: result.depletedItems,
-      lowStockAlerts: result.lowStockAlerts,
-      cancellationRecord:
-        result.cancellationRecord,
+      order: updatedOrder,
+      idempotentReplay: outcome.result.idempotentReplay,
+      depletedItems: outcome.result.depletedItems,
+      lowStockAlerts: outcome.result.lowStockAlerts,
+      cancellationRecord: outcome.result.cancellationRecord,
+      creditNoteInvoice: outcome.result.creditNoteInvoice,
+      refundTransaction: outcome.result.refundTransaction,
     });
   } catch (error) {
-    const message =
-      error instanceof Error
-        ? error.message
-        : "Unable to update order status";
-    const status = message.includes(
-      "Order not found",
-    )
-      ? 404
-      : message.includes(
-            "Invalid status transition",
-          ) ||
-          message.includes(
-            "Insufficient inventory",
-          )
-        ? 409
-        : 400;
-
+    console.error("PATCH /api/orders/[id]/status failed:", error);
     return NextResponse.json(
-      { error: message },
-      { status },
+      { error: "Unable to update order status" },
+      { status: 400 },
     );
   }
 }

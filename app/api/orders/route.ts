@@ -5,108 +5,135 @@ import {
   type DbaBrand,
   type OrderChannel,
   type OrderSource,
-  type OrderStatus,
 } from "@/lib/db";
-import { getAuthenticatedEmployee } from "@/lib/domain/auth-service";
-import { hasPermission } from "@/lib/domain/permission-service";
+import { requireAuthenticatedEmployee } from "@/lib/domain/auth-service";
+import { executeAuthorizedOrderTransition } from "@/lib/domain/order-transitions";
 import {
+  canAccessKitchen,
+  canAccessOrganization,
+  getAccessibleKitchenIds,
+  hasGlobalScope,
+  hasPermission,
+} from "@/lib/domain/permission-service";
+import {
+  getKitchens,
   getMenuCatalog,
   getOrders,
+  getOutboxEvents,
   injectCanonicalOrder,
-  transitionCanonicalOrder,
 } from "@/lib/store";
 
 export async function GET(request: NextRequest) {
   try {
-    const employee =
-      await getAuthenticatedEmployee(request);
-
-    if (!employee) {
-      return NextResponse.json(
-        { error: "Unauthorized" },
-        { status: 401 },
-      );
-    }
+    const auth = await requireAuthenticatedEmployee(request);
+    if (!auth.ok) return auth.response;
+    const employee = auth.employee;
 
     const { searchParams } = request.nextUrl;
-    const statusFilter =
-      searchParams.get("status") || "";
-    const brandFilter =
-      searchParams.get("brandId") || "";
-    const kitchenFilter =
-      searchParams.get("kitchenId") || "";
-    const channelFilter =
-      searchParams.get("channel") || "";
-    const search = (
-      searchParams.get("search") || ""
-    )
-      .trim()
-      .toLowerCase();
+    const statusFilter = searchParams.get("status") || "";
+    const brandFilter = searchParams.get("brandId") || "";
+    const requestedKitchenFilter = (
+      searchParams.get("kitchenId") || ""
+    ).trim();
+    const channelFilter = searchParams.get("channel") || "";
+    const search = (searchParams.get("search") || "").trim().toLowerCase();
 
-    let orders = getOrders();
+    const [allOrders, kitchens, outboxEvents] = await Promise.all([
+      getOrders(),
+      getKitchens(),
+      getOutboxEvents({ organizationId: employee.organizationId }),
+    ]);
+
+    const urbanPiperOutboxByOrder = new Map<string, typeof outboxEvents>();
+    for (const evt of outboxEvents) {
+      if (evt.destination !== "URBANPIPER") continue;
+      const list = urbanPiperOutboxByOrder.get(evt.aggregateId) ?? [];
+      list.push(evt);
+      urbanPiperOutboxByOrder.set(evt.aggregateId, list);
+    }
+
+    // Level 1 (Organization) cross-org explicit kitchen probe -> 403 Forbidden
+    if (requestedKitchenFilter && requestedKitchenFilter !== "ALL") {
+      const targetKitchen = kitchens.find(
+        (k) => k.id === requestedKitchenFilter,
+      );
+      if (
+        targetKitchen &&
+        !canAccessOrganization(employee, targetKitchen.organizationId)
+      ) {
+        return NextResponse.json(
+          {
+            error: `Forbidden: Kitchen ${requestedKitchenFilter} belongs to another organization`,
+          },
+          { status: 403 },
+        );
+      }
+    }
+
+    const accessibleKitchens = getAccessibleKitchenIds(employee, kitchens);
+
+    // Enforce two-level tenant + kitchen isolation on every read
+    let orders = allOrders.filter(
+      (o) =>
+        canAccessOrganization(employee, o.organizationId) &&
+        accessibleKitchens.has(o.kitchenId),
+    );
 
     if (
-      statusFilter &&
-      statusFilter !== "ALL"
+      hasGlobalScope(employee) &&
+      requestedKitchenFilter &&
+      requestedKitchenFilter !== "ALL"
     ) {
-      orders = orders.filter(
-        (o) => o.status === statusFilter,
-      );
+      orders = orders.filter((o) => o.kitchenId === requestedKitchenFilter);
     }
-    if (
-      brandFilter &&
-      brandFilter !== "ALL"
-    ) {
-      orders = orders.filter(
-        (o) => o.brandId === brandFilter,
-      );
+
+    if (statusFilter && statusFilter !== "ALL") {
+      orders = orders.filter((o) => o.status === statusFilter);
     }
-    if (
-      kitchenFilter &&
-      kitchenFilter !== "ALL"
-    ) {
-      orders = orders.filter(
-        (o) => o.kitchenId === kitchenFilter,
-      );
+    if (brandFilter && brandFilter !== "ALL") {
+      orders = orders.filter((o) => o.brandId === brandFilter);
     }
-    if (
-      channelFilter &&
-      channelFilter !== "ALL"
-    ) {
-      orders = orders.filter(
-        (o) => o.channel === channelFilter,
-      );
+    if (channelFilter && channelFilter !== "ALL") {
+      orders = orders.filter((o) => o.channel === channelFilter);
     }
     if (search) {
       orders = orders.filter(
         (o) =>
           o.id.toLowerCase().includes(search) ||
-          (o.customerName || "")
-            .toLowerCase()
-            .includes(search) ||
-          (o.externalOrderId || "")
-            .toLowerCase()
-            .includes(search) ||
-          o.brandId
-            .toLowerCase()
-            .includes(search) ||
-          o.items.some((item) =>
-            item.name
-              .toLowerCase()
-              .includes(search),
-          ),
+          (o.customerName || "").toLowerCase().includes(search) ||
+          (o.externalOrderId || "").toLowerCase().includes(search) ||
+          o.brandId.toLowerCase().includes(search) ||
+          o.items.some((item) => item.name.toLowerCase().includes(search)),
       );
     }
 
+    const enrichedOrders = orders.map((order) => {
+      const isAgg =
+        order.source === "SWIGGY" ||
+        order.source === "ZOMATO" ||
+        order.channel === "Swiggy" ||
+        order.channel === "Zomato";
+      if (!isAgg) return order;
+      const related = urbanPiperOutboxByOrder.get(order.id) ?? [];
+      const aggregatorSyncStatus = related.some((e) => e.status === "FAILED")
+        ? ("SYNC_FAILED" as const)
+        : related.some(
+              (e) => e.status === "PENDING" || e.status === "RETRYING",
+            )
+          ? ("OUTBOX_QUEUED" as const)
+          : ("SYNCED" as const);
+      return {
+        ...order,
+        aggregatorSyncStatus,
+      };
+    });
+
     return NextResponse.json({
-      orders,
-      total: orders.length,
+      orders: enrichedOrders,
+      total: enrichedOrders.length,
     });
   } catch (error) {
-    console.error(
-      "GET /api/orders failed:",
-      error,
-    );
+    console.error("GET /api/orders failed:", error);
     return NextResponse.json(
       { error: "Unable to load orders" },
       { status: 500 },
@@ -116,28 +143,19 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
-    const employee =
-      await getAuthenticatedEmployee(request);
+    const auth = await requireAuthenticatedEmployee(request);
+    if (!auth.ok) return auth.response;
+    const employee = auth.employee;
 
-    if (!employee) {
-      return NextResponse.json(
-        { error: "Unauthorized" },
-        { status: 401 },
-      );
-    }
-
+    // Strict RBAC: Only ORDER_INJECT or OWNER_VIEW may inject orders (KITCHEN_OPERATE is NOT sufficient)
     if (
       !hasPermission(employee, "ORDER_INJECT") &&
-      !hasPermission(employee, "OWNER_VIEW") &&
-      !hasPermission(
-        employee,
-        "KITCHEN_OPERATE",
-      )
+      !hasPermission(employee, "OWNER_VIEW")
     ) {
       return NextResponse.json(
         {
           error:
-            "Forbidden: Insufficient permissions to inject orders",
+            "Forbidden: Requires ORDER_INJECT or OWNER_VIEW permission",
         },
         { status: 403 },
       );
@@ -152,43 +170,39 @@ export async function POST(request: NextRequest) {
     }
 
     const brandId = body.brandId as DbaBrand;
-    const kitchenId = String(
-      body.kitchenId || "",
-    ).trim();
-    const channel = (body.channel ||
-      "Direct Web") as OrderChannel;
+    const kitchenId = String(body.kitchenId || "").trim();
+    const channel = (body.channel || "Direct Web") as OrderChannel;
 
     if (!brandId || !kitchenId) {
       return NextResponse.json(
-        {
-          error:
-            "Missing required brandId or kitchenId",
-        },
+        { error: "Missing required brandId or kitchenId" },
         { status: 400 },
       );
     }
 
-    const catalog =
-      getMenuCatalog() ?? MENU_CATALOG;
+    const kitchens = await getKitchens();
+    if (!canAccessKitchen(employee, kitchenId, kitchens)) {
+      return NextResponse.json(
+        {
+          error: `Forbidden: Employee ${employee.employeeCode} cannot inject orders into kitchen ${kitchenId}`,
+        },
+        { status: 403 },
+      );
+    }
+
+    const catalog = (await getMenuCatalog()) ?? MENU_CATALOG;
 
     // Support both explicit items[] array and synthetic single-item fallback
-    let items = Array.isArray(body.items)
-      ? body.items
-      : [];
+    let items = Array.isArray(body.items) ? body.items : [];
 
     if (items.length === 0) {
-      const defaultMenuItem = catalog.find(
-        (m) => m.brandId === brandId,
-      );
+      const defaultMenuItem = catalog.find((m) => m.brandId === brandId);
       if (defaultMenuItem) {
         items = [
           {
             menuItemId: defaultMenuItem.id,
             name: defaultMenuItem.name,
-            quantity: Math.max(
-              1,
-              Number(body.itemCount) || 1,
-            ),
+            quantity: Math.max(1, Number(body.itemCount) || 1),
             notes: body.notes,
           },
         ];
@@ -197,11 +211,9 @@ export async function POST(request: NextRequest) {
 
     const actorLabel = `${employee.employeeCode} (${employee.name})`;
 
-    const result = injectCanonicalOrder({
-      id:
-        typeof body.id === "string"
-          ? body.id
-          : undefined,
+    const result = await injectCanonicalOrder({
+      id: typeof body.id === "string" ? body.id : undefined,
+      organizationId: employee.organizationId,
       externalOrderId:
         typeof body.externalOrderId === "string"
           ? body.externalOrderId
@@ -213,11 +225,17 @@ export async function POST(request: NextRequest) {
       brandId,
       kitchenId,
       channel,
-      source: body.source as
-        | OrderSource
-        | undefined,
+      source: body.source as OrderSource | undefined,
       priority: body.priority,
       customerName: body.customerName,
+      customerGstin:
+        typeof body.customerGstin === "string" ? body.customerGstin : undefined,
+      placeOfSupplyStateCode:
+        typeof body.placeOfSupplyStateCode === "string"
+          ? body.placeOfSupplyStateCode
+          : undefined,
+      packagingFee:
+        typeof body.packagingFee === "number" ? body.packagingFee : undefined,
       notes: body.notes,
       items,
       actor: actorLabel,
@@ -227,31 +245,23 @@ export async function POST(request: NextRequest) {
       {
         success: true,
         order: result.order,
-        idempotentReplay:
-          result.idempotentReplay,
-        inventoryDecision:
-          result.inventoryDecision,
-        inventoryWarnings:
-          result.inventoryWarnings,
-        inventoryUnavailable:
-          result.inventoryUnavailable,
+        invoice: result.invoice,
+        idempotentReplay: result.idempotentReplay,
+        inventoryDecision: result.inventoryDecision,
+        inventoryWarnings: result.inventoryWarnings,
+        inventoryUnavailable: result.inventoryUnavailable,
       },
       {
-        status: result.idempotentReplay
-          ? 200
-          : 201,
+        status: result.idempotentReplay ? 200 : 201,
       },
     );
   } catch (error) {
     const message =
-      error instanceof Error
-        ? error.message
-        : "Unable to create order";
+      error instanceof Error ? error.message : "Unable to create order";
     const isConflict =
-      message.includes(
-        "BrandKitchen violation",
-      ) ||
-      message.includes("Invalid or inactive");
+      message.includes("BrandKitchen violation") ||
+      message.includes("Invalid or inactive") ||
+      message.includes("already exists");
 
     return NextResponse.json(
       { error: message },
@@ -260,157 +270,58 @@ export async function POST(request: NextRequest) {
   }
 }
 
-export async function PATCH(
-  request: NextRequest,
-) {
+export async function PATCH(request: NextRequest) {
   try {
-    const employee =
-      await getAuthenticatedEmployee(request);
-
-    if (!employee) {
-      return NextResponse.json(
-        { error: "Unauthorized" },
-        { status: 401 },
-      );
-    }
+    const auth = await requireAuthenticatedEmployee(request);
+    if (!auth.ok) return auth.response;
+    const employee = auth.employee;
 
     const body = await request.json();
-    const orderId = String(
-      body?.orderId || body?.id || "",
-    ).trim();
-    const nextStatus = String(
-      body?.action || body?.status || "",
-    ).trim() as OrderStatus;
-
-    if (!orderId || !nextStatus) {
-      return NextResponse.json(
-        {
-          error:
-            "Both orderId and action/status are required",
-        },
-        { status: 400 },
-      );
-    }
-
-    // Enforce RBAC permissions per transition type
-    if (
-      nextStatus === "PREPARING" ||
-      nextStatus === "READY_FOR_PICKUP"
-    ) {
-      if (
-        !hasPermission(
-          employee,
-          "COOK_ORDERS",
-        ) &&
-        !hasPermission(
-          employee,
-          "OWNER_VIEW",
-        )
-      ) {
-        return NextResponse.json(
-          {
-            error:
-              "Forbidden: Requires COOK_ORDERS permission",
-          },
-          { status: 403 },
-        );
-      }
-    } else if (
-      nextStatus === "DRIVER_ASSIGNED" ||
-      nextStatus === "PICKED_UP" ||
-      nextStatus === "DISPATCHED"
-    ) {
-      if (
-        !hasPermission(
-          employee,
-          "DISPATCH_ORDERS",
-        ) &&
-        !hasPermission(
-          employee,
-          "OWNER_VIEW",
-        )
-      ) {
-        return NextResponse.json(
-          {
-            error:
-              "Forbidden: Requires DISPATCH_ORDERS permission",
-          },
-          { status: 403 },
-        );
-      }
-    } else if (nextStatus === "CANCELLED") {
-      if (
-        !hasPermission(
-          employee,
-          "ORDER_CANCEL",
-        ) &&
-        !hasPermission(
-          employee,
-          "OWNER_VIEW",
-        )
-      ) {
-        return NextResponse.json(
-          {
-            error:
-              "Forbidden: Requires ORDER_CANCEL permission",
-          },
-          { status: 403 },
-        );
-      }
-    }
-
-    const actorLabel = `${employee.employeeCode} (${employee.name})`;
-
-    const result = transitionCanonicalOrder({
-      orderId,
-      nextStatus,
-      actor: actorLabel,
-      driverName: body?.driverName,
+    const outcome = await executeAuthorizedOrderTransition({
+      employee,
+      orderId: String(body?.orderId || body?.id || ""),
+      nextStatusRaw: String(body?.action || body?.status || ""),
+      driverName:
+        typeof body?.driverName === "string" ? body.driverName : undefined,
       courierEtaMins:
         typeof body?.courierEtaMins === "number"
           ? body.courierEtaMins
           : undefined,
-      cancellationSource:
-        body?.cancellationSource as
-          | CancellationSource
-          | undefined,
+      cancellationSource: body?.cancellationSource as
+        | CancellationSource
+        | undefined,
       cancellationReason:
-        body?.cancellationReason,
+        typeof body?.cancellationReason === "string"
+          ? body.cancellationReason
+          : undefined,
       restoreInventoryOnPrePrepCancel:
-        body?.restoreInventoryOnPrePrepCancel,
+        typeof body?.restoreInventoryOnPrePrepCancel === "boolean"
+          ? body.restoreInventoryOnPrePrepCancel
+          : undefined,
     });
+
+    if (!outcome.ok) {
+      return NextResponse.json(
+        { error: outcome.error },
+        { status: outcome.status },
+      );
+    }
 
     return NextResponse.json({
       success: true,
-      order: result.order,
-      idempotentReplay:
-        result.idempotentReplay,
-      depletedItems: result.depletedItems,
-      lowStockAlerts: result.lowStockAlerts,
-      cancellationRecord:
-        result.cancellationRecord,
+      order: outcome.result.order,
+      idempotentReplay: outcome.result.idempotentReplay,
+      depletedItems: outcome.result.depletedItems,
+      lowStockAlerts: outcome.result.lowStockAlerts,
+      cancellationRecord: outcome.result.cancellationRecord,
+      creditNoteInvoice: outcome.result.creditNoteInvoice,
+      refundTransaction: outcome.result.refundTransaction,
     });
   } catch (error) {
-    const message =
-      error instanceof Error
-        ? error.message
-        : "Unable to update order";
-    const status = message.includes(
-      "Order not found",
-    )
-      ? 404
-      : message.includes(
-            "Invalid status transition",
-          ) ||
-          message.includes(
-            "Insufficient inventory",
-          )
-        ? 409
-        : 400;
-
+    console.error("PATCH /api/orders failed:", error);
     return NextResponse.json(
-      { error: message },
-      { status },
+      { error: "Unable to update order" },
+      { status: 400 },
     );
   }
 }

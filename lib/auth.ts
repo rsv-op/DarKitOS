@@ -2,16 +2,47 @@ import { jwtVerify, SignJWT } from "jose";
 import { cookies } from "next/headers";
 import type { NextRequest } from "next/server";
 import {
+  DEFAULT_ORGANIZATION_ID,
   EMPLOYEES_DB,
   type Employee,
   type EmployeeRole,
 } from "@/lib/db";
 
-const SECRET_KEY =
-  process.env.JWT_SECRET ||
+const FALLBACK_DEV_SECRET =
   "dark-cloud-os-fallback-secret-key-2026";
 
-const key = new TextEncoder().encode(SECRET_KEY);
+function getJwtKey(): Uint8Array {
+  const configured = process.env.JWT_SECRET?.trim();
+  if (configured) {
+    return new TextEncoder().encode(configured);
+  }
+  if (
+    process.env.NODE_ENV === "production" &&
+    !isDemoSandboxEnabled()
+  ) {
+    throw new Error(
+      "JWT_SECRET environment variable must be configured in production.",
+    );
+  }
+  return new TextEncoder().encode(FALLBACK_DEV_SECRET);
+}
+
+export function isDemoSandboxEnabled(): boolean {
+  if (process.env.DEMO_SANDBOX_MODE === "false") {
+    return false;
+  }
+  if (process.env.DEMO_SANDBOX_MODE === "true") {
+    return true;
+  }
+  return process.env.NODE_ENV !== "production";
+}
+
+export function isStrictProductionMode(): boolean {
+  return (
+    process.env.NODE_ENV === "production" &&
+    process.env.DEMO_SANDBOX_MODE !== "true"
+  );
+}
 
 export type Role = EmployeeRole;
 
@@ -22,19 +53,32 @@ export type AuthRole =
   | "dispatch"
   | "developer";
 
+export type AuthProvider = "supabase" | "demo_jwt";
+
+export interface PublicEmployee extends Omit<Employee, "pin"> {
+  organizationId: string;
+  employeeId: string;
+  authProvider?: AuthProvider;
+}
+
+export type AuthenticatedEmployee = PublicEmployee;
+
 export interface SessionPayload {
   userId: string;
+  organizationId?: string;
   employeeCode?: string;
   name?: string;
   role: Role;
   authRole?: AuthRole;
   kitchenId?: string;
+  authProvider?: AuthProvider;
   developer?: boolean;
   iat?: number;
   exp?: number;
 }
 
-const PIN_TO_CODE: Record<string, string> = {
+// Demo-only shift PINs kept strictly server-side (never bundled into client code or API responses)
+const DEMO_PIN_TO_CODE: Record<string, string> = {
   "3333": "OWNER-01",
   "9999": "0001",
   "1111": "2001",
@@ -48,6 +92,39 @@ const DEVELOPER_CODES = new Set([
   "ADMIN-DEV",
 ]);
 
+export function sanitizeEmployee(
+  employee: Employee,
+  authProvider?: AuthProvider,
+): PublicEmployee {
+  return {
+    id: employee.id,
+    employeeId: employee.id,
+    organizationId: employee.organizationId ?? DEFAULT_ORGANIZATION_ID,
+    employeeCode: employee.employeeCode,
+    name: employee.name,
+    role: employee.role,
+    kitchenId: employee.kitchenId,
+    email: employee.email,
+    phone: employee.phone,
+    authUserId: employee.authUserId,
+    active: employee.active,
+    ...(authProvider ? { authProvider } : {}),
+  };
+}
+
+export function isSafeRedirectPath(
+  value: unknown,
+): value is string {
+  if (typeof value !== "string") return false;
+  const trimmed = value.trim();
+  if (!trimmed.startsWith("/")) return false;
+  if (trimmed.startsWith("//")) return false;
+  if (trimmed.includes("\\")) return false;
+  if (/[\r\n\0]/.test(trimmed)) return false;
+  if (trimmed === "/login") return false;
+  return true;
+}
+
 export function isDeveloperCode(code: string): boolean {
   return DEVELOPER_CODES.has(code.trim().toUpperCase());
 }
@@ -59,13 +136,17 @@ export function findEmployeeByCode(
   const normalized = codeOrPin.trim();
   if (!normalized) return null;
 
-  const mappedCode = PIN_TO_CODE[normalized] ?? normalized;
+  const mappedCode =
+    isDemoSandboxEnabled() && DEMO_PIN_TO_CODE[normalized]
+      ? DEMO_PIN_TO_CODE[normalized]
+      : normalized;
 
-  if (isDeveloperCode(mappedCode)) {
+  if (isDemoSandboxEnabled() && isDeveloperCode(mappedCode)) {
     return {
       id: "EMP-DEV-01",
+      organizationId: DEFAULT_ORGANIZATION_ID,
       employeeCode: "DEVELOPER",
-      name: "Cloud7 Dev Architect",
+      name: "DarKitOS Demo Architect",
       role: "OWNER",
       kitchenId: "K1",
       active: true,
@@ -78,7 +159,7 @@ export function findEmployeeByCode(
         emp.active &&
         (emp.employeeCode.toLowerCase() ===
           mappedCode.toLowerCase() ||
-          emp.pin === normalized),
+          (emp.pin && emp.pin === normalized)),
     ) ?? null
   );
 }
@@ -90,7 +171,7 @@ export function roleFromEmployeeCode(
   const normalized = codeOrPin.trim();
   if (!normalized) return null;
 
-  if (isDeveloperCode(normalized)) {
+  if (isDemoSandboxEnabled() && isDeveloperCode(normalized)) {
     return "developer";
   }
 
@@ -114,10 +195,6 @@ export function roleFromEmployeeCode(
   }
 }
 
-export function tokenForRole(role: AuthRole): string {
-  return `legacy_role_token:${role}`;
-}
-
 export async function signToken(
   payload: SessionPayload,
 ): Promise<string> {
@@ -125,50 +202,28 @@ export async function signToken(
     .setProtectedHeader({ alg: "HS256" })
     .setIssuedAt()
     .setExpirationTime("12h")
-    .sign(key);
+    .sign(getJwtKey());
 }
 
 export async function verifyToken(
   token: string,
 ): Promise<SessionPayload | null> {
-  if (!token) return null;
-
-  if (token.startsWith("legacy_role_token:")) {
-    const authRole = token.replace(
-      "legacy_role_token:",
-      "",
-    ) as AuthRole;
-    const roleMap: Record<AuthRole, Role> = {
-      owner: "OWNER",
-      manager: "MANAGER",
-      cook: "LINE_COOK",
-      dispatch: "DISPATCH",
-      developer: "OWNER",
-    };
-    const mappedRole = roleMap[authRole];
-    if (!mappedRole) return null;
-    return {
-      userId:
-        authRole === "developer"
-          ? "EMP-DEV-01"
-          : `EMP-${mappedRole}`,
-      employeeCode:
-        authRole === "developer"
-          ? "DEVELOPER"
-          : mappedRole,
-      name:
-        authRole === "developer"
-          ? "Cloud7 Dev Architect"
-          : mappedRole,
-      role: mappedRole,
-      authRole,
-      kitchenId: "K1",
-      developer: authRole === "developer",
-    };
+  if (!token || token.startsWith("legacy_role_token:")) {
+    return null;
   }
 
   try {
-    const { payload } = await jwtVerify(token, key);
+    const { payload } = await jwtVerify(
+      token,
+      getJwtKey(),
+      { algorithms: ["HS256"] },
+    );
+    if (
+      typeof payload.userId !== "string" ||
+      typeof payload.role !== "string"
+    ) {
+      return null;
+    }
     return payload as unknown as SessionPayload;
   } catch {
     return null;
@@ -186,25 +241,9 @@ export async function getSession(
     "dark_cloud_session",
   )?.value;
 
-  if (sessionToken) {
-    const verified = await verifyToken(sessionToken);
-    if (verified) return verified;
+  if (!sessionToken) {
+    return null;
   }
 
-  const empCode = cookieStore.get("employee_code")?.value;
-  if (empCode) {
-    const emp = findEmployeeByCode(empCode);
-    if (emp) {
-      return {
-        userId: emp.id,
-        employeeCode: emp.employeeCode,
-        name: emp.name,
-        role: emp.role,
-        kitchenId: emp.kitchenId,
-        developer: isDeveloperCode(empCode),
-      };
-    }
-  }
-
-  return null;
+  return await verifyToken(sessionToken);
 }

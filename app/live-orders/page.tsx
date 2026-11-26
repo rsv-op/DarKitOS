@@ -10,14 +10,29 @@ import {
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import AppShell from "@/components/AppShell";
+import KotPrintTicketModal from "@/components/KotPrintTicketModal";
+import RealtimeSyncBadge from "@/components/RealtimeSyncBadge";
+import { useRealtimeKitchenSync } from "@/hooks/useRealtimeKitchenSync";
+import { formatCurrency, type SupportedCurrency } from "@/lib/currency";
 import {
   BRANDS_DB,
   KITCHENS_DB,
   type CancellationSource,
+  type Employee,
   type Order,
   type OrderChannel,
+  type OrderPaymentStatus,
   type OrderStatus,
+  type SystemSettings,
 } from "@/lib/db";
+
+const PAYMENT_STATUS_BADGE: Record<OrderPaymentStatus, string> = {
+  CAPTURED: "border-emerald-500/40 bg-emerald-500/10 text-emerald-300",
+  AGGREGATOR_SETTLED: "border-sky-500/40 bg-sky-500/10 text-sky-300",
+  PENDING: "border-amber-500/40 bg-amber-500/10 text-amber-300",
+  UNPAID: "border-rose-500/40 bg-rose-500/10 text-rose-300",
+  REFUNDED: "border-purple-500/40 bg-purple-500/10 text-purple-300",
+};
 
 const STATUSES: OrderStatus[] = [
   "PENDING",
@@ -82,6 +97,38 @@ export default function LiveOrdersPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [feedback, setFeedback] = useState("");
+  const [currency, setCurrency] =
+    useState<SupportedCurrency>("INR");
+  const [currentEmployee, setCurrentEmployee] =
+    useState<Employee | null>(null);
+
+  const fmt = useCallback(
+    (amount: number) => formatCurrency(amount, currency),
+    [currency],
+  );
+
+  useEffect(() => {
+    let active = true;
+    fetch("/api/session", { cache: "no-store" })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (!active || !data) return;
+        if (data.settings?.currency) setCurrency(data.settings.currency);
+        if (data.employee) setCurrentEmployee(data.employee as Employee);
+      })
+      .catch(() => {
+        // ignore transient error
+      });
+    const onSettingsUpdated = (event: Event) => {
+      const custom = event as CustomEvent<SystemSettings>;
+      if (custom.detail?.currency) setCurrency(custom.detail.currency);
+    };
+    window.addEventListener("darkit:settings-updated", onSettingsUpdated);
+    return () => {
+      active = false;
+      window.removeEventListener("darkit:settings-updated", onSettingsUpdated);
+    };
+  }, []);
 
   const [statusFilter, setStatusFilter] =
     useState<string>("ALL");
@@ -109,6 +156,8 @@ export default function LiveOrdersPage() {
     useState(true);
   const [submittingId, setSubmittingId] =
     useState<string | null>(null);
+  const [kotOrder, setKotOrder] =
+    useState<Order | null>(null);
 
   const loadOrders = useCallback(async () => {
     try {
@@ -140,11 +189,18 @@ export default function LiveOrdersPage() {
 
   useEffect(() => {
     void loadOrders();
-    const timer = window.setInterval(() => {
-      void loadOrders();
-    }, 5000);
-    return () => window.clearInterval(timer);
   }, [loadOrders]);
+
+  const realtimeSync = useRealtimeKitchenSync({
+    organizationId: currentEmployee?.organizationId,
+    kitchenId:
+      currentEmployee?.role !== "OWNER" && currentEmployee?.kitchenId
+        ? currentEmployee.kitchenId
+        : kitchenFilter !== "ALL"
+          ? kitchenFilter
+          : null,
+    onSync: loadOrders,
+  });
 
   const filteredOrders = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -236,8 +292,14 @@ export default function LiveOrdersPage() {
         );
       } else if (nextStatus === "CANCELLED") {
         const rec = data.cancellationRecord;
+        const cnNote = data.creditNoteInvoice
+          ? ` • GST Invoice ${data.creditNoteInvoice.invoiceNumber} -> CREDIT_NOTE`
+          : "";
+        const refundNote = data.refundTransaction
+          ? ` • Auto-Refund ${data.refundTransaction.providerRefundId} (${fmt(data.refundTransaction.refundedAmount)})`
+          : "";
         setFeedback(
-          `Order ${orderId} cancelled (${rec?.stage || "STAGE"}) → Resolution: ${rec?.resolution || "PROCESSED"} • Loss: $${(rec?.financialLoss ?? 0).toFixed(2)} • Claim: $${(rec?.claimAmount ?? 0).toFixed(2)}.`,
+          `Order ${orderId} cancelled (${rec?.stage || "STAGE"}) → Resolution: ${rec?.resolution || "PROCESSED"} • Loss: ${fmt(rec?.financialLoss ?? 0)} • Claim: ${fmt(rec?.claimAmount ?? 0)}${cnNote}${refundNote}.`,
         );
       } else {
         setFeedback(
@@ -256,12 +318,48 @@ export default function LiveOrdersPage() {
     }
   }
 
+  async function handleSimulateSandboxUpi(orderId: string) {
+    setSubmittingId(orderId);
+    setError("");
+    setFeedback("");
+    try {
+      const res = await fetch("/api/payments/razorpay/order", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          orderId,
+          simulateSandboxCapture: true,
+          method: "upi",
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || "Unable to capture Sandbox UPI payment.");
+      }
+      setFeedback(
+        `Sandbox UPI Payment Captured for ${orderId} (${data.transaction?.providerPaymentId || "pay_sbx"}) — Razorpay HMAC verified.`,
+      );
+      await loadOrders();
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "Sandbox UPI capture failed.",
+      );
+    } finally {
+      setSubmittingId(null);
+    }
+  }
+
   return (
     <AppShell
       title="Live Orders"
       subtitle="Find orders by number, see where each one is in the kitchen, and review changes or cancellations."
       actions={
         <>
+          <RealtimeSyncBadge
+            connectionMode={realtimeSync.connectionMode}
+            lastEventAt={realtimeSync.lastEventAt}
+            topic={realtimeSync.topic}
+          />
           <Link
             href="/order-injection"
             className="rounded-xl bg-sky-500 px-3.5 py-2 font-mono text-xs font-bold text-slate-950 hover:bg-sky-400"
@@ -480,21 +578,66 @@ export default function LiveOrdersPage() {
                       </div>
 
                       <div className="text-right">
-                        <span
-                          className={`inline-block rounded-full border px-2.5 py-0.5 font-mono text-[10px] font-bold ${STATUS_BADGE[order.status]}`}
-                        >
-                          {order.status.replaceAll(
-                            "_",
-                            " ",
+                        <div className="flex flex-wrap justify-end gap-1.5">
+                          <span
+                            className={`inline-block rounded-full border px-2.5 py-0.5 font-mono text-[10px] font-bold ${STATUS_BADGE[order.status]}`}
+                          >
+                            {order.status.replaceAll(
+                              "_",
+                              " ",
+                            )}
+                          </span>
+                          <span
+                            className={`inline-block rounded-full border px-2 py-0.5 font-mono text-[10px] font-bold ${
+                              PAYMENT_STATUS_BADGE[
+                                order.paymentStatus ?? "AGGREGATOR_SETTLED"
+                              ]
+                            }`}
+                          >
+                            {(
+                              order.paymentStatus ?? "AGGREGATOR_SETTLED"
+                            ).replaceAll("_", " ")}
+                          </span>
+                          {order.aggregatorSyncStatus && (
+                            <span
+                              className={`inline-block rounded-full border px-2 py-0.5 font-mono text-[10px] font-bold ${
+                                order.aggregatorSyncStatus === "SYNC_FAILED"
+                                  ? "border-red-500/40 bg-red-500/10 text-red-300"
+                                  : order.aggregatorSyncStatus ===
+                                      "OUTBOX_QUEUED"
+                                    ? "border-amber-500/40 bg-amber-500/10 text-amber-300"
+                                    : "border-emerald-500/30 bg-emerald-500/10 text-emerald-300"
+                              }`}
+                            >
+                              {order.aggregatorSyncStatus === "SYNC_FAILED"
+                                ? "SYNC FAILED"
+                                : order.aggregatorSyncStatus === "OUTBOX_QUEUED"
+                                  ? "OUTBOX QUEUED"
+                                  : "AGGREGATOR SYNCED"}
+                            </span>
                           )}
-                        </span>
-                        <p className="mt-1 font-mono text-sm font-bold text-emerald-400">
-                          $
-                          {(
-                            order.totalAmount ??
-                            0
-                          ).toFixed(2)}
-                        </p>
+                        </div>
+                        <div className="mt-1 flex items-center justify-end gap-2">
+                          <p className="font-mono text-sm font-bold text-emerald-400">
+                            {fmt(order.totalAmount ?? 0)}
+                            {typeof order.taxAmount === "number" &&
+                              order.taxAmount > 0 && (
+                                <span className="ml-1.5 text-[10px] font-normal text-slate-400">
+                                  (incl. GST {fmt(order.taxAmount)})
+                                </span>
+                              )}
+                          </p>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setKotOrder(order);
+                            }}
+                            className="rounded-lg border border-slate-700 bg-slate-800 px-2 py-0.5 font-mono text-[10px] font-bold text-sky-300 hover:border-sky-500/50 hover:bg-slate-700"
+                          >
+                            🖨 Print KOT
+                          </button>
+                        </div>
                       </div>
                     </div>
 
@@ -579,11 +722,20 @@ export default function LiveOrdersPage() {
                   </span>
                 </div>
 
-                {(selectedOrder.status === "PENDING" || selectedOrder.status === "PREPARING") && (
-                  <Link href="/kds" className="inline-flex rounded-lg bg-sky-500 px-3 py-2 text-sm font-semibold text-slate-950 hover:bg-sky-400">
-                    Continue on the Kitchen Board →
-                  </Link>
-                )}
+                <div className="flex flex-wrap items-center gap-2">
+                  {(selectedOrder.status === "PENDING" || selectedOrder.status === "PREPARING") && (
+                    <Link href="/kds" className="inline-flex rounded-lg bg-sky-500 px-3 py-2 text-sm font-semibold text-slate-950 hover:bg-sky-400">
+                      Continue on the Kitchen Board →
+                    </Link>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => setKotOrder(selectedOrder)}
+                    className="inline-flex rounded-lg border border-sky-500/40 bg-sky-500/10 px-3 py-2 font-mono text-xs font-bold text-sky-300 hover:bg-sky-500/20"
+                  >
+                    🖨 Print 80mm KOT
+                  </button>
+                </div>
 
                 {/* Inventory & Dispatch Metadata */}
                 <div className="grid grid-cols-2 gap-3 rounded-xl border border-slate-800 bg-slate-950 p-3.5 font-mono text-xs">
@@ -624,17 +776,85 @@ export default function LiveOrdersPage() {
                       Loss / Claim
                     </span>
                     <p className="mt-0.5 text-amber-300">
-                      Loss: $
-                      {(
-                        selectedOrder.lossAmount ??
-                        0
-                      ).toFixed(2)}{" "}
-                      • Claim: $
-                      {(
-                        selectedOrder.claimAmount ??
-                        0
-                      ).toFixed(2)}
+                      Loss: {fmt(selectedOrder.lossAmount ?? 0)} • Claim:{" "}
+                      {fmt(selectedOrder.claimAmount ?? 0)}
                     </p>
+                  </div>
+                </div>
+
+                {/* Indian GST Tax Breakup & Razorpay Payment Status */}
+                <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/5 p-3.5 font-mono text-xs">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <span className="font-bold uppercase text-emerald-300">
+                      Indian GST &amp; Payment Ledger
+                    </span>
+                    <span
+                      className={`rounded-full border px-2 py-0.5 text-[10px] font-bold ${
+                        PAYMENT_STATUS_BADGE[
+                          selectedOrder.paymentStatus ?? "AGGREGATOR_SETTLED"
+                        ]
+                      }`}
+                    >
+                      {(
+                        selectedOrder.paymentStatus ?? "AGGREGATOR_SETTLED"
+                      ).replaceAll("_", " ")}
+                    </span>
+                  </div>
+                  <div className="mt-2.5 space-y-1 text-[11px] text-slate-300">
+                    <div className="flex justify-between">
+                      <span>Taxable Subtotal</span>
+                      <span>
+                        {fmt(
+                          selectedOrder.subtotalAmount ??
+                            selectedOrder.totalAmount ??
+                            0,
+                        )}
+                      </span>
+                    </div>
+                    {(selectedOrder.igstAmount ?? 0) > 0 ? (
+                      <div className="flex justify-between text-cyan-300">
+                        <span>IGST (5%)</span>
+                        <span>{fmt(selectedOrder.igstAmount ?? 0)}</span>
+                      </div>
+                    ) : (
+                      <div className="flex justify-between text-emerald-300">
+                        <span>CGST (2.5%) + SGST (2.5%)</span>
+                        <span>
+                          {fmt(selectedOrder.cgstAmount ?? 0)} +{" "}
+                          {fmt(selectedOrder.sgstAmount ?? 0)}
+                        </span>
+                      </div>
+                    )}
+                    <div className="flex justify-between border-t border-slate-800 pt-1.5 font-bold text-white">
+                      <span>Grand Total (INR)</span>
+                      <span>{fmt(selectedOrder.totalAmount ?? 0)}</span>
+                    </div>
+                  </div>
+                  <div className="mt-3 flex flex-wrap items-center gap-2">
+                    <Link
+                      href={`/invoices?order=${encodeURIComponent(selectedOrder.id)}`}
+                      className="rounded-lg border border-sky-500/40 bg-sky-500/10 px-3 py-1.5 text-[11px] font-bold text-sky-300 hover:bg-sky-500/20"
+                    >
+                      View GST Tax Invoice →
+                    </Link>
+                    {(selectedOrder.source === "DIRECT_WEB" ||
+                      selectedOrder.channel === "Direct Web") &&
+                      selectedOrder.status !== "CANCELLED" &&
+                      (selectedOrder.paymentStatus === "UNPAID" ||
+                        selectedOrder.paymentStatus === "PENDING") && (
+                        <button
+                          type="button"
+                          disabled={submittingId === selectedOrder.id}
+                          onClick={() =>
+                            void handleSimulateSandboxUpi(selectedOrder.id)
+                          }
+                          className="rounded-lg bg-emerald-500 px-3 py-1.5 text-[11px] font-black text-slate-950 hover:bg-emerald-400 disabled:opacity-50"
+                        >
+                          {submittingId === selectedOrder.id
+                            ? "Capturing UPI…"
+                            : "⚡ Simulate Sandbox UPI Capture"}
+                        </button>
+                      )}
                   </div>
                 </div>
 
@@ -811,6 +1031,16 @@ export default function LiveOrdersPage() {
           </aside>
         </div>
       </div>
+
+      <KotPrintTicketModal
+        order={kotOrder}
+        onClose={() => setKotOrder(null)}
+        onPrinted={({ orderId, printJobId, mode }) =>
+          setFeedback(
+            `80mm KOT printed for ${orderId} via ${mode} (Job ${printJobId}).`,
+          )
+        }
+      />
     </AppShell>
   );
 }

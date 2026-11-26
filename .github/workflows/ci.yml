@@ -1,0 +1,90 @@
+name: DarKitOS CI
+
+on:
+  push:
+    branches: ["main", "arena/**"]
+  pull_request:
+    branches: ["main"]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    name: Typecheck, Lint, Unit Tests & Build
+    runs-on: ubuntu-latest
+    env:
+      JWT_SECRET: ci-quality-jwt-secret-32-bytes-minimum-value
+      DEMO_SANDBOX_MODE: "true"
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: TypeScript typecheck
+        run: npm run typecheck
+
+      - name: ESLint check
+        run: npm run lint
+
+      - name: Vitest suite (in-memory fallback mode)
+        run: npm test
+
+      - name: Next.js production build
+        run: npm run build
+
+  postgres-integration:
+    name: PostgreSQL 16 Migration, Idempotent Seed & ACID Integration Suite
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: darkitos
+          POSTGRES_PASSWORD: darkitos_ci_password
+          POSTGRES_DB: darkitos_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U darkitos -d darkitos_test"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=10
+    env:
+      DATABASE_URL: postgresql://darkitos:darkitos_ci_password@127.0.0.1:5432/darkitos_test
+      DIRECT_URL: postgresql://darkitos:darkitos_ci_password@127.0.0.1:5432/darkitos_test
+      TEST_DATABASE_URL: postgresql://darkitos:darkitos_ci_password@127.0.0.1:5432/darkitos_test
+      JWT_SECRET: ci-postgres-jwt-secret-32-bytes-minimum-value
+      DEMO_SANDBOX_MODE: "true"
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run Drizzle SQL migrations
+        run: npm run db:migrate
+
+      - name: Run idempotent seed twice (ON CONFLICT DO NOTHING verification)
+        run: |
+          npm run db:seed
+          npm run db:seed
+
+      - name: Run full Vitest suite against real PostgreSQL 16
+        run: npm test

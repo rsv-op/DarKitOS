@@ -548,11 +548,12 @@ export default function DesktopWindowManager({
                           item.reorderThreshold;
                         return (
                           <div
-                            key={item.id}
+                            key={`${item.kitchenId ?? "K1"}-${item.id}`}
                             className="flex items-center justify-between rounded-lg border border-slate-800 bg-slate-950 px-3 py-2"
                           >
                             <div>
                               <p className="font-semibold text-slate-200">
+                                {item.kitchenId ? `[${item.kitchenId}] ` : ""}
                                 {item.name}
                               </p>
                               <p className="font-mono text-[10px] text-slate-500">
@@ -642,9 +643,9 @@ export default function DesktopWindowManager({
         </div>
 
         <div className="flex items-center gap-3 font-mono text-[11px] text-slate-400">
-          <span>PgBouncer: Transaction Pool</span>
+          <span>Sprint 0 Canonical Store</span>
           <span className="text-emerald-400">
-            ● Cloud7 Online
+            ● Sandbox Online
           </span>
         </div>
 
@@ -684,7 +685,7 @@ export default function DesktopWindowManager({
                   href: "/kitchens",
                 },
                 {
-                  label: "VerticalForge BI & Leakage",
+                  label: "Analytics & Margin Audit",
                   href: "/analytics",
                 },
                 {
