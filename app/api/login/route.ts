@@ -67,7 +67,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const employees = getEmployees();
+    const employees = await getEmployees();
     const role = roleFromEmployeeCode(rawCode, employees);
     const employee = findEmployeeByCode(rawCode, employees);
 
@@ -101,7 +101,7 @@ export async function POST(request: NextRequest) {
     const permissions = getRolePermissions(employee.role);
     const safeEmployee = sanitizeEmployee(employee);
 
-    recordActivity({
+    await recordActivity({
       type: "AUTH_LOGIN",
       category: "AUTH",
       title: `${safeEmployee.name} (${safeEmployee.role}) Signed In`,

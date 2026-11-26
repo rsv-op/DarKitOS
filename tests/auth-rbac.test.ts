@@ -1,8 +1,12 @@
 import { NextRequest } from "next/server";
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { isSafeRedirectPath } from "@/lib/auth";
+import { closeDb } from "@/lib/db-client";
 import { resetStore } from "@/lib/store";
-import { DELETE as logoutHandler, POST as loginHandler } from "@/app/api/login/route";
+import {
+  DELETE as logoutHandler,
+  POST as loginHandler,
+} from "@/app/api/login/route";
 import { GET as sessionHandler } from "@/app/api/session/route";
 import {
   GET as getOrdersHandler,
@@ -10,7 +14,10 @@ import {
   POST as postOrdersHandler,
 } from "@/app/api/orders/route";
 import { PATCH as patchOrderStatusHandler } from "@/app/api/orders/[id]/status/route";
-import { GET as getSystemHandler, PATCH as patchSystemHandler } from "@/app/api/system/route";
+import {
+  GET as getSystemHandler,
+  PATCH as patchSystemHandler,
+} from "@/app/api/system/route";
 
 function makeRequest(
   url: string,
@@ -51,9 +58,13 @@ async function loginAs(code: string): Promise<string> {
 }
 
 describe("Auth, Logout & Server-Side RBAC Security", () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     process.env.DEMO_SANDBOX_MODE = "true";
-    resetStore();
+    await resetStore();
+  });
+
+  afterAll(async () => {
+    await closeDb();
   });
 
   it("blocks open redirect URLs in isSafeRedirectPath", () => {
@@ -91,7 +102,6 @@ describe("Auth, Logout & Server-Side RBAC Security", () => {
     expect(logoutRes.cookies.get("dark_cloud_logged_out")?.value).toBe("1");
     expect(logoutRes.cookies.get("dark_cloud_session")?.value).toBe("");
 
-    // Even if an older client still sends the prior JWT alongside dark_cloud_logged_out=1, sign-out wins
     const sessionRes = await sessionHandler(
       makeRequest("http://localhost:3000/api/session", {
         cookies: {
@@ -106,7 +116,6 @@ describe("Auth, Logout & Server-Side RBAC Security", () => {
   });
 
   it("rejects spoofed x-employee-code headers, unsigned employee_code cookies, and legacy_role_token", async () => {
-    // Disable demo sandbox so unauthenticated requests cannot fall back to demo owner
     process.env.DEMO_SANDBOX_MODE = "false";
 
     const spoofHeader = await getOrdersHandler(
@@ -134,7 +143,6 @@ describe("Auth, Logout & Server-Side RBAC Security", () => {
   it("blocks LINE_COOK from injecting orders, cancelling, mutating system, or crossing kitchens", async () => {
     const cookJwt = await loginAs("2001"); // K1 LINE_COOK
 
-    // Cannot inject orders (KITCHEN_OPERATE is no longer accepted!)
     const injectRes = await postOrdersHandler(
       makeRequest("http://localhost:3000/api/orders", {
         method: "POST",
@@ -149,7 +157,6 @@ describe("Auth, Logout & Server-Side RBAC Security", () => {
     );
     expect(injectRes.status).toBe(403);
 
-    // Cannot clear orders, reset store, update settings, or write/delete files
     for (const payload of [
       { action: "CLEAR_ORDERS" },
       { action: "RESET_STORE" },
@@ -167,7 +174,6 @@ describe("Auth, Logout & Server-Side RBAC Security", () => {
       expect(sysRes.status).toBe(403);
     }
 
-    // Cannot cancel orders
     const cancelRes = await patchOrderStatusHandler(
       makeRequest("http://localhost:3000/api/orders/ORD-901/status", {
         method: "PATCH",
@@ -178,7 +184,6 @@ describe("Auth, Logout & Server-Side RBAC Security", () => {
     );
     expect(cancelRes.status).toBe(403);
 
-    // Kitchen isolation: GET /api/orders only returns K1 orders
     const listRes = await getOrdersHandler(
       makeRequest("http://localhost:3000/api/orders?kitchenId=K2", {
         cookies: { dark_cloud_session: cookJwt },
@@ -190,7 +195,6 @@ describe("Auth, Logout & Server-Side RBAC Security", () => {
       listData.orders.every((o: { kitchenId: string }) => o.kitchenId === "K1"),
     ).toBe(true);
 
-    // Kitchen isolation: cannot transition K2 order (ORD-905)
     const crossKitchenRes = await patchOrdersHandler(
       makeRequest("http://localhost:3000/api/orders", {
         method: "PATCH",
@@ -200,7 +204,6 @@ describe("Auth, Logout & Server-Side RBAC Security", () => {
     );
     expect(crossKitchenRes.status).toBe(403);
 
-    // GET /api/system redacts owner financials & other staff for LINE_COOK
     const sysGetRes = await getSystemHandler(
       makeRequest("http://localhost:3000/api/system", {
         cookies: { dark_cloud_session: cookJwt },
@@ -210,6 +213,11 @@ describe("Auth, Logout & Server-Side RBAC Security", () => {
     expect(sysData.leakageVectors).toEqual([]);
     expect(sysData.employees).toHaveLength(1);
     expect(sysData.employees[0].employeeCode).toBe("2001");
+    expect(
+      sysData.inventory.every(
+        (i: { kitchenId: string }) => i.kitchenId === "K1",
+      ),
+    ).toBe(true);
   });
 
   it("blocks DISPATCH from cancelling orders and blocks K1 MANAGER from K2 injection or global resets", async () => {

@@ -10,10 +10,11 @@ import {
   type PublicEmployee,
 } from "@/lib/auth";
 
-export function getEmployeeByCode(
+export async function getEmployeeByCode(
   employeeCode: string,
-): Employee | null {
-  return findEmployeeByCode(employeeCode, getEmployees());
+): Promise<Employee | null> {
+  const employees = await getEmployees();
+  return findEmployeeByCode(employeeCode, employees);
 }
 
 export async function getAuthenticatedEmployee(
@@ -28,7 +29,7 @@ export async function getAuthenticatedEmployee(
   // 2. Verify signed HS256 JWT session cookie
   const session = await getSession(request);
   if (session) {
-    const employees = getEmployees();
+    const employees = await getEmployees();
 
     if (session.developer && isDemoSandboxEnabled()) {
       return {
@@ -63,8 +64,6 @@ export async function getAuthenticatedEmployee(
   }
 
   // 4. Instant demo sandbox default to OWNER-01 for seamless owner walkthroughs
-  const defaultOwner = getEmployeeByCode("OWNER-01");
-  return defaultOwner
-    ? sanitizeEmployee(defaultOwner)
-    : null;
+  const defaultOwner = await getEmployeeByCode("OWNER-01");
+  return defaultOwner ? sanitizeEmployee(defaultOwner) : null;
 }

@@ -84,7 +84,9 @@ export type InventoryMovementType =
   | "MANUAL_ADJUSTMENT"
   | "WASTE"
   | "LOSS"
-  | "CANCELLATION_RESTORE";
+  | "CANCELLATION_RESTORE"
+  | "TRANSFER_OUT"
+  | "TRANSFER_IN";
 
 export type OrderEventType =
   | "RECEIVED"
@@ -153,6 +155,7 @@ export interface RolePermission {
 
 export interface InventoryItem {
   id: string;
+  ingredientId?: string;
   sku: string;
   name: string;
   category:
@@ -185,6 +188,7 @@ export interface InventoryMovement {
   unit: string;
   costImpact: number;
   orderId?: string;
+  transferGroupId?: string;
   actor: string;
   reason: string;
   timestamp: string;
@@ -1085,6 +1089,31 @@ export function getRequiredIngredients(
   return requirements;
 }
 
+function findKitchenInventoryItem(
+  inventory: InventoryItem[],
+  inventoryItemId: string,
+  kitchenId?: string,
+): InventoryItem | undefined {
+  const hasScopedRows =
+    Boolean(kitchenId) &&
+    inventory.some((item) => Boolean(item.kitchenId));
+
+  if (hasScopedRows && kitchenId) {
+    return inventory.find(
+      (item) =>
+        (item.id === inventoryItemId ||
+          item.ingredientId === inventoryItemId) &&
+        item.kitchenId === kitchenId,
+    );
+  }
+
+  return inventory.find(
+    (item) =>
+      item.id === inventoryItemId ||
+      item.ingredientId === inventoryItemId,
+  );
+}
+
 export function evaluateOrderInventory(
   order: Order,
   inventory: InventoryItem[],
@@ -1102,8 +1131,10 @@ export function evaluateOrderInventory(
     inventoryItemId,
     requiredQuantity,
   ] of requirements) {
-    const inventoryItem = inventory.find(
-      (item) => item.id === inventoryItemId,
+    const inventoryItem = findKitchenInventoryItem(
+      inventory,
+      inventoryItemId,
+      order.kitchenId,
     );
 
     if (!inventoryItem) {
@@ -1188,12 +1219,22 @@ export function processOrderDepletion(
     menuCatalog,
   );
 
+  const hasScopedRows =
+    Boolean(order.kitchenId) &&
+    inventory.some((item) => Boolean(item.kitchenId));
+
   const updatedInventory = inventory.map(
     (inventoryItem) => {
-      const required =
-        requirements.get(
-          inventoryItem.id,
-        ) ?? 0;
+      const kitchenMatches =
+        !hasScopedRows ||
+        inventoryItem.kitchenId === order.kitchenId;
+      const itemKey =
+        inventoryItem.ingredientId ?? inventoryItem.id;
+      const required = kitchenMatches
+        ? (requirements.get(itemKey) ??
+          requirements.get(inventoryItem.id) ??
+          0)
+        : 0;
 
       if (required <= 0) {
         return {
@@ -1218,10 +1259,10 @@ export function processOrderDepletion(
   for (const [
     inventoryItemId,
   ] of requirements) {
-    const item = inventory.find(
-      (inventoryItem) =>
-        inventoryItem.id ===
-        inventoryItemId,
+    const item = findKitchenInventoryItem(
+      inventory,
+      inventoryItemId,
+      order.kitchenId,
     );
 
     if (item) {
@@ -1231,12 +1272,19 @@ export function processOrderDepletion(
 
   const lowStockAlerts =
     updatedInventory
-      .filter(
-        (item) =>
+      .filter((item) => {
+        const kitchenMatches =
+          !hasScopedRows ||
+          item.kitchenId === order.kitchenId;
+        const itemKey = item.ingredientId ?? item.id;
+        return (
+          kitchenMatches &&
           item.currentStock <=
             item.reorderThreshold &&
-          requirements.has(item.id),
-      )
+          (requirements.has(itemKey) ||
+            requirements.has(item.id))
+        );
+      })
       .map((item) => item.name);
 
   return {
@@ -1264,9 +1312,17 @@ export function calculateOrderRecipeCost(
     inventoryItemId,
     requiredQty,
   ] of requirements) {
-    const item = inventory.find(
-      (i) => i.id === inventoryItemId,
-    );
+    const item =
+      findKitchenInventoryItem(
+        inventory,
+        inventoryItemId,
+        order.kitchenId,
+      ) ??
+      inventory.find(
+        (i) =>
+          i.id === inventoryItemId ||
+          i.ingredientId === inventoryItemId,
+      );
     if (item) {
       totalCost +=
         item.costPerUnit * requiredQty;

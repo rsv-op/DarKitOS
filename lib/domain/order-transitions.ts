@@ -46,9 +46,9 @@ export type OrderTransitionOutcome =
       error: string;
     };
 
-export function executeAuthorizedOrderTransition(
+export async function executeAuthorizedOrderTransition(
   params: ExecuteOrderTransitionParams,
-): OrderTransitionOutcome {
+): Promise<OrderTransitionOutcome> {
   const { employee, orderId, nextStatusRaw } = params;
   const cleanOrderId = orderId.trim();
   const nextStatus = nextStatusRaw.trim() as OrderStatus;
@@ -70,10 +70,7 @@ export function executeAuthorizedOrderTransition(
   }
 
   // 1. Role-based permission checks per target status
-  if (
-    nextStatus === "PREPARING" ||
-    nextStatus === "READY_FOR_PICKUP"
-  ) {
+  if (nextStatus === "PREPARING" || nextStatus === "READY_FOR_PICKUP") {
     if (
       !hasPermission(employee, "COOK_ORDERS") &&
       !hasPermission(employee, "OWNER_VIEW")
@@ -113,7 +110,7 @@ export function executeAuthorizedOrderTransition(
   }
 
   // 2. Existence & kitchen-scope check before mutating canonical state
-  const existingOrder = findOrder(cleanOrderId);
+  const existingOrder = await findOrder(cleanOrderId);
   if (!existingOrder) {
     return {
       ok: false,
@@ -133,7 +130,7 @@ export function executeAuthorizedOrderTransition(
   // 3. Execute atomic canonical state transition
   try {
     const actorLabel = `${employee.employeeCode} (${employee.name})`;
-    const result = transitionCanonicalOrder({
+    const result = await transitionCanonicalOrder({
       orderId: cleanOrderId,
       nextStatus,
       actor: actorLabel,
@@ -141,8 +138,7 @@ export function executeAuthorizedOrderTransition(
       courierEtaMins: params.courierEtaMins,
       cancellationSource: params.cancellationSource,
       cancellationReason: params.cancellationReason,
-      restoreInventoryOnPrePrepCancel:
-        params.restoreInventoryOnPrePrepCancel,
+      restoreInventoryOnPrePrepCancel: params.restoreInventoryOnPrePrepCancel,
     });
     return {
       ok: true,
@@ -151,9 +147,7 @@ export function executeAuthorizedOrderTransition(
     };
   } catch (error) {
     const message =
-      error instanceof Error
-        ? error.message
-        : "Unable to update order status";
+      error instanceof Error ? error.message : "Unable to update order status";
     const status = message.includes("Order not found")
       ? 404
       : message.includes("Invalid status transition") ||

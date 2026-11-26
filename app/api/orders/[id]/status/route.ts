@@ -18,7 +18,7 @@ export async function PATCH(
     }
 
     const body = await request.json();
-    const outcome = executeAuthorizedOrderTransition({
+    const outcome = await executeAuthorizedOrderTransition({
       employee,
       orderId: params.id,
       nextStatusRaw: String(body?.status || body?.action || ""),

@@ -18,11 +18,11 @@ import type {
 
 const PERFORMANCE_HOTSPOTS = [
   {
-    title: "In-memory store resets on restart",
-    severity: "Critical · Sprint 1",
+    title: "Dual-mode PostgreSQL persistence & per-kitchen stock isolation",
+    severity: "Implemented · Sprint 1",
     detail:
-      "Sprint 0 runs on a globalThis in-memory store for showcase velocity; restarts reset state and inventory is shared across kitchens.",
-    fix: "Migrate lib/store.ts from sync to async backed by Supabase PostgreSQL (Mumbai ap-south-1) + Drizzle ORM with composite (kitchen_id, ingredient_id) stock ledgers.",
+      "Drizzle ORM 19-table PostgreSQL schema (db/schema.ts), Supavisor pooling (prepare: false), composite (kitchen_id, ingredient_id) stock ledgers, sorted FOR UPDATE locking, and atomic inter-kitchen transfers.",
+    fix: "Set DATABASE_URL (Supavisor port 6543) & DIRECT_URL (port 5432) in Vercel/Supabase and run npm run db:migrate && npm run db:seed.",
   },
   {
     title: "HTTP polling vs. sub-second KDS push",
@@ -32,11 +32,11 @@ const PERFORMANCE_HOTSPOTS = [
     fix: "Enable Supabase Realtime channels (<500ms order propagation) with automatic HTTP polling fallback when Wi-Fi drops.",
   },
   {
-    title: "Linear array lookups & full snapshot clones",
-    severity: "Medium · Sprint 1+",
+    title: "Cursor pagination for high-volume historical archives",
+    severity: "Medium · Sprint 2+",
     detail:
-      "Order filtering and snapshot serialization scale linearly when historical order archives grow.",
-    fix: "Use indexed Postgres queries (kitchen_id, status, created_at DESC) with cursor pagination on GET /api/orders.",
+      "Indexed PostgreSQL queries (kitchen_id, status) and (brand_id, created_at) are live; add cursor pagination when historical order volumes exceed 10k rows.",
+    fix: "Extend GET /api/orders with cursor pagination and date-window partitions.",
   },
 ];
 
@@ -45,8 +45,8 @@ const PRODUCTION_MILESTONES = [
     id: "SPRINT-1",
     name: "Sprint 1 · Persistence & Stock Ledger",
     domain: "Supabase (ap-south-1) + Drizzle ORM",
-    status: "NEXT",
-    task: "Durable Postgres tables, per-kitchen (kitchen_id, ingredient_id) stock isolation, inter-kitchen transfers, SELECT FOR UPDATE depletion, Vitest CI.",
+    status: "COMPLETE",
+    task: "Durable 19-table Postgres schema, per-kitchen (kitchen_id, ingredient_id) stock isolation, inter-kitchen transfers, SELECT FOR UPDATE depletion, Vitest CI.",
   },
   {
     id: "SPRINT-2",
@@ -444,13 +444,15 @@ export default function AnalyticsPage() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-800">
-                      {inventory.map((item) => {
+                      {Array.from(
+                        new Map(inventory.map((i) => [i.id, i])).values(),
+                      ).map((item) => {
                         const exp = item.expectedYieldPct ?? 90;
                         const act = item.actualYieldPct ?? 88;
                         const diff = act - exp;
                         const alert = diff <= -4;
                         return (
-                          <tr key={item.id}>
+                          <tr key={`${item.kitchenId ?? "K1"}-${item.id}`}>
                             <td className="px-3 py-2.5 font-semibold text-white">
                               {item.name}{" "}
                               <span className="font-mono text-[10px] text-slate-400">

@@ -530,7 +530,9 @@ export default function BrandsPage() {
                     }
                     className="mt-1 w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-white"
                   >
-                    {inventory.map((inv) => (
+                    {Array.from(
+                      new Map(inventory.map((i) => [i.id, i])).values(),
+                    ).map((inv) => (
                       <option
                         key={inv.id}
                         value={inv.id}

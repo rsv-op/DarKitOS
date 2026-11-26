@@ -274,9 +274,12 @@ export default function OrderSimulationPanel() {
     }
     return Array.from(reqMap.entries()).map(
       ([invId, requiredQty]) => {
-        const inv = inventory.find(
-          (i) => i.id === invId,
-        );
+        const inv =
+          inventory.find(
+            (i) =>
+              i.id === invId &&
+              i.kitchenId === selectedKitchenId,
+          ) ?? inventory.find((i) => i.id === invId);
         const currentStock =
           inv?.currentStock ?? 0;
         const threshold =
@@ -290,7 +293,7 @@ export default function OrderSimulationPanel() {
               ? "LOW_STOCK"
               : "AVAILABLE";
         return {
-          id: invId,
+          id: `${selectedKitchenId}-${invId}`,
           name: inv?.name || invId,
           unit: inv?.unit || "units",
           requiredQty,
@@ -302,7 +305,7 @@ export default function OrderSimulationPanel() {
         };
       },
     );
-  }, [cartItems, inventory]);
+  }, [cartItems, inventory, selectedKitchenId]);
 
   async function submitOrder(
     reuseKey = false,

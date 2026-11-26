@@ -1,13 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import {
-  isDemoSandboxEnabled,
-  sanitizeEmployee,
-} from "@/lib/auth";
-import {
-  PERMISSIONS_DB,
-  ROLE_PERMISSIONS_DB,
-  type DbaBrand,
-} from "@/lib/db";
+import { isDemoSandboxEnabled, sanitizeEmployee } from "@/lib/auth";
+import { PERMISSIONS_DB, ROLE_PERMISSIONS_DB, type DbaBrand } from "@/lib/db";
 import { getAuthenticatedEmployee } from "@/lib/domain/auth-service";
 import {
   canAccessKitchen,
@@ -18,6 +11,7 @@ import {
 import {
   clearOrdersStore,
   deleteVirtualFile,
+  getStorageMode,
   getStoreSnapshot,
   resetStore,
   toggleBrandKitchenMapping,
@@ -34,22 +28,21 @@ export async function GET(request: NextRequest) {
     const employee = await getAuthenticatedEmployee(request);
 
     if (!employee) {
-      return NextResponse.json(
-        { error: "Unauthorized" },
-        { status: 401 },
-      );
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const snapshot = getStoreSnapshot();
+    const snapshot = await getStoreSnapshot();
     const isGlobal = hasGlobalScope(employee);
     const isOwnerView = hasPermission(employee, "OWNER_VIEW");
     const safeSelf = sanitizeEmployee(employee);
 
     const scopedOrders = isGlobal
       ? snapshot.orders
-      : snapshot.orders.filter(
-          (o) => o.kitchenId === employee.kitchenId,
-        );
+      : snapshot.orders.filter((o) => o.kitchenId === employee.kitchenId);
+
+    const scopedInventory = isGlobal
+      ? snapshot.inventory
+      : snapshot.inventory.filter((i) => i.kitchenId === employee.kitchenId);
 
     const scopedCancellations = isGlobal
       ? snapshot.cancellations
@@ -97,6 +90,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({
       ...snapshot,
       orders: scopedOrders,
+      inventory: scopedInventory,
       cancellations: scopedCancellations,
       inventoryMovements: scopedMovements,
       activities: scopedActivities,
@@ -110,6 +104,7 @@ export async function GET(request: NextRequest) {
       permissionsCatalog: PERMISSIONS_DB,
       rolePermissionsCatalog: ROLE_PERMISSIONS_DB,
       demoSandboxEnabled: isDemoSandboxEnabled(),
+      storageMode: getStorageMode(),
     });
   } catch (error) {
     console.error("GET /api/system failed:", error);
@@ -125,10 +120,7 @@ export async function PATCH(request: NextRequest) {
     const employee = await getAuthenticatedEmployee(request);
 
     if (!employee) {
-      return NextResponse.json(
-        { error: "Unauthorized" },
-        { status: 401 },
-      );
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
     const body = await request.json();
@@ -165,7 +157,7 @@ export async function PATCH(request: NextRequest) {
             { status: 403 },
           );
         }
-        const brandKitchens = toggleBrandKitchenMapping(
+        const brandKitchens = await toggleBrandKitchenMapping(
           body.brandId as DbaBrand,
           kitchenId,
           actor,
@@ -189,7 +181,7 @@ export async function PATCH(request: NextRequest) {
             { status: 400 },
           );
         }
-        const menuCatalog = updateMenuCatalogItem(body.item, actor);
+        const menuCatalog = await updateMenuCatalogItem(body.item, actor);
         return NextResponse.json({
           success: true,
           menuCatalog,
@@ -218,7 +210,7 @@ export async function PATCH(request: NextRequest) {
             { status: 403 },
           );
         }
-        const kitchens = toggleKitchenActive(kitchenId, actor);
+        const kitchens = await toggleKitchenActive(kitchenId, actor);
         return NextResponse.json({
           success: true,
           kitchens,
@@ -258,9 +250,9 @@ export async function PATCH(request: NextRequest) {
             );
           }
         }
-        const employees = upsertCanonicalEmployee(body.employee, actor).map(
-          sanitizeEmployee,
-        );
+        const employees = (
+          await upsertCanonicalEmployee(body.employee, actor)
+        ).map(sanitizeEmployee);
         return NextResponse.json({
           success: true,
           employees,
@@ -280,7 +272,7 @@ export async function PATCH(request: NextRequest) {
             { status: 400 },
           );
         }
-        const files = upsertVirtualFile(body.file, actor);
+        const files = await upsertVirtualFile(body.file, actor);
         return NextResponse.json({
           success: true,
           files,
@@ -301,7 +293,7 @@ export async function PATCH(request: NextRequest) {
             { status: 400 },
           );
         }
-        const files = deleteVirtualFile(fileId, actor);
+        const files = await deleteVirtualFile(fileId, actor);
         return NextResponse.json({
           success: true,
           files,
@@ -315,7 +307,7 @@ export async function PATCH(request: NextRequest) {
             { status: 403 },
           );
         }
-        const settings = updateSystemSettings(body.settings || {}, actor);
+        const settings = await updateSystemSettings(body.settings || {}, actor);
         return NextResponse.json({
           success: true,
           settings,
@@ -336,7 +328,7 @@ export async function PATCH(request: NextRequest) {
             { status: 400 },
           );
         }
-        const leakageVectors = updateLeakageVectorStatus(
+        const leakageVectors = await updateLeakageVectorStatus(
           vectorId,
           body.status,
           actor,
@@ -361,8 +353,8 @@ export async function PATCH(request: NextRequest) {
             { status: 403 },
           );
         }
-        resetStore();
-        const fresh = getStoreSnapshot();
+        await resetStore();
+        const fresh = await getStoreSnapshot();
         return NextResponse.json({
           success: true,
           snapshot: {
@@ -386,8 +378,8 @@ export async function PATCH(request: NextRequest) {
             { status: 403 },
           );
         }
-        clearOrdersStore();
-        const fresh = getStoreSnapshot();
+        await clearOrdersStore();
+        const fresh = await getStoreSnapshot();
         return NextResponse.json({
           success: true,
           snapshot: {
@@ -405,12 +397,7 @@ export async function PATCH(request: NextRequest) {
     }
   } catch (error) {
     const message =
-      error instanceof Error
-        ? error.message
-        : "System mutation failed";
-    return NextResponse.json(
-      { error: message },
-      { status: 400 },
-    );
+      error instanceof Error ? error.message : "System mutation failed";
+    return NextResponse.json({ error: message }, { status: 400 });
   }
 }

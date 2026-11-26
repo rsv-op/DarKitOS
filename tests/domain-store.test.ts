@@ -1,4 +1,5 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import { closeDb } from "@/lib/db-client";
 import {
   MID_PREP_LABOR_ALLOWANCE_INR,
   clearOrdersStore,
@@ -19,31 +20,42 @@ import {
 } from "@/lib/store";
 
 describe("lib/store canonical domain invariants", () => {
-  beforeEach(() => {
-    resetStore();
+  beforeEach(async () => {
+    await resetStore();
   });
 
-  it("initializes with INR currency and HTTP_POLLING sync mode", () => {
-    const settings = getSettings();
+  afterAll(async () => {
+    await closeDb();
+  });
+
+  it("initializes with INR currency, HTTP_POLLING sync mode, and 44 per-kitchen stock rows (4 hubs × 11 SKUs)", async () => {
+    const settings = await getSettings();
     expect(settings.currency).toBe("INR");
     expect(settings.syncMode).toBe("HTTP_POLLING");
+
+    const allStock = await getInventory();
+    expect(allStock).toHaveLength(44);
+    expect(await getInventory("K1")).toHaveLength(11);
+    expect(await getInventory("K2")).toHaveLength(11);
+    expect(await getInventory("K3")).toHaveLength(11);
+    expect(await getInventory("K4")).toHaveLength(11);
   });
 
-  it("enforces canonical BrandKitchen authorization on order injection", () => {
+  it("enforces canonical BrandKitchen authorization on order injection", async () => {
     // WingProtocol is NOT authorized in K2 (Noida)
-    expect(() =>
+    await expect(
       injectCanonicalOrder({
         brandId: "WingProtocol",
         kitchenId: "K2",
         channel: "Zomato",
         items: [{ menuItemId: "MENU-WP-01", quantity: 1 }],
-        actor: "OWNER-01 (Arvind Singhania)",
+        actor: "OWNER-01 (Patric Revuelto)",
       }),
-    ).toThrow(/BrandKitchen violation/);
+    ).rejects.toThrow(/BrandKitchen violation/);
   });
 
-  it("deduplicates repeated webhook idempotency keys cleanly", () => {
-    const first = injectCanonicalOrder({
+  it("deduplicates repeated webhook idempotency keys cleanly", async () => {
+    const first = await injectCanonicalOrder({
       idempotencyKey: "idem-test-001",
       brandId: "BurgerForge",
       kitchenId: "K1",
@@ -52,7 +64,7 @@ describe("lib/store canonical domain invariants", () => {
       actor: "OWNER-01",
     });
 
-    const replay = injectCanonicalOrder({
+    const replay = await injectCanonicalOrder({
       idempotencyKey: "idem-test-001",
       brandId: "BurgerForge",
       kitchenId: "K1",
@@ -64,14 +76,14 @@ describe("lib/store canonical domain invariants", () => {
     expect(first.idempotentReplay).toBe(false);
     expect(replay.idempotentReplay).toBe(true);
     expect(replay.order.id).toBe(first.order.id);
-    const webhook = getWebhookEvents().find(
+    const webhook = (await getWebhookEvents()).find(
       (w) => w.idempotencyKey === "idem-test-001",
     );
     expect(webhook?.hitCount).toBe(2);
   });
 
-  it("rejects duplicate explicit order IDs", () => {
-    expect(() =>
+  it("rejects duplicate explicit order IDs", async () => {
+    await expect(
       injectCanonicalOrder({
         id: "ORD-901",
         brandId: "BurgerForge",
@@ -80,14 +92,15 @@ describe("lib/store canonical domain invariants", () => {
         items: [{ menuItemId: "MENU-BF-01", quantity: 1 }],
         actor: "OWNER-01",
       }),
-    ).toThrow(/already exists/);
+    ).rejects.toThrow(/already exists/);
   });
 
-  it("depletes complete recipe BOM including MENU-BF-02 Truffle Fries", () => {
-    const friesBefore = getInventory().find((i) => i.id === "INV-011")!;
-    const pkgBefore = getInventory().find((i) => i.id === "INV-010")!;
+  it("depletes complete recipe BOM including MENU-BF-02 Truffle Fries scoped to K1", async () => {
+    const k1Before = await getInventory("K1");
+    const friesBefore = k1Before.find((i) => i.id === "INV-011")!;
+    const pkgBefore = k1Before.find((i) => i.id === "INV-010")!;
 
-    const created = injectCanonicalOrder({
+    const created = await injectCanonicalOrder({
       brandId: "BurgerForge",
       kitchenId: "K1",
       channel: "Swiggy",
@@ -95,31 +108,32 @@ describe("lib/store canonical domain invariants", () => {
       actor: "OWNER-01",
     });
 
-    transitionCanonicalOrder({
+    await transitionCanonicalOrder({
       orderId: created.order.id,
       nextStatus: "PREPARING",
       actor: "2001 (Rajesh Kumar)",
     });
 
-    const friesAfter = getInventory().find((i) => i.id === "INV-011")!;
-    const pkgAfter = getInventory().find((i) => i.id === "INV-010")!;
+    const k1After = await getInventory("K1");
+    const friesAfter = k1After.find((i) => i.id === "INV-011")!;
+    const pkgAfter = k1After.find((i) => i.id === "INV-010")!;
     expect(friesAfter.currentStock).toBe(friesBefore.currentStock - 2);
     expect(pkgAfter.currentStock).toBe(pkgBefore.currentStock - 2);
   });
 
-  it("persists INVENTORY_UNAVAILABLE audit event without deducting stock when insufficient stock blocks PREPARING", () => {
-    // Reduce Brioche Buns (INV-002) to 1 unit
-    mutateCanonicalInventory({
+  it("persists INVENTORY_UNAVAILABLE audit event without deducting stock when insufficient stock blocks PREPARING", async () => {
+    await mutateCanonicalInventory({
       itemId: "INV-002",
+      kitchenId: "K1",
       action: "SET_STOCK",
       currentStock: 1,
       actor: "OWNER-01",
     });
-    const beefBefore = getInventory().find((i) => i.id === "INV-001")!
-      .currentStock;
+    const beefBefore = (await getInventory("K1")).find(
+      (i) => i.id === "INV-001",
+    )!.currentStock;
 
-    // Create order requiring 3 Double Smash Burgers (6 beef patties, 3 brioche buns)
-    const created = injectCanonicalOrder({
+    const created = await injectCanonicalOrder({
       brandId: "BurgerForge",
       kitchenId: "K1",
       channel: "Swiggy",
@@ -127,24 +141,21 @@ describe("lib/store canonical domain invariants", () => {
       actor: "OWNER-01",
     });
 
-    expect(() =>
+    await expect(
       transitionCanonicalOrder({
         orderId: created.order.id,
         nextStatus: "PREPARING",
         actor: "2001 (Rajesh Kumar)",
       }),
-    ).toThrow(/Insufficient inventory/);
+    ).rejects.toThrow(/Insufficient inventory/);
 
-    // Stock MUST remain untouched (atomic)
-    const beefAfter = getInventory().find((i) => i.id === "INV-001")!
-      .currentStock;
-    const bunsAfter = getInventory().find((i) => i.id === "INV-002")!
-      .currentStock;
-    expect(beefAfter).toBe(beefBefore);
-    expect(bunsAfter).toBe(1);
+    const k1After = await getInventory("K1");
+    expect(k1After.find((i) => i.id === "INV-001")!.currentStock).toBe(
+      beefBefore,
+    );
+    expect(k1After.find((i) => i.id === "INV-002")!.currentStock).toBe(1);
 
-    // Audit event & decision MUST be persisted (not rolled back!)
-    const persisted = findOrder(created.order.id)!;
+    const persisted = (await findOrder(created.order.id))!;
     expect(persisted.status).toBe("PENDING");
     expect(persisted.inventoryDecision).toBe("INSUFFICIENT_STOCK");
     expect(persisted.inventoryUnavailable).toContain("Brioche Buns");
@@ -153,11 +164,12 @@ describe("lib/store canonical domain invariants", () => {
     ).toBe(true);
   });
 
-  it("does not fabricate stock restoration or loss when cancelling PENDING order before stock consumption", () => {
-    const beefBefore = getInventory().find((i) => i.id === "INV-001")!
-      .currentStock;
+  it("does not fabricate stock restoration or loss when cancelling PENDING order before stock consumption", async () => {
+    const beefBefore = (await getInventory("K1")).find(
+      (i) => i.id === "INV-001",
+    )!.currentStock;
 
-    const created = injectCanonicalOrder({
+    const created = await injectCanonicalOrder({
       brandId: "BurgerForge",
       kitchenId: "K1",
       channel: "Zomato",
@@ -165,7 +177,7 @@ describe("lib/store canonical domain invariants", () => {
       actor: "OWNER-01",
     });
 
-    const cancelled = transitionCanonicalOrder({
+    const cancelled = await transitionCanonicalOrder({
       orderId: created.order.id,
       nextStatus: "CANCELLED",
       actor: "0001 (Priya Sharma)",
@@ -176,12 +188,12 @@ describe("lib/store canonical domain invariants", () => {
     expect(cancelled.cancellationRecord?.financialLoss).toBe(0);
     expect(cancelled.cancellationRecord?.restoredIngredients).toEqual([]);
     expect(
-      getInventory().find((i) => i.id === "INV-001")!.currentStock,
+      (await getInventory("K1")).find((i) => i.id === "INV-001")!.currentStock,
     ).toBe(beefBefore);
   });
 
-  it("logs INR Food & Labor Loss (COGS + ₹75) on mid-prep cancellation without returning cooked stock", () => {
-    const created = injectCanonicalOrder({
+  it("logs INR Food & Labor Loss (COGS + ₹75) on mid-prep cancellation without returning cooked stock", async () => {
+    const created = await injectCanonicalOrder({
       brandId: "BurgerForge",
       kitchenId: "K1",
       channel: "Zomato",
@@ -189,23 +201,23 @@ describe("lib/store canonical domain invariants", () => {
       actor: "OWNER-01",
     });
 
-    transitionCanonicalOrder({
+    await transitionCanonicalOrder({
       orderId: created.order.id,
       nextStatus: "PREPARING",
       actor: "2001 (Rajesh Kumar)",
     });
 
-    const beefAfterPrep = getInventory().find((i) => i.id === "INV-001")!
-      .currentStock;
+    const beefAfterPrep = (await getInventory("K1")).find(
+      (i) => i.id === "INV-001",
+    )!.currentStock;
 
-    const cancelled = transitionCanonicalOrder({
+    const cancelled = await transitionCanonicalOrder({
       orderId: created.order.id,
       nextStatus: "CANCELLED",
       actor: "0001 (Priya Sharma)",
       cancellationSource: "CUSTOMER",
     });
 
-    // Double Smash Burger recipe COGS = 2 * ₹85 + 1 * ₹28 = ₹198
     const expectedLoss = 198 + MID_PREP_LABOR_ALLOWANCE_INR;
     expect(cancelled.cancellationRecord?.stage).toBe("DURING_OR_AFTER_PREP");
     expect(cancelled.cancellationRecord?.resolution).toBe(
@@ -213,15 +225,13 @@ describe("lib/store canonical domain invariants", () => {
     );
     expect(cancelled.cancellationRecord?.financialLoss).toBe(expectedLoss);
     expect(cancelled.cancellationRecord?.restoredIngredients).toEqual([]);
-    // Stock must NOT increase back
     expect(
-      getInventory().find((i) => i.id === "INV-001")!.currentStock,
+      (await getInventory("K1")).find((i) => i.id === "INV-001")!.currentStock,
     ).toBe(beefAfterPrep);
   });
 
-  it("creates post-pickup aggregator accounting claim with courier evidence", () => {
-    // ORD-906 starts in PICKED_UP status (total ₹798)
-    const cancelled = transitionCanonicalOrder({
+  it("creates post-pickup aggregator accounting claim with courier evidence", async () => {
+    const cancelled = await transitionCanonicalOrder({
       orderId: "ORD-906",
       nextStatus: "CANCELLED",
       actor: "OWNER-01",
@@ -238,14 +248,16 @@ describe("lib/store canonical domain invariants", () => {
     );
   });
 
-  it("does not override RESTOCK action when stray currentStock is passed", () => {
-    const bunsBefore = getInventory().find((i) => i.id === "INV-002")!
-      .currentStock;
-    const result = mutateCanonicalInventory({
+  it("does not override RESTOCK action when stray currentStock is passed", async () => {
+    const bunsBefore = (await getInventory("K1")).find(
+      (i) => i.id === "INV-002",
+    )!.currentStock;
+    const result = await mutateCanonicalInventory({
       itemId: "INV-002",
+      kitchenId: "K1",
       action: "RESTOCK",
       quantity: 20,
-      currentStock: 0, // stray field must NOT wipe stock during RESTOCK
+      currentStock: 0,
       actor: "OWNER-01",
     });
 
@@ -253,8 +265,8 @@ describe("lib/store canonical domain invariants", () => {
     expect(result.movement.type).toBe("RESTOCK");
   });
 
-  it("deep-clones cancellations and clears webhooks/outbox on clearOrdersStore", () => {
-    const records = getCancellations();
+  it("deep-clones cancellations and clears webhooks/outbox on clearOrdersStore", async () => {
+    const records = await getCancellations();
     expect(records.length).toBeGreaterThan(0);
     records[0].lostIngredients.push({
       inventoryItemId: "FAKE",
@@ -262,19 +274,19 @@ describe("lib/store canonical domain invariants", () => {
       quantity: 99,
     });
     expect(
-      getCancellations()[0].lostIngredients.some(
+      (await getCancellations())[0].lostIngredients.some(
         (i) => i.inventoryItemId === "FAKE",
       ),
     ).toBe(false);
 
-    clearOrdersStore();
-    expect(getWebhookEvents()).toEqual([]);
-    expect(getOutboxEvents()).toEqual([]);
-    expect(getCancellations()).toEqual([]);
+    await clearOrdersStore();
+    expect(await getWebhookEvents()).toEqual([]);
+    expect(await getOutboxEvents()).toEqual([]);
+    expect(await getCancellations()).toEqual([]);
   });
 
-  it("strips plaintext pins on employee upsert and rejects malformed files/settings", () => {
-    upsertCanonicalEmployee(
+  it("strips plaintext pins on employee upsert and rejects malformed files/settings", async () => {
+    await upsertCanonicalEmployee(
       {
         employeeCode: "COOK-99",
         name: "Test Chef",
@@ -284,15 +296,17 @@ describe("lib/store canonical domain invariants", () => {
       },
       "OWNER-01",
     );
-    const saved = getEmployees().find((e) => e.employeeCode === "COOK-99");
+    const saved = (await getEmployees()).find(
+      (e) => e.employeeCode === "COOK-99",
+    );
     expect(saved).toBeDefined();
     expect(saved?.pin).toBeUndefined();
 
-    expect(() =>
+    await expect(
       upsertVirtualFile({ name: "   " }, "OWNER-01"),
-    ).toThrow(/File name is required/);
+    ).rejects.toThrow(/File name is required/);
 
-    const sanitized = updateSystemSettings(
+    const sanitized = await updateSystemSettings(
       { prepSlaMinutes: -50, lowStockMultiplier: Number.NaN },
       "OWNER-01",
     );

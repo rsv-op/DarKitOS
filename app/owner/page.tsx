@@ -663,9 +663,10 @@ export default function OwnerPage() {
                 ) : (
                   lowStockItems.map((i) => (
                     <span
-                      key={i.id}
+                      key={`${i.kitchenId ?? "K1"}-${i.id}`}
                       className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-2 py-1 font-mono text-[10px] text-amber-300"
                     >
+                      {i.kitchenId ? `[${i.kitchenId}] ` : ""}
                       {i.name}: {i.currentStock} {i.unit}
                     </span>
                   ))

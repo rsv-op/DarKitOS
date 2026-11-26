@@ -37,7 +37,7 @@ export async function GET(request: NextRequest) {
     const channelFilter = searchParams.get("channel") || "";
     const search = (searchParams.get("search") || "").trim().toLowerCase();
 
-    let orders = getOrders();
+    let orders = await getOrders();
 
     // Enforce server-side kitchen isolation for non-global employees
     if (!hasGlobalScope(employee) && employee.kitchenId) {
@@ -139,7 +139,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const catalog = getMenuCatalog() ?? MENU_CATALOG;
+    const catalog = (await getMenuCatalog()) ?? MENU_CATALOG;
 
     // Support both explicit items[] array and synthetic single-item fallback
     let items = Array.isArray(body.items) ? body.items : [];
@@ -162,7 +162,7 @@ export async function POST(request: NextRequest) {
 
     const actorLabel = `${employee.employeeCode} (${employee.name})`;
 
-    const result = injectCanonicalOrder({
+    const result = await injectCanonicalOrder({
       id: typeof body.id === "string" ? body.id : undefined,
       externalOrderId:
         typeof body.externalOrderId === "string"
@@ -225,7 +225,7 @@ export async function PATCH(request: NextRequest) {
     }
 
     const body = await request.json();
-    const outcome = executeAuthorizedOrderTransition({
+    const outcome = await executeAuthorizedOrderTransition({
       employee,
       orderId: String(body?.orderId || body?.id || ""),
       nextStatusRaw: String(body?.action || body?.status || ""),

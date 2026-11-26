@@ -10,8 +10,11 @@ import { getEmployees, getSettings } from "@/lib/store";
 export async function GET(request: NextRequest) {
   const employee = await getAuthenticatedEmployee(request);
   const demoSandboxEnabled = isDemoSandboxEnabled();
-  const settings = getSettings();
-  const safeActiveEmployees = getEmployees()
+  const [settings, allEmployees] = await Promise.all([
+    getSettings(),
+    getEmployees(),
+  ]);
+  const safeActiveEmployees = allEmployees
     .filter((e) => e.active)
     .map(sanitizeEmployee);
 
