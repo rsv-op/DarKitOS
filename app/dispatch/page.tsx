@@ -11,29 +11,26 @@ import Link from "next/link";
 import AppShell from "@/components/AppShell";
 import KitchenSlaBadge from "@/components/KitchenSlaBadge";
 import RealtimeSyncBadge from "@/components/RealtimeSyncBadge";
+import { SplitInspector } from "@/components/SplitInspector";
 import { useKitchenAudioAlerts } from "@/hooks/useKitchenAudioAlerts";
 import { useRealtimeKitchenSync } from "@/hooks/useRealtimeKitchenSync";
 import { formatCurrency, type SupportedCurrency } from "@/lib/currency";
-import {
-  KITCHENS_DB,
-  type Employee,
-  type Order,
-  type PermissionCode,
-} from "@/lib/db";
+import type { Employee, Order, PermissionCode } from "@/lib/db";
 
-const COURIER_PRESETS = [
-  "Deepak Yadav",
-  "Suresh Solanki",
-  "Manoj Tiwari",
-  "Rahul Deshmukh",
-  "Imran Qureshi",
+const COURIER_CHIPS = [
+  "Shadowfax",
+  "Porter",
+  "Swiggy Fleet",
+  "Zomato Rider",
 ];
+
+const ETA_CHIPS = [5, 8, 12, 15];
 
 function formatTime(value?: string): string {
   if (!value) return "--";
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "--";
-  return date.toLocaleTimeString([], {
+  return date.toLocaleTimeString("en-IN", {
     hour: "2-digit",
     minute: "2-digit",
   });
@@ -43,42 +40,32 @@ function getOrderAge(value?: string): string {
   if (!value) return "--";
   const created = new Date(value).getTime();
   if (Number.isNaN(created)) return "--";
-  const minutes = Math.max(
-    0,
-    Math.floor((Date.now() - created) / 60000),
-  );
-  return `${minutes} min`;
+  return `${Math.max(0, Math.floor((Date.now() - created) / 60000))}m`;
 }
 
 export default function DispatchPage() {
-  const [orders, setOrders] = useState<Order[]>(
-    [],
-  );
+  const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
-  const [updatingOrderId, setUpdatingOrderId] =
-    useState<string | null>(null);
-  const [kitchenFilter, setKitchenFilter] =
-    useState<string>("ALL");
-  const [canCancelOrders, setCanCancelOrders] =
-    useState<boolean>(false);
-  const [currency, setCurrency] =
-    useState<SupportedCurrency>("INR");
-  const [dispatchSlaMinutes, setDispatchSlaMinutes] =
-    useState<number>(8);
-  const [currentEmployee, setCurrentEmployee] =
-    useState<Employee | null>(null);
+  const [updatingOrderId, setUpdatingOrderId] = useState<string | null>(null);
+  const [kitchenFilter, setKitchenFilter] = useState<string>("ALL");
+  const [canCancelOrders, setCanCancelOrders] = useState<boolean>(false);
+  const [currency, setCurrency] = useState<SupportedCurrency>("INR");
+  const [dispatchSlaMinutes, setDispatchSlaMinutes] = useState<number>(8);
+  const [currentEmployee, setCurrentEmployee] = useState<Employee | null>(null);
+
+  const [driverInputs, setDriverInputs] = useState<Record<string, string>>({});
+  const [etaInputs, setEtaInputs] = useState<Record<string, number>>({});
+
+  // Post-pickup claim cancellation SplitInspector
+  const [claimOrder, setClaimOrder] = useState<Order | null>(null);
+  const [claimReason, setClaimReason] = useState(
+    "Post-pickup aggregator cancellation — logged for accounting claim reconciliation",
+  );
 
   const audio = useKitchenAudioAlerts();
   const seenReadyIdsRef = useRef<Set<string> | null>(null);
-
-  // Inline driver assignment state per order
-  const [driverInputs, setDriverInputs] =
-    useState<Record<string, string>>({});
-  const [etaInputs, setEtaInputs] = useState<
-    Record<string, number>
-  >({});
 
   useEffect(() => {
     let active = true;
@@ -90,46 +77,39 @@ export default function DispatchPage() {
         setCanCancelOrders(
           perms.includes("ORDER_CANCEL") || perms.includes("OWNER_VIEW"),
         );
-        if (data.settings?.currency) {
-          setCurrency(data.settings.currency);
-        }
+        if (data.settings?.currency) setCurrency(data.settings.currency);
         if (typeof data.settings?.dispatchSlaMinutes === "number") {
           setDispatchSlaMinutes(data.settings.dispatchSlaMinutes);
         }
         if (data.employee) {
-          setCurrentEmployee(data.employee as Employee);
+          const emp = data.employee as Employee;
+          setCurrentEmployee(emp);
+          if (emp.role !== "OWNER" && emp.kitchenId) {
+            setKitchenFilter(emp.kitchenId);
+          }
         }
       })
-      .catch(() => {
-        // ignore transient error
-      });
+      .catch(() => {});
+
+    const onHubChanged = (event: Event) => {
+      const custom = event as CustomEvent<{ kitchenId?: string }>;
+      if (custom.detail?.kitchenId) setKitchenFilter(custom.detail.kitchenId);
+    };
+    window.addEventListener("darkit:hub-changed", onHubChanged);
     return () => {
       active = false;
+      window.removeEventListener("darkit:hub-changed", onHubChanged);
     };
   }, []);
 
   const loadOrders = useCallback(async () => {
     try {
-      const response = await fetch(
-        "/api/orders",
-        {
-          cache: "no-store",
-        },
-      );
+      const response = await fetch("/api/orders", { cache: "no-store" });
       const data = await response.json();
-
       if (!response.ok) {
-        throw new Error(
-          data.error ??
-            "Unable to load dispatch orders.",
-        );
+        throw new Error(data.error ?? "Unable to load dispatch orders.");
       }
-
-      setOrders(
-        Array.isArray(data.orders)
-          ? data.orders
-          : [],
-      );
+      setOrders(Array.isArray(data.orders) ? data.orders : []);
       setError("");
     } catch (loadError) {
       setError(
@@ -157,22 +137,20 @@ export default function DispatchPage() {
     onSync: loadOrders,
   });
 
-  const scopedOrders = useMemo(() => {
-    return orders.filter(
-      (o) =>
-        kitchenFilter === "ALL" ||
-        o.kitchenId === kitchenFilter,
-    );
-  }, [orders, kitchenFilter]);
+  const scopedOrders = useMemo(
+    () =>
+      orders.filter(
+        (o) => kitchenFilter === "ALL" || o.kitchenId === kitchenFilter,
+      ),
+    [orders, kitchenFilter],
+  );
 
   const readyOrders = useMemo(
     () =>
       scopedOrders.filter(
         (order) =>
-          order.status ===
-            "READY_FOR_PICKUP" ||
-          order.status ===
-            "DRIVER_ASSIGNED" ||
+          order.status === "READY_FOR_PICKUP" ||
+          order.status === "DRIVER_ASSIGNED" ||
           order.status === "PICKED_UP",
       ),
     [scopedOrders],
@@ -184,9 +162,7 @@ export default function DispatchPage() {
   const driverAssigned = readyOrders.filter(
     (o) => o.status === "DRIVER_ASSIGNED",
   );
-  const pickedUp = readyOrders.filter(
-    (o) => o.status === "PICKED_UP",
-  );
+  const pickedUp = readyOrders.filter((o) => o.status === "PICKED_UP");
 
   useEffect(() => {
     if (loading) return;
@@ -202,23 +178,15 @@ export default function DispatchPage() {
     }
     seenReadyIdsRef.current = currentIds;
   }, [loading, readyForPickup, audio]);
+
   const recentlyDispatched = useMemo(
-    () =>
-      scopedOrders
-        .filter(
-          (o) => o.status === "DISPATCHED",
-        )
-        .slice(0, 6),
+    () => scopedOrders.filter((o) => o.status === "DISPATCHED").slice(0, 8),
     [scopedOrders],
   );
 
   async function updateOrder(
     orderId: string,
-    action:
-      | "DRIVER_ASSIGNED"
-      | "PICKED_UP"
-      | "DISPATCHED"
-      | "CANCELLED",
+    action: "DRIVER_ASSIGNED" | "PICKED_UP" | "DISPATCHED" | "CANCELLED",
     driverName?: string,
     courierEtaMins?: number,
     cancellationReason?: string,
@@ -228,48 +196,36 @@ export default function DispatchPage() {
     setNotice("");
 
     try {
-      const response = await fetch(
-        "/api/orders",
-        {
-          method: "PATCH",
-          headers: {
-            "Content-Type":
-              "application/json",
-          },
-          body: JSON.stringify({
-            orderId,
-            action,
-            ...(driverName
-              ? { driverName }
-              : {}),
-            ...(typeof courierEtaMins ===
-            "number"
-              ? { courierEtaMins }
-              : {}),
-            ...(cancellationReason
-              ? {
-                  cancellationSource:
-                    "AGGREGATOR",
-                  cancellationReason,
-                }
-              : {}),
-          }),
-        },
-      );
-
+      const response = await fetch("/api/orders", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          orderId,
+          action,
+          ...(driverName ? { driverName } : {}),
+          ...(typeof courierEtaMins === "number" ? { courierEtaMins } : {}),
+          ...(cancellationReason
+            ? {
+                cancellationSource: "AGGREGATOR",
+                cancellationReason,
+              }
+            : {}),
+        }),
+      });
       const data = await response.json();
 
       if (!response.ok) {
-        throw new Error(
-          data.error ??
-            "Unable to update order.",
-        );
+        throw new Error(data.error ?? "Unable to update order.");
       }
 
       if (action === "CANCELLED") {
         setNotice(
-          `Post-Pickup Cancellation Logged for ${orderId}: Aggregator Accounting Claim (${formatCurrency(data.cancellationRecord?.claimAmount ?? 0, currency)}) created with preserved courier evidence.`,
+          `Post-pickup claim logged for ${orderId}: ${formatCurrency(
+            data.cancellationRecord?.claimAmount ?? 0,
+            currency,
+          )} claim created with courier evidence.`,
         );
+        setClaimOrder(null);
       } else {
         setNotice(
           `Order ${orderId} transitioned to ${action.replaceAll("_", " ")}.`,
@@ -288,146 +244,118 @@ export default function DispatchPage() {
     }
   }
 
-  function renderOrderCard(order: Order) {
-    const isUpdating =
-      updatingOrderId === order.id;
-    const selectedDriver =
-      driverInputs[order.id] ??
-      COURIER_PRESETS[0];
-    const selectedEta =
-      etaInputs[order.id] ?? 8;
+  function renderHandoffCard(order: Order) {
+    const isUpdating = updatingOrderId === order.id;
+    const selectedDriver = driverInputs[order.id] ?? COURIER_CHIPS[0];
+    const selectedEta = etaInputs[order.id] ?? 8;
 
     return (
       <article
         key={order.id}
-        className="rounded-2xl border border-slate-800 bg-slate-900/85 p-4 shadow-lg"
+        className="overflow-hidden rounded-lg border border-white/[0.08] bg-[#151519]"
       >
-        <div className="flex items-start justify-between gap-3">
-          <div>
-            <p className="font-mono text-lg font-black text-white">
-              {order.id}
+        <div className="flex items-start justify-between gap-2 border-b border-white/[0.06] bg-[#1d1d22]/50 px-3.5 py-2.5">
+          <div className="min-w-0">
+            <p className="font-mono text-sm font-bold text-zinc-100 tabular-nums">
+              #{order.id}
             </p>
-            <p className="text-xs font-semibold text-sky-400">
-              {order.brandId} •{" "}
-              <span className="text-slate-400">
-                {order.kitchenId} •{" "}
-                {order.channel}
-              </span>
-            </p>
-            <p className="mt-0.5 text-xs text-slate-400">
-              Customer:{" "}
+            <p className="mt-0.5 truncate text-[11px] text-zinc-400">
+              {order.brandId} · {order.kitchenId} · {order.channel} ·{" "}
               {order.customerName || "Guest"}
             </p>
           </div>
 
-          <div className="text-right font-mono text-xs text-slate-400">
-            <div className="mb-1 flex justify-end">
-              <KitchenSlaBadge
-                orderId={order.id}
-                anchorIso={order.readyAt ?? order.createdAt}
-                slaMinutes={dispatchSlaMinutes}
-                labelPrefix="Dispatch SLA"
-                onBreach={audio.playSlaBreachAlert}
-              />
-            </div>
-            <p>
-              Ready{" "}
-              <strong className="text-emerald-400">
-                {formatTime(order.readyAt)}
-              </strong>
-            </p>
-            <p>
-              Age{" "}
-              {getOrderAge(
-                order.receivedAt ??
-                  order.createdAt,
-              )}
+          <div className="shrink-0 text-right">
+            <KitchenSlaBadge
+              orderId={order.id}
+              anchorIso={order.readyAt ?? order.createdAt}
+              slaMinutes={dispatchSlaMinutes}
+              labelPrefix="Dispatch SLA"
+              onBreach={audio.playSlaBreachAlert}
+            />
+            <p className="mt-1 font-mono text-[10px] text-zinc-500 tabular-nums">
+              Ready {formatTime(order.readyAt)} · Age{" "}
+              {getOrderAge(order.receivedAt ?? order.createdAt)}
             </p>
           </div>
         </div>
 
-        <div className="mt-3 space-y-1.5">
-          {order.items.map((item, index) => (
+        <div className="divide-y divide-white/[0.06] px-3.5 py-1.5 text-xs">
+          {order.items.map((item, idx) => (
             <div
-              key={
-                item.id ??
-                item.menuItemId ??
-                `${order.id}-${index}`
-              }
-              className="flex items-center justify-between rounded-xl border border-slate-800 bg-slate-950 px-3 py-2 text-xs"
+              key={item.id ?? item.menuItemId ?? `${order.id}-${idx}`}
+              className="flex items-center justify-between py-1"
             >
-              <span className="font-medium text-slate-200">
-                {item.name}
-              </span>
-              <span className="font-mono font-bold text-emerald-400">
+              <span className="truncate text-zinc-200">{item.name}</span>
+              <span className="ml-2 shrink-0 font-mono font-semibold text-zinc-100 tabular-nums">
                 ×{item.quantity}
               </span>
             </div>
           ))}
         </div>
 
-        {order.status ===
-          "READY_FOR_PICKUP" && (
-          <div className="mt-4 space-y-2.5 border-t border-slate-800 pt-3">
-            <div className="grid grid-cols-3 gap-2">
-              <div className="col-span-2">
-                <label className="block font-mono text-[10px] uppercase text-slate-400">
-                  Assign Courier
-                </label>
-                <input
-                  type="text"
-                  value={selectedDriver}
-                  onChange={(e) =>
-                    setDriverInputs((prev) => ({
-                      ...prev,
-                      [order.id]:
-                        e.target.value,
-                    }))
-                  }
-                  list={`couriers-${order.id}`}
-                  className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-2.5 py-2 text-xs text-white"
-                />
-                <datalist
-                  id={`couriers-${order.id}`}
-                >
-                  {COURIER_PRESETS.map((c) => (
-                    <option
-                      key={c}
-                      value={c}
-                    />
-                  ))}
-                </datalist>
-              </div>
-              <div>
-                <label className="block font-mono text-[10px] uppercase text-slate-400">
-                  ETA (min)
-                </label>
-                <input
-                  type="number"
-                  min={1}
-                  max={60}
-                  value={selectedEta}
-                  onChange={(e) =>
-                    setEtaInputs((prev) => ({
-                      ...prev,
-                      [order.id]: Math.max(
-                        0,
-                        Number(e.target.value) ||
-                          0,
-                      ),
-                    }))
-                  }
-                  className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-2.5 py-2 font-mono text-xs text-white"
-                />
+        {/* Stage Controls */}
+        {order.status === "READY_FOR_PICKUP" && (
+          <div className="space-y-2.5 border-t border-white/[0.06] p-3">
+            {/* 1-Tap Courier Chips */}
+            <div className="flex flex-wrap gap-1">
+              {COURIER_CHIPS.map((fleet) => {
+                const active = selectedDriver === fleet;
+                return (
+                  <button
+                    key={fleet}
+                    type="button"
+                    onClick={() =>
+                      setDriverInputs((prev) => ({ ...prev, [order.id]: fleet }))
+                    }
+                    className={`rounded-md border px-2 py-1 text-[11px] font-medium transition-colors ${
+                      active
+                        ? "border-white/[0.25] bg-[#27272e] text-zinc-100"
+                        : "border-white/[0.07] bg-[#0e0e11] text-zinc-400 hover:text-zinc-200"
+                    }`}
+                  >
+                    {fleet}
+                  </button>
+                );
+              })}
+            </div>
+
+            <div className="grid grid-cols-[1fr_auto] gap-2">
+              <input
+                type="text"
+                value={selectedDriver}
+                onChange={(e) =>
+                  setDriverInputs((prev) => ({
+                    ...prev,
+                    [order.id]: e.target.value,
+                  }))
+                }
+                placeholder="Courier or rider name"
+                className="h-8 rounded-md border border-white/[0.08] bg-[#0e0e11] px-2.5 text-xs text-zinc-100 outline-none focus:border-white/[0.2]"
+              />
+              <div className="flex items-center rounded-md border border-white/[0.08] bg-[#0e0e11] p-0.5">
+                {ETA_CHIPS.map((mins) => (
+                  <button
+                    key={mins}
+                    type="button"
+                    onClick={() =>
+                      setEtaInputs((prev) => ({ ...prev, [order.id]: mins }))
+                    }
+                    className={`rounded px-1.5 py-1 font-mono text-[10px] tabular-nums ${
+                      selectedEta === mins
+                        ? "bg-[#27272e] text-zinc-100"
+                        : "text-zinc-500 hover:text-zinc-300"
+                    }`}
+                  >
+                    {mins}m
+                  </button>
+                ))}
               </div>
             </div>
 
             <button
               type="button"
-              disabled={
-                isUpdating ||
-                !selectedDriver.trim()
-              }
+              disabled={isUpdating || !selectedDriver.trim()}
               onClick={() =>
                 void updateOrder(
                   order.id,
@@ -436,94 +364,65 @@ export default function DispatchPage() {
                   selectedEta,
                 )
               }
-              className="w-full rounded-xl bg-sky-500 px-4 py-3 font-mono text-xs font-black uppercase tracking-wider text-slate-950 hover:bg-sky-400 disabled:opacity-40"
+              className="h-10 w-full rounded-md bg-zinc-100 font-mono text-xs font-bold uppercase tracking-wider text-zinc-950 transition-colors hover:bg-white disabled:opacity-40"
             >
-              {isUpdating
-                ? "Assigning..."
-                : "✦ ASSIGN DRIVER"}
+              {isUpdating ? "Assigning..." : "Assign Driver"}
             </button>
           </div>
         )}
 
-        {order.status ===
-          "DRIVER_ASSIGNED" && (
-          <div className="mt-4 space-y-3 border-t border-slate-800 pt-3">
-            <div className="rounded-xl border border-purple-500/30 bg-purple-500/10 p-3 text-xs">
-              <p className="font-mono text-[10px] uppercase text-purple-300">
-                Assigned Courier
-              </p>
-              <p className="mt-0.5 font-bold text-white">
-                {order.driverName ?? "--"} • ETA:{" "}
-                {typeof order.courierEtaMins ===
-                "number"
-                  ? `${order.courierEtaMins} min`
+        {order.status === "DRIVER_ASSIGNED" && (
+          <div className="space-y-2.5 border-t border-white/[0.06] p-3">
+            <div className="flex items-center justify-between rounded-md border border-violet-500/25 bg-violet-500/10 px-2.5 py-2 text-xs">
+              <span className="font-medium text-violet-200">
+                {order.driverName ?? "--"}
+              </span>
+              <span className="font-mono text-[11px] text-violet-300 tabular-nums">
+                ETA{" "}
+                {typeof order.courierEtaMins === "number"
+                  ? `${order.courierEtaMins}m`
                   : "--"}
-              </p>
+              </span>
             </div>
-
             <button
               type="button"
               disabled={isUpdating}
-              onClick={() =>
-                void updateOrder(
-                  order.id,
-                  "PICKED_UP",
-                )
-              }
-              className="w-full rounded-xl bg-amber-500 px-4 py-3 font-mono text-xs font-black uppercase tracking-wider text-slate-950 hover:bg-amber-400 disabled:opacity-40"
+              onClick={() => void updateOrder(order.id, "PICKED_UP")}
+              className="h-10 w-full rounded-md bg-amber-400 font-mono text-xs font-bold uppercase tracking-wider text-zinc-950 transition-colors hover:bg-amber-300 disabled:opacity-40"
             >
-              {isUpdating
-                ? "Updating..."
-                : "📦 MARK PICKED UP BY COURIER"}
+              {isUpdating ? "Confirming..." : "Confirm Pickup"}
             </button>
           </div>
         )}
 
         {order.status === "PICKED_UP" && (
-          <div className="mt-4 space-y-2.5 border-t border-slate-800 pt-3">
-            <div className="rounded-xl border border-indigo-500/30 bg-indigo-500/10 p-3 text-xs text-indigo-200">
-              <p className="font-bold">
-                In Courier Custody:{" "}
+          <div className="space-y-2 border-t border-white/[0.06] p-3">
+            <div className="flex items-center justify-between rounded-md border border-indigo-500/25 bg-indigo-500/10 px-2.5 py-2 text-xs">
+              <span className="font-medium text-indigo-200">
                 {order.driverName ?? "--"}
-              </p>
-              <p className="mt-0.5 font-mono text-[10px]">
-                Picked up at{" "}
-                {formatTime(order.pickedUpAt)}
-              </p>
+              </span>
+              <span className="font-mono text-[10px] text-indigo-300 tabular-nums">
+                Picked {formatTime(order.pickedUpAt)}
+              </span>
             </div>
 
             <button
               type="button"
               disabled={isUpdating}
-              onClick={() =>
-                void updateOrder(
-                  order.id,
-                  "DISPATCHED",
-                )
-              }
-              className="w-full rounded-xl bg-emerald-500 px-4 py-3 font-mono text-xs font-black uppercase tracking-wider text-slate-950 hover:bg-emerald-400 disabled:opacity-40"
+              onClick={() => void updateOrder(order.id, "DISPATCHED")}
+              className="h-10 w-full rounded-md bg-emerald-500 font-mono text-xs font-bold uppercase tracking-wider text-zinc-950 transition-colors hover:bg-emerald-400 disabled:opacity-40"
             >
-              {isUpdating
-                ? "Finalizing..."
-                : "✓ MARK DISPATCHED (COMPLETE)"}
+              {isUpdating ? "Finalizing..." : "Mark Dispatched"}
             </button>
 
             {canCancelOrders && (
               <button
                 type="button"
                 disabled={isUpdating}
-                onClick={() =>
-                  void updateOrder(
-                    order.id,
-                    "CANCELLED",
-                    undefined,
-                    undefined,
-                    "Post-pickup aggregator cancellation -> logged for accounting claim reconciliation",
-                  )
-                }
-                className="w-full rounded-xl border border-red-500/40 bg-red-500/10 px-3 py-2 font-mono text-[10px] font-bold uppercase text-red-300 hover:bg-red-500/20"
+                onClick={() => setClaimOrder(order)}
+                className="h-8 w-full rounded-md border border-rose-500/35 bg-rose-500/10 font-mono text-[11px] font-medium text-rose-300 transition-colors hover:bg-rose-500/20"
               >
-                ⚠ Post-Pickup Cancel (Aggregator Claim)
+                Post-Pickup Cancel (Claim)
               </button>
             )}
           </div>
@@ -535,213 +434,270 @@ export default function DispatchPage() {
   return (
     <AppShell
       title="Dispatch"
-      subtitle="Assign a driver to a ready order, confirm pickup, and record the handoff."
-      actions={
+      subtitle={`${readyOrders.length} active handoffs`}
+      activeHub={kitchenFilter}
+      onHubChange={setKitchenFilter}
+      fullBleed
+      rightActions={
         <>
           <RealtimeSyncBadge
             connectionMode={realtimeSync.connectionMode}
             lastEventAt={realtimeSync.lastEventAt}
             topic={realtimeSync.topic}
           />
-
           <button
             type="button"
             onClick={audio.toggleAudio}
-            className={`rounded-xl border px-3 py-2 font-mono text-xs font-bold transition ${
+            className={`inline-flex h-7 items-center rounded-md border px-2.5 font-mono text-[11px] font-medium transition-colors ${
               audio.audioEnabled
-                ? "border-emerald-500/50 bg-emerald-500/15 text-emerald-300"
-                : "border-slate-700 bg-slate-900 text-slate-400 hover:text-white"
+                ? "border-emerald-500/40 bg-emerald-500/15 text-emerald-300"
+                : "border-white/[0.08] bg-[#151519] text-zinc-400 hover:text-zinc-200"
             }`}
           >
-            {audio.audioEnabled ? "🔔 Audio Chimes: ON" : "🔕 Audio Chimes: OFF"}
+            Chimes: {audio.audioEnabled ? "ON" : "OFF"}
           </button>
-
-          <select
-            value={kitchenFilter}
-            onChange={(e) =>
-              setKitchenFilter(e.target.value)
-            }
-            className="rounded-xl border border-slate-700 bg-slate-900 px-3 py-2 font-mono text-xs text-white"
-          >
-            <option value="ALL">
-              All Kitchens
-            </option>
-            {KITCHENS_DB.map((k) => (
-              <option key={k.id} value={k.id}>
-                {k.id} • {k.name}
-              </option>
-            ))}
-          </select>
-
           <Link
-            href="/kds"
-            className="rounded-xl border border-slate-700 bg-slate-900 px-3.5 py-2 font-mono text-xs font-bold text-sky-300"
+            href="/cook"
+            className="inline-flex h-7 items-center rounded-md border border-white/[0.08] bg-[#151519] px-2.5 text-[11px] font-medium text-zinc-300 hover:border-white/[0.16] hover:text-zinc-100"
           >
-            ← Cook KDS
+            Cook KDS
           </Link>
-
           <button
             type="button"
             onClick={() => void loadOrders()}
-            className="rounded-xl border border-slate-700 bg-slate-800 px-3.5 py-2 font-mono text-xs font-bold text-white hover:bg-slate-700"
+            className="inline-flex h-7 items-center rounded-md border border-white/[0.08] bg-[#151519] px-2.5 text-[11px] font-medium text-zinc-300 hover:border-white/[0.16] hover:text-zinc-100"
           >
-            ↻ Refresh
+            Refresh
           </button>
         </>
       }
     >
-      <div className="space-y-6">
-        {error && (
-          <div className="rounded-xl border border-red-500/40 bg-red-500/10 px-4 py-3 font-mono text-xs text-red-300">
-            ⚠ {error}
-          </div>
-        )}
+      {error && (
+        <div className="border-b border-rose-500/30 bg-rose-500/10 px-4 py-2 text-xs text-rose-200">
+          {error}
+        </div>
+      )}
 
-        {notice && (
-          <div className="rounded-xl border border-emerald-500/40 bg-emerald-500/10 px-4 py-3 font-mono text-xs text-emerald-300">
-            ✓ {notice}
-          </div>
-        )}
+      {notice && (
+        <div className="border-b border-emerald-500/30 bg-emerald-500/10 px-4 py-2 text-xs text-emerald-200">
+          {notice}
+        </div>
+      )}
 
-        <section className="grid grid-cols-3 gap-4">
-          <div className="rounded-2xl border border-emerald-500/30 bg-emerald-500/5 p-4">
-            <p className="font-mono text-xs font-bold uppercase text-emerald-300">
-              1. Ready for Pickup
-            </p>
-            <p className="mt-1 text-3xl font-black text-white">
-              {readyForPickup.length}
-            </p>
-          </div>
-          <div className="rounded-2xl border border-purple-500/30 bg-purple-500/5 p-4">
-            <p className="font-mono text-xs font-bold uppercase text-purple-300">
-              2. Driver Assigned
-            </p>
-            <p className="mt-1 text-3xl font-black text-white">
-              {driverAssigned.length}
-            </p>
-          </div>
-          <div className="rounded-2xl border border-indigo-500/30 bg-indigo-500/5 p-4">
-            <p className="font-mono text-xs font-bold uppercase text-indigo-300">
-              3. Picked Up
-            </p>
-            <p className="mt-1 text-3xl font-black text-white">
-              {pickedUp.length}
-            </p>
-          </div>
-        </section>
-
-        {loading ? (
-          <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-10 text-center font-mono text-sm text-slate-400">
-            Loading dispatch queues...
-          </div>
-        ) : readyOrders.length === 0 ? (
-          <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-12 text-center">
-            <p className="text-lg font-bold text-white">
-              No active orders waiting at Dispatch Pass
-            </p>
-            <p className="mt-1 text-xs text-slate-400">
-              Orders marked READY_FOR_PICKUP on the Cook KDS will appear here immediately.
-            </p>
-          </div>
-        ) : (
-          <div className="grid gap-6 lg:grid-cols-3">
-            <section>
-              <div className="mb-3 flex items-center justify-between border-b border-emerald-500/30 pb-2">
-                <h2 className="font-mono text-sm font-black uppercase text-emerald-300">
-                  Ready for Pickup
-                </h2>
-                <span className="rounded-full bg-emerald-500/20 px-2.5 py-0.5 font-mono text-xs font-bold text-emerald-300">
-                  {readyForPickup.length}
-                </span>
-              </div>
-              <div className="space-y-4">
-                {readyForPickup.map(
-                  renderOrderCard,
-                )}
-              </div>
-            </section>
-
-            <section>
-              <div className="mb-3 flex items-center justify-between border-b border-purple-500/30 pb-2">
-                <h2 className="font-mono text-sm font-black uppercase text-purple-300">
-                  Driver Assigned
-                </h2>
-                <span className="rounded-full bg-purple-500/20 px-2.5 py-0.5 font-mono text-xs font-bold text-purple-300">
-                  {driverAssigned.length}
-                </span>
-              </div>
-              <div className="space-y-4">
-                {driverAssigned.map(
-                  renderOrderCard,
-                )}
-              </div>
-            </section>
-
-            <section>
-              <div className="mb-3 flex items-center justify-between border-b border-indigo-500/30 pb-2">
-                <h2 className="font-mono text-sm font-black uppercase text-indigo-300">
-                  Picked Up
-                </h2>
-                <span className="rounded-full bg-indigo-500/20 px-2.5 py-0.5 font-mono text-xs font-bold text-indigo-300">
-                  {pickedUp.length}
-                </span>
-              </div>
-              <div className="space-y-4">
-                {pickedUp.map(renderOrderCard)}
-              </div>
-            </section>
-          </div>
-        )}
-
-        {/* Recently Dispatched Evidence Ledger */}
-        <section className="rounded-2xl border border-slate-800 bg-slate-900/60 p-5">
-          <h2 className="font-mono text-xs font-bold uppercase tracking-wider text-teal-400 mb-3">
-            Completed Dispatch Evidence Ledger (Post-Pickup Reconciliation Proof)
-          </h2>
-          {recentlyDispatched.length === 0 ? (
-            <p className="text-xs text-slate-500">
-              No completed dispatches recorded yet.
-            </p>
-          ) : (
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-              {recentlyDispatched.map((o) => (
-                <div
-                  key={o.id}
-                  className="rounded-xl border border-slate-800 bg-slate-950 p-3.5 text-xs"
-                >
-                  <div className="flex items-center justify-between">
-                    <span className="font-mono font-bold text-white">
-                      {o.id} ({o.brandId})
-                    </span>
-                    <span className="rounded bg-teal-500/20 px-2 py-0.5 font-mono text-[10px] font-bold text-teal-300">
-                      DISPATCHED
-                    </span>
-                  </div>
-                  <p className="mt-1 text-slate-400">
-                    Courier:{" "}
-                    <strong className="text-slate-200">
-                      {o.driverName || "Verified"}
-                    </strong>{" "}
-                    • {o.channel}
-                  </p>
-                  <div className="mt-2 flex items-center justify-between font-mono text-[10px] text-slate-500">
-                    <span>
-                      Picked:{" "}
-                      {formatTime(o.pickedUpAt)}
-                    </span>
-                    <span>
-                      Dispatched:{" "}
-                      {formatTime(
-                        o.dispatchedAt,
-                      )}
-                    </span>
-                  </div>
-                </div>
-              ))}
+      {/* 3-Lane Hairline Handoff Queue */}
+      {loading ? (
+        <div className="flex flex-1 items-center justify-center p-12 text-xs text-zinc-500">
+          Loading dispatch queues...
+        </div>
+      ) : (
+        <div className="grid flex-1 divide-y divide-white/[0.06] lg:grid-cols-3 lg:divide-x lg:divide-y-0">
+          <section className="flex min-h-[280px] flex-col">
+            <div className="flex items-center justify-between border-b border-white/[0.06] bg-[#09090b]/40 px-4 py-2.5">
+              <span className="flex items-center gap-2 text-xs font-semibold text-zinc-200">
+                <span className="h-2 w-2 rounded-full bg-emerald-400" />
+                READY FOR PICKUP
+              </span>
+              <span className="rounded bg-emerald-500/15 px-2 py-0.5 font-mono text-[11px] font-semibold text-emerald-300 tabular-nums">
+                {readyForPickup.length}
+              </span>
             </div>
-          )}
-        </section>
-      </div>
+            <div className="flex-1 space-y-3 overflow-y-auto p-3.5">
+              {readyForPickup.length === 0 ? (
+                <p className="py-10 text-center text-xs text-zinc-600">
+                  No orders ready at pass
+                </p>
+              ) : (
+                readyForPickup.map(renderHandoffCard)
+              )}
+            </div>
+          </section>
+
+          <section className="flex min-h-[280px] flex-col">
+            <div className="flex items-center justify-between border-b border-white/[0.06] bg-[#09090b]/40 px-4 py-2.5">
+              <span className="flex items-center gap-2 text-xs font-semibold text-zinc-200">
+                <span className="h-2 w-2 rounded-full bg-violet-400" />
+                DRIVER ASSIGNED
+              </span>
+              <span className="rounded bg-violet-500/15 px-2 py-0.5 font-mono text-[11px] font-semibold text-violet-300 tabular-nums">
+                {driverAssigned.length}
+              </span>
+            </div>
+            <div className="flex-1 space-y-3 overflow-y-auto p-3.5">
+              {driverAssigned.length === 0 ? (
+                <p className="py-10 text-center text-xs text-zinc-600">
+                  No assigned riders en route
+                </p>
+              ) : (
+                driverAssigned.map(renderHandoffCard)
+              )}
+            </div>
+          </section>
+
+          <section className="flex min-h-[280px] flex-col">
+            <div className="flex items-center justify-between border-b border-white/[0.06] bg-[#09090b]/40 px-4 py-2.5">
+              <span className="flex items-center gap-2 text-xs font-semibold text-zinc-200">
+                <span className="h-2 w-2 rounded-full bg-indigo-400" />
+                PICKED UP
+              </span>
+              <span className="rounded bg-indigo-500/15 px-2 py-0.5 font-mono text-[11px] font-semibold text-indigo-300 tabular-nums">
+                {pickedUp.length}
+              </span>
+            </div>
+            <div className="flex-1 space-y-3 overflow-y-auto p-3.5">
+              {pickedUp.length === 0 ? (
+                <p className="py-10 text-center text-xs text-zinc-600">
+                  No orders in rider custody
+                </p>
+              ) : (
+                pickedUp.map(renderHandoffCard)
+              )}
+            </div>
+          </section>
+        </div>
+      )}
+
+      {/* Completed Dispatch Evidence Ledger */}
+      <section className="border-t border-white/[0.06] bg-[#09090b]/50">
+        <div className="flex items-center justify-between border-b border-white/[0.06] px-4 py-2">
+          <h2 className="text-xs font-semibold text-zinc-300">
+            Completed Dispatch Evidence Ledger
+          </h2>
+          <span className="font-mono text-[10px] text-zinc-500 tabular-nums">
+            {recentlyDispatched.length} recent handoffs
+          </span>
+        </div>
+        {recentlyDispatched.length === 0 ? (
+          <p className="px-4 py-4 text-xs text-zinc-500">
+            No completed dispatches recorded yet.
+          </p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs">
+              <thead>
+                <tr className="border-b border-white/[0.06] text-[11px] font-medium text-zinc-500">
+                  <th className="px-4 py-2">Order</th>
+                  <th className="px-4 py-2">Hub / Channel</th>
+                  <th className="px-4 py-2">Courier</th>
+                  <th className="px-4 py-2 text-right">Picked Up</th>
+                  <th className="px-4 py-2 text-right">Dispatched</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-white/[0.06]">
+                {recentlyDispatched.map((o) => (
+                  <tr key={o.id} className="hover:bg-[#151519]/60">
+                    <td className="px-4 py-2 font-mono font-medium text-zinc-100 tabular-nums">
+                      {o.id}{" "}
+                      <span className="text-zinc-500">({o.brandId})</span>
+                    </td>
+                    <td className="px-4 py-2 font-mono text-[11px] text-zinc-400">
+                      {o.kitchenId} · {o.channel}
+                    </td>
+                    <td className="px-4 py-2 text-zinc-200">
+                      {o.driverName || "Verified"}
+                    </td>
+                    <td className="px-4 py-2 text-right font-mono text-[11px] text-zinc-400 tabular-nums">
+                      {formatTime(o.pickedUpAt)}
+                    </td>
+                    <td className="px-4 py-2 text-right font-mono text-[11px] text-emerald-300 tabular-nums">
+                      {formatTime(o.dispatchedAt)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
+
+      {/* RBAC-Gated Post-Pickup Claim Cancellation SplitInspector */}
+      <SplitInspector
+        open={Boolean(claimOrder)}
+        mode="overlay"
+        title={
+          claimOrder ? `Post-Pickup Claim · ${claimOrder.id}` : "Post-Pickup Claim"
+        }
+        subtitle="Preserves courier handoff proof and logs aggregator reimbursement claim"
+        onClose={() => setClaimOrder(null)}
+        footer={
+          claimOrder ? (
+            <div className="flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setClaimOrder(null)}
+                className="h-8 rounded-md border border-white/[0.08] bg-[#151519] px-3 text-xs font-medium text-zinc-300 hover:text-white"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={updatingOrderId === claimOrder.id}
+                onClick={() =>
+                  void updateOrder(
+                    claimOrder.id,
+                    "CANCELLED",
+                    undefined,
+                    undefined,
+                    claimReason.trim() ||
+                      "Post-pickup aggregator cancellation claim",
+                  )
+                }
+                className="h-8 rounded-md border border-rose-500/40 bg-rose-500/20 px-3 text-xs font-semibold text-rose-200 hover:bg-rose-500/30 disabled:opacity-50"
+              >
+                {updatingOrderId === claimOrder.id
+                  ? "Filing Claim..."
+                  : "Confirm Post-Pickup Cancellation"}
+              </button>
+            </div>
+          ) : undefined
+        }
+      >
+        {claimOrder && (
+          <div className="space-y-4 text-xs">
+            <div className="grid grid-cols-2 gap-px overflow-hidden rounded-lg border border-white/[0.06] bg-white/[0.06]">
+              <div className="bg-[#151519] p-3">
+                <p className="text-[10px] text-zinc-500">Courier in Custody</p>
+                <p className="mt-0.5 font-medium text-zinc-100">
+                  {claimOrder.driverName || "Unassigned"}
+                </p>
+              </div>
+              <div className="bg-[#151519] p-3">
+                <p className="text-[10px] text-zinc-500">Picked Up At</p>
+                <p className="mt-0.5 font-mono text-zinc-100 tabular-nums">
+                  {formatTime(claimOrder.pickedUpAt)}
+                </p>
+              </div>
+              <div className="bg-[#151519] p-3">
+                <p className="text-[10px] text-zinc-500">Channel</p>
+                <p className="mt-0.5 text-zinc-100">{claimOrder.channel}</p>
+              </div>
+              <div className="bg-[#151519] p-3">
+                <p className="text-[10px] text-zinc-500">Order Total</p>
+                <p className="mt-0.5 font-mono font-semibold text-amber-300 tabular-nums">
+                  {formatCurrency(claimOrder.totalAmount ?? 0, currency)}
+                </p>
+              </div>
+            </div>
+
+            <div>
+              <label className="mb-1.5 block text-[11px] font-medium text-zinc-400">
+                Aggregator Claim Reason
+              </label>
+              <textarea
+                rows={3}
+                value={claimReason}
+                onChange={(e) => setClaimReason(e.target.value)}
+                className="w-full rounded-md border border-white/[0.08] bg-[#151519] px-3 py-2 text-xs text-zinc-100 outline-none focus:border-white/[0.2]"
+              />
+            </div>
+
+            <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-[11px] text-amber-200">
+              Stage <code className="font-mono">AFTER_PICKUP</code>: Cooked
+              inventory will NOT return to usable stock; full order value is
+              logged for aggregator payout dispute reconciliation.
+            </div>
+          </div>
+        )}
+      </SplitInspector>
     </AppShell>
   );
 }

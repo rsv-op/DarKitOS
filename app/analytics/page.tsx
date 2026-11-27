@@ -1,11 +1,6 @@
 "use client";
 
-import {
-  useCallback,
-  useEffect,
-  useMemo,
-  useState,
-} from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import AppShell from "@/components/AppShell";
 import { formatCurrency, type SupportedCurrency } from "@/lib/currency";
 import type {
@@ -21,60 +16,67 @@ const PERFORMANCE_HOTSPOTS = [
     title: "Dual-mode PostgreSQL persistence & per-kitchen stock isolation",
     severity: "Implemented · Sprint 1",
     detail:
-      "Drizzle ORM 19-table PostgreSQL schema (db/schema.ts), Supavisor pooling (prepare: false), composite (kitchen_id, ingredient_id) stock ledgers, sorted FOR UPDATE locking, and atomic inter-kitchen transfers.",
-    fix: "Set DATABASE_URL (Supavisor port 6543) & DIRECT_URL (port 5432) in Vercel/Supabase and run npm run db:migrate && npm run db:seed.",
+      "Drizzle ORM 24-table PostgreSQL schema, Supavisor pooling (prepare: false), composite (kitchen_id, ingredient_id) ledgers, sorted FOR UPDATE locks, and atomic transfers.",
+    fix: "Configure DATABASE_URL (Supavisor 6543) & DIRECT_URL (5432) and run npm run db:migrate && npm run db:seed.",
   },
   {
     title: "Sub-second KDS & ops Realtime push with polling fallback",
     severity: "Implemented · Sprint 2",
     detail:
-      "Kitchen Board (/kds), Dispatch, Live Orders, Inventory, and Owner views subscribe to org:${orgId}:kitchen:${kitchenId} / org:${orgId}:all Supabase Realtime Broadcast channels.",
-    fix: "Automatically switches to 30s heartbeats when REALTIME_LIVE and degrades seamlessly to 3.5s HTTP polling when offline.",
+      "KDS, Dispatch, Live Orders, Inventory, and Command Center subscribe to org:kitchen Supabase Realtime Broadcast topics with 3.5s HTTP fallback.",
+    fix: "Enable Supabase Realtime replication for orders, kitchen_inventory, and activities.",
   },
   {
     title: "Cursor pagination for high-volume historical archives",
-    severity: "Medium · Sprint 2+",
+    severity: "Planned · Scale+",
     detail:
-      "Indexed PostgreSQL queries (kitchen_id, status) and (brand_id, created_at) are live; add cursor pagination when historical order volumes exceed 10k rows.",
-    fix: "Extend GET /api/orders with cursor pagination and date-window partitions.",
+      "Indexed queries (kitchen_id, status) and (brand_id, created_at) are live; add cursor pagination above 10k historical orders.",
+    fix: "Extend GET /api/orders with cursor pagination and monthly partitions.",
   },
 ];
 
 const PRODUCTION_MILESTONES = [
   {
     id: "SPRINT-1",
-    name: "Sprint 1 · Persistence & Stock Ledger",
-    domain: "Supabase (ap-south-1) + Drizzle ORM",
+    name: "Persistence & Stock Ledger",
+    domain: "Supabase + Drizzle ORM",
     status: "COMPLETE",
-    task: "Durable 19-table Postgres schema, per-kitchen (kitchen_id, ingredient_id) stock isolation, inter-kitchen transfers, SELECT FOR UPDATE depletion, Vitest CI.",
+    task: "Durable Postgres schema, per-kitchen stock isolation, inter-kitchen transfers, SELECT FOR UPDATE depletion, PG16 CI.",
   },
   {
     id: "SPRINT-2",
-    name: "Sprint 2 · Auth, RBAC & Realtime",
-    domain: "Supabase Auth + RLS + Realtime",
+    name: "Auth, RBAC & Realtime",
+    domain: "Supabase Auth + RLS",
     status: "COMPLETE",
-    task: "Multi-tenant organizations + PostgreSQL RLS, Email/Password & OTP auth, two-level org+kitchen RBAC with instant revocation, and sub-second Realtime KDS sync.",
+    task: "Multi-tenant organizations, PostgreSQL RLS, Email/OTP auth, two-level RBAC with revocation, Realtime KDS sync.",
   },
   {
     id: "SPRINT-3A",
-    name: "Sprint 3A · India GST & Razorpay",
+    name: "India GST & Razorpay",
     domain: "Compliance & Direct UPI",
     status: "COMPLETE",
-    task: "5% GST invoices (CGST/SGST/IGST), GSTIN & FSSAI stamps, gapless FY sequential invoice numbers, Tally/Zoho CSV exports, and Razorpay Direct Web UPI/auto-refunds.",
+    task: "5% GST invoices (CGST/SGST/IGST), GSTIN/FSSAI stamps, FY sequencing, Tally/Zoho CSVs, Razorpay webhooks & auto-refunds.",
   },
   {
     id: "SPRINT-3B",
-    name: "Sprint 3B · Aggregators & WhatsApp",
+    name: "Aggregators & WhatsApp",
     domain: "UrbanPiper + QStash + Interakt",
     status: "COMPLETE",
-    task: "Signed Swiggy/Zomato webhooks via UrbanPiper, transactional outbox + Upstash QStash retries, SKU mapping UI, and cooldown-deduplicated WhatsApp low-stock alerts & IST Daily INR Digests.",
+    task: "Signed Swiggy/Zomato webhooks, transactional outbox retries, SKU mapping console, WhatsApp stock alerts & IST Daily INR Digests.",
   },
   {
     id: "SPRINT-4",
-    name: "Sprint 4 · Hardware Bridges & AI Copilot",
-    domain: "80mm ESC/POS + USB Scale + Gemini",
+    name: "Hardware Bridges & AI Copilot",
+    domain: "80mm ESC/POS + Scale + Gemini",
     status: "COMPLETE",
-    task: "80mm thermal KOT formatter & LAN ESC/POS print bridge, zero-dependency Web Audio SLA chimes, USB HID barcode/scale receiving station, and live telemetry-grounded Gemini /api/ai/diagnose copilot.",
+    task: "80mm thermal KOT print bridge, Web Audio SLA chimes, USB HID barcode/scale station, live telemetry Gemini /api/ai/diagnose.",
+  },
+  {
+    id: "SPRINT-5",
+    name: "Native Operational UI",
+    domain: "Linear / Square KDS System",
+    status: "COMPLETE",
+    task: "52px icon rail, 44px unified top bar, ⌘K Command Palette, SplitInspector drawers, tonal hairline surfaces, tabular-nums.",
   },
 ];
 
@@ -93,7 +95,6 @@ export default function AnalyticsPage() {
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
 
-  // Interactive Yield Calculator state (metric kg)
   const [asPurchasedWeight, setAsPurchasedWeight] = useState<number>(20);
   const [usableEdibleWeight, setUsableEdibleWeight] = useState<number>(16.8);
 
@@ -105,9 +106,7 @@ export default function AnalyticsPage() {
 
   const loadData = useCallback(async () => {
     try {
-      const res = await fetch("/api/system", {
-        cache: "no-store",
-      });
+      const res = await fetch("/api/system", { cache: "no-store" });
       const data = await res.json();
       if (!res.ok) {
         setError(data.error || "Unable to load analytics.");
@@ -148,7 +147,6 @@ export default function AnalyticsPage() {
     );
     const aov = validOrders.length > 0 ? totalSales / validOrders.length : 0;
 
-    // Prep durations
     const prepMins = orders
       .map((o) =>
         o.prepStartedAt && o.prepCompletedAt
@@ -163,12 +161,10 @@ export default function AnalyticsPage() {
         ? prepMins.reduce((a, b) => a + b, 0) / prepMins.length
         : 0;
 
-    // Dispatch dwell time (readyAt -> pickedUpAt)
     const dwellMins = orders
       .map((o) =>
         o.readyAt && o.pickedUpAt
-          ? (new Date(o.pickedUpAt).getTime() -
-              new Date(o.readyAt).getTime()) /
+          ? (new Date(o.pickedUpAt).getTime() - new Date(o.readyAt).getTime()) /
             60000
           : null,
       )
@@ -178,7 +174,6 @@ export default function AnalyticsPage() {
         ? dwellMins.reduce((a, b) => a + b, 0) / dwellMins.length
         : 0;
 
-    // Total lifecycle (receivedAt -> dispatchedAt)
     const lifeMins = orders
       .map((o) =>
         o.receivedAt && o.dispatchedAt
@@ -203,14 +198,8 @@ export default function AnalyticsPage() {
       (c) => c.stage === "AFTER_PICKUP",
     );
 
-    const prePrepLoss = prePrepCancels.reduce(
-      (s, c) => s + c.financialLoss,
-      0,
-    );
-    const midPrepLoss = midPrepCancels.reduce(
-      (s, c) => s + c.financialLoss,
-      0,
-    );
+    const prePrepLoss = prePrepCancels.reduce((s, c) => s + c.financialLoss, 0);
+    const midPrepLoss = midPrepCancels.reduce((s, c) => s + c.financialLoss, 0);
     const postPickupLoss = postPickupCancels.reduce(
       (s, c) => s + c.financialLoss,
       0,
@@ -239,22 +228,11 @@ export default function AnalyticsPage() {
   }, [orders, cancellations]);
 
   const leakageSummary = useMemo(() => {
-    const potential = leakageVectors.reduce(
-      (s, v) => s + v.potentialRevenue,
-      0,
-    );
-    const collected = leakageVectors.reduce(
-      (s, v) => s + v.actualCollected,
-      0,
-    );
+    const potential = leakageVectors.reduce((s, v) => s + v.potentialRevenue, 0);
+    const collected = leakageVectors.reduce((s, v) => s + v.actualCollected, 0);
     const leaked = potential - collected;
     const pct = potential > 0 ? (leaked / potential) * 100 : 0;
-    return {
-      potential,
-      collected,
-      leaked,
-      pct,
-    };
+    return { potential, collected, leaked, pct };
   }, [leakageVectors]);
 
   const calculatedYieldPct =
@@ -271,14 +249,8 @@ export default function AnalyticsPage() {
     try {
       const res = await fetch("/api/system", {
         method: "PATCH",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          action: "UPDATE_LEAKAGE_VECTOR",
-          id,
-          status,
-        }),
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "UPDATE_LEAKAGE_VECTOR", id, status }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -286,7 +258,7 @@ export default function AnalyticsPage() {
         return;
       }
       setLeakageVectors(data.leakageVectors);
-      setNotice(`Revenue leakage item ${id} marked as ${status}.`);
+      setNotice(`Leakage vector ${id} marked as ${status}.`);
     } catch {
       setError("Network error while updating leakage vector.");
     }
@@ -295,162 +267,131 @@ export default function AnalyticsPage() {
   return (
     <AppShell
       title="Analytics & Margin"
-      subtitle="Review INR sales volume, kitchen prep SLAs, ingredient yield variance, and aggregator payout leakage."
-      actions={
-        <div className="flex flex-wrap rounded-xl border border-slate-800 bg-slate-900 p-1">
-          <button
-            type="button"
-            onClick={() => setActiveTab("BI_YIELD")}
-            className={`rounded-lg px-3 py-1.5 font-mono text-xs font-bold transition ${
-              activeTab === "BI_YIELD"
-                ? "bg-sky-500 text-slate-950"
-                : "text-slate-400 hover:text-white"
-            }`}
-          >
-            1. Kitchen BI &amp; Food Yield
-          </button>
-          <button
-            type="button"
-            onClick={() => setActiveTab("LEAKAGE")}
-            className={`rounded-lg px-3 py-1.5 font-mono text-xs font-bold transition ${
-              activeTab === "LEAKAGE"
-                ? "bg-purple-500 text-slate-950"
-                : "text-slate-400 hover:text-white"
-            }`}
-          >
-            2. Revenue Leakage Audit
-          </button>
-          <button
-            type="button"
-            onClick={() => setActiveTab("ROADMAP_PERF")}
-            className={`rounded-lg px-3 py-1.5 font-mono text-xs font-bold transition ${
-              activeTab === "ROADMAP_PERF"
-                ? "bg-emerald-500 text-slate-950"
-                : "text-slate-400 hover:text-white"
-            }`}
-          >
-            3. Scale &amp; Rollout Readiness
-          </button>
+      subtitle="Throughput SLAs, yield variance & aggregator payout leakage"
+      rightActions={
+        <div
+          role="tablist"
+          className="flex items-center rounded-md border border-white/[0.06] bg-[#151519] p-0.5"
+        >
+          {(
+            [
+              { id: "BI_YIELD", label: "BI & Yield" },
+              { id: "LEAKAGE", label: "Leakage Audit" },
+              { id: "ROADMAP_PERF", label: "Rollout" },
+            ] as const
+          ).map((tab) => (
+            <button
+              key={tab.id}
+              type="button"
+              role="tab"
+              aria-selected={activeTab === tab.id}
+              onClick={() => setActiveTab(tab.id)}
+              className={`rounded-[5px] px-2.5 py-1 text-[11px] font-medium transition-colors ${
+                activeTab === tab.id
+                  ? "bg-[#27272e] text-zinc-100"
+                  : "text-zinc-400 hover:text-zinc-200"
+              }`}
+            >
+              {tab.label}
+            </button>
+          ))}
         </div>
       }
     >
-      <div className="space-y-6">
+      <div className="space-y-5">
         {error && (
-          <div className="rounded-xl border border-red-500/40 bg-red-500/10 px-4 py-3 font-mono text-xs text-red-300">
-            ⚠ {error}
+          <div className="rounded-lg border border-rose-500/35 bg-rose-500/10 px-3.5 py-2.5 text-xs text-rose-200">
+            {error}
           </div>
         )}
-
         {notice && (
-          <div className="rounded-xl border border-emerald-500/40 bg-emerald-500/10 px-4 py-3 font-mono text-xs text-emerald-300">
-            ✓ {notice}
+          <div className="rounded-lg border border-emerald-500/35 bg-emerald-500/10 px-3.5 py-2.5 text-xs text-emerald-200">
+            {notice}
           </div>
         )}
 
         {activeTab === "BI_YIELD" && (
-          <div className="space-y-6">
-            {/* Operational Duration & Financial KPIs */}
-            <section className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
-              <div className="rounded-2xl border border-emerald-500/30 bg-emerald-500/5 p-4">
-                <p className="font-mono text-[10px] font-bold uppercase text-emerald-300">
-                  Net Sales Volume
+          <div className="space-y-5">
+            {/* Hairline Metric Strip */}
+            <section className="grid grid-cols-2 divide-y divide-white/[0.06] overflow-hidden rounded-lg border border-white/[0.06] bg-[#151519] sm:grid-cols-3 lg:grid-cols-6 sm:divide-x sm:divide-y-0">
+              <div className="px-4 py-3">
+                <p className="text-[11px] font-medium text-zinc-400">
+                  Net Sales
                 </p>
-                <p className="mt-1.5 text-2xl font-black text-white">
+                <p className="mt-1 font-mono text-lg font-semibold text-emerald-300 tabular-nums">
                   {fmt(biMetrics.totalSales)}
                 </p>
-                <p className="font-mono text-[10px] text-slate-400">
+                <p className="text-[11px] text-zinc-500 tabular-nums">
                   AOV {fmt(biMetrics.aov)}
                 </p>
               </div>
-
-              <div className="rounded-2xl border border-sky-500/30 bg-sky-500/5 p-4">
-                <p className="font-mono text-[10px] font-bold uppercase text-sky-300">
-                  Avg Prep Duration
+              <div className="px-4 py-3">
+                <p className="text-[11px] font-medium text-zinc-400">
+                  Avg Prep
                 </p>
-                <p className="mt-1.5 text-2xl font-black text-white">
+                <p className="mt-1 font-mono text-lg font-semibold text-zinc-100 tabular-nums">
                   {biMetrics.avgPrep.toFixed(1)}m
                 </p>
-                <p className="font-mono text-[10px] text-slate-400">
-                  PREPARING → READY
-                </p>
+                <p className="text-[11px] text-zinc-500">PREP → READY</p>
               </div>
-
-              <div className="rounded-2xl border border-purple-500/30 bg-purple-500/5 p-4">
-                <p className="font-mono text-[10px] font-bold uppercase text-purple-300">
-                  Rider Wait Time
+              <div className="px-4 py-3">
+                <p className="text-[11px] font-medium text-zinc-400">
+                  Rider Dwell
                 </p>
-                <p className="mt-1.5 text-2xl font-black text-white">
+                <p className="mt-1 font-mono text-lg font-semibold text-zinc-100 tabular-nums">
                   {biMetrics.avgDwell.toFixed(1)}m
                 </p>
-                <p className="font-mono text-[10px] text-slate-400">
-                  READY → PICKED_UP
-                </p>
+                <p className="text-[11px] text-zinc-500">READY → PICKUP</p>
               </div>
-
-              <div className="rounded-2xl border border-teal-500/30 bg-teal-500/5 p-4">
-                <p className="font-mono text-[10px] font-bold uppercase text-teal-300">
-                  Total Lifecycle
+              <div className="px-4 py-3">
+                <p className="text-[11px] font-medium text-zinc-400">
+                  Total Cycle
                 </p>
-                <p className="mt-1.5 text-2xl font-black text-white">
+                <p className="mt-1 font-mono text-lg font-semibold text-zinc-100 tabular-nums">
                   {biMetrics.avgLifecycle.toFixed(1)}m
                 </p>
-                <p className="font-mono text-[10px] text-slate-400">
-                  RECEIVED → DISPATCHED
-                </p>
+                <p className="text-[11px] text-zinc-500">IN → DISPATCH</p>
               </div>
-
-              <div className="rounded-2xl border border-red-500/30 bg-red-500/5 p-4">
-                <p className="font-mono text-[10px] font-bold uppercase text-red-300">
-                  Cancellation Loss
+              <div className="px-4 py-3">
+                <p className="text-[11px] font-medium text-zinc-400">
+                  Cancel Loss
                 </p>
-                <p className="mt-1.5 text-2xl font-black text-white">
+                <p className="mt-1 font-mono text-lg font-semibold text-rose-300 tabular-nums">
                   {fmt(biMetrics.totalFoodLaborLoss)}
                 </p>
-                <p className="font-mono text-[10px] text-slate-400">
-                  Mid-prep: {fmt(biMetrics.midPrepLoss)}
+                <p className="text-[11px] text-zinc-500 tabular-nums">
+                  Mid {fmt(biMetrics.midPrepLoss)}
                 </p>
               </div>
-
-              <div className="rounded-2xl border border-amber-500/30 bg-amber-500/5 p-4">
-                <p className="font-mono text-[10px] font-bold uppercase text-amber-300">
-                  Aggregator Claims
-                </p>
-                <p className="mt-1.5 text-2xl font-black text-white">
+              <div className="px-4 py-3">
+                <p className="text-[11px] font-medium text-zinc-400">Claims</p>
+                <p className="mt-1 font-mono text-lg font-semibold text-amber-300 tabular-nums">
                   {fmt(biMetrics.totalAggregatorClaims)}
                 </p>
-                <p className="font-mono text-[10px] text-slate-400">
-                  Post-pickup claims
-                </p>
+                <p className="text-[11px] text-zinc-500">Post-pickup</p>
               </div>
             </section>
 
-            {/* Food Yield Optimization & Cost Variance Engine */}
-            <div className="grid gap-6 lg:grid-cols-[1.25fr_0.75fr]">
-              <section className="rounded-2xl border border-slate-800 bg-slate-900/70 p-6">
-                <span className="font-mono text-xs font-bold uppercase tracking-wider text-purple-400">
-                  Kitchen Margin • Physical Goods Variance
-                </span>
-                <h2 className="mt-1 text-lg font-black text-white">
-                  Raw Material Yield &amp; Theoretical vs. Actual COGS Matrix
-                </h2>
-                <p className="text-xs text-slate-400">
-                  Compares physical inventory depletion against standardized
-                  recipe yields to surface trim waste, spoilage, and
-                  over-portioning.
-                </p>
-
-                <div className="mt-4 overflow-x-auto">
+            <div className="grid gap-5 lg:grid-cols-[1.3fr_0.7fr]">
+              {/* Raw Material Yield Table */}
+              <section className="overflow-hidden rounded-lg border border-white/[0.06] bg-[#151519]/60">
+                <div className="border-b border-white/[0.06] px-4 py-2.5">
+                  <h2 className="text-xs font-semibold text-zinc-200">
+                    Raw Material Yield &amp; Theoretical vs. Actual COGS
+                  </h2>
+                </div>
+                <div className="overflow-x-auto">
                   <table className="w-full text-left text-xs">
-                    <thead className="border-b border-slate-800 bg-slate-950 font-mono text-[10px] uppercase text-slate-400">
-                      <tr>
-                        <th className="px-3 py-2.5">SKU / Ingredient</th>
-                        <th className="px-3 py-2.5">Target Yield %</th>
-                        <th className="px-3 py-2.5">Actual Yield %</th>
-                        <th className="px-3 py-2.5">Variance</th>
-                        <th className="px-3 py-2.5">Diagnostic Status</th>
+                    <thead>
+                      <tr className="border-b border-white/[0.06] bg-[#09090b]/40 text-[11px] font-medium text-zinc-500">
+                        <th className="px-4 py-2">Ingredient</th>
+                        <th className="px-4 py-2 text-right">Target %</th>
+                        <th className="px-4 py-2 text-right">Actual %</th>
+                        <th className="px-4 py-2 text-right">Variance</th>
+                        <th className="px-4 py-2">Status</th>
                       </tr>
                     </thead>
-                    <tbody className="divide-y divide-slate-800">
+                    <tbody className="divide-y divide-white/[0.06]">
                       {Array.from(
                         new Map(inventory.map((i) => [i.id, i])).values(),
                       ).map((item) => {
@@ -459,39 +400,40 @@ export default function AnalyticsPage() {
                         const diff = act - exp;
                         const alert = diff <= -4;
                         return (
-                          <tr key={`${item.kitchenId ?? "K1"}-${item.id}`}>
-                            <td className="px-3 py-2.5 font-semibold text-white">
+                          <tr
+                            key={`${item.kitchenId ?? "K1"}-${item.id}`}
+                            className="hover:bg-[#1d1d22]/40"
+                          >
+                            <td className="px-4 py-2.5 font-medium text-zinc-100">
                               {item.name}{" "}
-                              <span className="font-mono text-[10px] text-slate-400">
-                                ({item.sku})
+                              <span className="font-mono text-[10px] text-zinc-500">
+                                {item.sku}
                               </span>
                             </td>
-                            <td className="px-3 py-2.5 font-mono text-slate-300">
+                            <td className="px-4 py-2.5 text-right font-mono text-zinc-400 tabular-nums">
                               {exp.toFixed(1)}%
                             </td>
-                            <td className="px-3 py-2.5 font-mono font-bold text-white">
+                            <td className="px-4 py-2.5 text-right font-mono font-medium text-zinc-100 tabular-nums">
                               {act.toFixed(1)}%
                             </td>
                             <td
-                              className={`px-3 py-2.5 font-mono font-bold ${
-                                alert ? "text-red-400" : "text-amber-300"
+                              className={`px-4 py-2.5 text-right font-mono font-semibold tabular-nums ${
+                                alert ? "text-rose-400" : "text-amber-300"
                               }`}
                             >
                               {diff > 0
                                 ? `+${diff.toFixed(1)}%`
                                 : `${diff.toFixed(1)}%`}
                             </td>
-                            <td className="px-3 py-2.5">
+                            <td className="px-4 py-2.5">
                               <span
-                                className={`rounded-full px-2 py-0.5 font-mono text-[10px] font-bold ${
+                                className={`rounded-md border px-2 py-0.5 font-mono text-[10px] font-medium ${
                                   alert
-                                    ? "bg-red-500/20 text-red-300"
-                                    : "bg-emerald-500/20 text-emerald-300"
+                                    ? "border-rose-500/35 bg-rose-500/10 text-rose-300"
+                                    : "border-emerald-500/30 bg-emerald-500/10 text-emerald-300"
                                 }`}
                               >
-                                {alert
-                                  ? "OVER-PORTION / WASTE ALERT"
-                                  : "WITHIN TOLERANCE"}
+                                {alert ? "WASTE ALERT" : "OK"}
                               </span>
                             </td>
                           </tr>
@@ -502,20 +444,16 @@ export default function AnalyticsPage() {
                 </div>
               </section>
 
-              {/* Interactive Yield Formula Calculator & Stage-Accurate Cancellation Matrix */}
-              <div className="space-y-6">
-                <section className="rounded-2xl border border-purple-500/30 bg-slate-900/80 p-5">
-                  <h3 className="font-mono text-xs font-bold uppercase tracking-wider text-purple-300">
-                    Interactive Food Yield Calculator (Metric)
+              {/* Right Column: Yield Calculator & Stage Cancellation Breakdown */}
+              <div className="space-y-5">
+                <section className="rounded-lg border border-white/[0.06] bg-[#151519]/60 p-4">
+                  <h3 className="text-xs font-semibold text-zinc-200">
+                    Metric Food Yield Calculator
                   </h3>
-                  <code className="mt-2 block rounded-xl bg-slate-950 p-3 font-mono text-[11px] text-purple-200">
-                    Yield % = (Usable Edible Weight ÷ As Purchased Weight) × 100
-                  </code>
-
-                  <div className="mt-4 grid grid-cols-2 gap-3 text-xs">
+                  <div className="mt-3 grid grid-cols-2 gap-2.5 text-xs">
                     <label className="block">
-                      <span className="font-mono text-[10px] uppercase text-slate-400">
-                        Purchased Weight (kg)
+                      <span className="text-[11px] text-zinc-400">
+                        Purchased (kg)
                       </span>
                       <input
                         type="number"
@@ -527,12 +465,12 @@ export default function AnalyticsPage() {
                             Math.max(0.1, Number(e.target.value) || 0.1),
                           )
                         }
-                        className="mt-1 w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 font-mono text-white"
+                        className="mt-1 h-8 w-full rounded-md border border-white/[0.08] bg-[#0e0e11] px-2.5 font-mono text-zinc-100 tabular-nums"
                       />
                     </label>
                     <label className="block">
-                      <span className="font-mono text-[10px] uppercase text-slate-400">
-                        Usable Edible Weight (kg)
+                      <span className="text-[11px] text-zinc-400">
+                        Usable Edible (kg)
                       </span>
                       <input
                         type="number"
@@ -544,69 +482,61 @@ export default function AnalyticsPage() {
                             Math.max(0, Number(e.target.value) || 0),
                           )
                         }
-                        className="mt-1 w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 font-mono text-white"
+                        className="mt-1 h-8 w-full rounded-md border border-white/[0.08] bg-[#0e0e11] px-2.5 font-mono text-zinc-100 tabular-nums"
                       />
                     </label>
                   </div>
-
-                  <div className="mt-4 flex items-center justify-between rounded-xl border border-slate-800 bg-slate-950 p-3.5">
-                    <span className="text-xs text-slate-400">
-                      Calculated Physical Yield:
-                    </span>
-                    <span className="font-mono text-xl font-black text-emerald-400">
+                  <div className="mt-3 flex items-center justify-between rounded-md border border-white/[0.06] bg-[#0e0e11] px-3 py-2">
+                    <span className="text-xs text-zinc-400">Physical Yield</span>
+                    <span className="font-mono text-base font-semibold text-emerald-300 tabular-nums">
                       {calculatedYieldPct.toFixed(1)}%
                     </span>
                   </div>
                 </section>
 
-                <section className="rounded-2xl border border-slate-800 bg-slate-900/80 p-5">
-                  <h3 className="font-mono text-xs font-bold uppercase tracking-wider text-red-400">
-                    Stage-Accurate Cancellation Impact Matrix
-                  </h3>
-                  <div className="mt-3 space-y-2.5 text-xs">
-                    <div className="flex items-center justify-between rounded-xl bg-slate-950 p-3">
+                <section className="overflow-hidden rounded-lg border border-white/[0.06] bg-[#151519]/60">
+                  <div className="border-b border-white/[0.06] px-4 py-2.5">
+                    <h3 className="text-xs font-semibold text-zinc-200">
+                      Cancellation Stage Impact
+                    </h3>
+                  </div>
+                  <div className="divide-y divide-white/[0.06] text-xs">
+                    <div className="flex items-center justify-between px-4 py-2.5">
                       <div>
-                        <p className="font-bold text-white">
-                          1. Pre-Preparation (PENDING)
+                        <p className="font-medium text-zinc-100">
+                          Before Prep (PENDING)
                         </p>
-                        <p className="text-[11px] text-slate-400">
-                          No stock deducted (or restored if reserved)
+                        <p className="text-[11px] text-zinc-500">
+                          Stock restored + GST credit note
                         </p>
                       </div>
-                      <span className="font-mono text-sm font-black text-amber-300">
-                        {biMetrics.prePrepCancels} case(s) (
-                        {fmt(biMetrics.prePrepLoss)})
+                      <span className="font-mono text-amber-300 tabular-nums">
+                        {biMetrics.prePrepCancels} ({fmt(biMetrics.prePrepLoss)})
                       </span>
                     </div>
-
-                    <div className="flex items-center justify-between rounded-xl bg-slate-950 p-3">
+                    <div className="flex items-center justify-between px-4 py-2.5">
                       <div>
-                        <p className="font-bold text-white">
-                          2. Mid-Production (PREPARING / READY)
+                        <p className="font-medium text-zinc-100">
+                          Mid-Production
                         </p>
-                        <p className="text-[11px] text-slate-400">
-                          Irreversible COGS + station labor allowance
+                        <p className="text-[11px] text-zinc-500">
+                          Irreversible COGS + prep labor
                         </p>
                       </div>
-                      <span className="font-mono text-sm font-black text-red-400">
-                        {biMetrics.midPrepCancels} case(s) (
-                        {fmt(biMetrics.midPrepLoss)})
+                      <span className="font-mono text-rose-300 tabular-nums">
+                        {biMetrics.midPrepCancels} ({fmt(biMetrics.midPrepLoss)})
                       </span>
                     </div>
-
-                    <div className="flex items-center justify-between rounded-xl bg-slate-950 p-3">
+                    <div className="flex items-center justify-between px-4 py-2.5">
                       <div>
-                        <p className="font-bold text-white">
-                          3. Post-Pickup (PICKED_UP / DISPATCHED)
-                        </p>
-                        <p className="text-[11px] text-slate-400">
-                          COGS loss {fmt(biMetrics.postPickupLoss)} · Tagged for
-                          aggregator claim
+                        <p className="font-medium text-zinc-100">Post-Pickup</p>
+                        <p className="text-[11px] text-zinc-500">
+                          Aggregator payout dispute claim
                         </p>
                       </div>
-                      <span className="font-mono text-sm font-black text-purple-300">
-                        {biMetrics.postPickupCancels} case(s) (
-                        {fmt(biMetrics.totalAggregatorClaims)} claim)
+                      <span className="font-mono text-violet-300 tabular-nums">
+                        {biMetrics.postPickupCancels} (
+                        {fmt(biMetrics.totalAggregatorClaims)})
                       </span>
                     </div>
                   </div>
@@ -617,91 +547,92 @@ export default function AnalyticsPage() {
         )}
 
         {activeTab === "LEAKAGE" && (
-          <div className="space-y-6">
-            {/* Revenue Leakage Diagnostic Banner */}
-            <section className="rounded-2xl border border-purple-500/40 bg-purple-500/5 p-6">
-              <div className="flex flex-wrap items-center justify-between gap-4">
-                <div>
-                  <span className="font-mono text-xs font-bold uppercase tracking-wider text-purple-400">
-                    Cloud Kitchen Revenue Recovery • Swiggy, Zomato &amp; Direct
-                  </span>
-                  <h2 className="mt-1 text-2xl font-black text-white">
-                    Estimated Revenue Leakage:{" "}
-                    <span className="text-purple-300">
-                      {leakageSummary.pct.toFixed(2)}%
-                    </span>{" "}
-                    ({fmt(leakageSummary.leaked)} Uncollected)
-                  </h2>
-                  <code className="mt-2 inline-block rounded-lg bg-slate-950 px-3 py-1.5 font-mono text-xs text-purple-200">
-                    Revenue Leakage (%) = (Potential{" "}
-                    {fmt(leakageSummary.potential)} − Collected{" "}
-                    {fmt(leakageSummary.collected)}) ÷ Potential × 100
-                  </code>
-                </div>
+          <div className="space-y-5">
+            <section className="grid grid-cols-2 divide-y divide-white/[0.06] overflow-hidden rounded-lg border border-white/[0.06] bg-[#151519] sm:grid-cols-4 sm:divide-x sm:divide-y-0">
+              <div className="px-4 py-3">
+                <p className="text-[11px] text-zinc-400">Potential Revenue</p>
+                <p className="mt-1 font-mono text-lg font-semibold text-zinc-100 tabular-nums">
+                  {fmt(leakageSummary.potential)}
+                </p>
+              </div>
+              <div className="px-4 py-3">
+                <p className="text-[11px] text-zinc-400">Actual Collected</p>
+                <p className="mt-1 font-mono text-lg font-semibold text-emerald-300 tabular-nums">
+                  {fmt(leakageSummary.collected)}
+                </p>
+              </div>
+              <div className="px-4 py-3">
+                <p className="text-[11px] text-zinc-400">Leaked Amount</p>
+                <p className="mt-1 font-mono text-lg font-semibold text-rose-300 tabular-nums">
+                  {fmt(leakageSummary.leaked)}
+                </p>
+              </div>
+              <div className="px-4 py-3">
+                <p className="text-[11px] text-zinc-400">Leakage Rate</p>
+                <p className="mt-1 font-mono text-lg font-semibold text-amber-300 tabular-nums">
+                  {leakageSummary.pct.toFixed(2)}%
+                </p>
               </div>
             </section>
 
-            {/* Indian Cloud Kitchen Leakage Vectors Table */}
-            <section className="rounded-2xl border border-slate-800 bg-slate-900/70 overflow-hidden">
+            <section className="overflow-hidden rounded-lg border border-white/[0.06] bg-[#151519]/60">
               <div className="overflow-x-auto">
                 <table className="w-full text-left text-xs">
-                  <thead className="border-b border-slate-800 bg-slate-950 font-mono text-[10px] uppercase text-slate-400">
-                    <tr>
-                      <th className="px-4 py-3.5">Leakage Vector</th>
-                      <th className="px-4 py-3.5">Operational Signature</th>
-                      <th className="px-4 py-3.5">Financial Impact Level</th>
-                      <th className="px-4 py-3.5">Leaked Amount</th>
-                      <th className="px-4 py-3.5">Status</th>
-                      <th className="px-4 py-3.5 text-right">
-                        Remediation Control
-                      </th>
+                  <thead>
+                    <tr className="border-b border-white/[0.06] bg-[#09090b]/40 text-[11px] font-medium text-zinc-500">
+                      <th className="px-4 py-2">Leakage Vector</th>
+                      <th className="px-4 py-2">Operational Signature</th>
+                      <th className="px-4 py-2">Impact</th>
+                      <th className="px-4 py-2 text-right">Leaked</th>
+                      <th className="px-4 py-2">Status</th>
+                      <th className="px-4 py-2 text-right">Control</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-slate-800">
+                  <tbody className="divide-y divide-white/[0.06]">
                     {leakageVectors.map((vec) => (
-                      <tr key={vec.id}>
-                        <td className="px-4 py-4 font-bold text-white">
+                      <tr key={vec.id} className="hover:bg-[#1d1d22]/40">
+                        <td className="px-4 py-2.5 font-medium text-zinc-100">
                           {vec.vector}
-                          <p className="font-mono text-[10px] text-slate-500">
-                            {vec.affectedAccounts} impacted order(s)
+                          <p className="font-mono text-[10px] text-zinc-500 tabular-nums">
+                            {vec.affectedAccounts} order(s)
                           </p>
                         </td>
-                        <td className="px-4 py-4 text-slate-300 max-w-md">
+                        <td className="max-w-md px-4 py-2.5 text-zinc-400">
                           {vec.signature}
                         </td>
-                        <td className="px-4 py-4 font-mono text-amber-300">
+                        <td className="px-4 py-2.5 font-mono text-[11px] text-amber-300">
                           {vec.impactNote}
                         </td>
-                        <td className="px-4 py-4 font-mono text-sm font-black text-red-400">
+                        <td className="px-4 py-2.5 text-right font-mono font-semibold text-rose-300 tabular-nums">
                           {fmt(vec.leakedAmount)}
                         </td>
-                        <td className="px-4 py-4">
+                        <td className="px-4 py-2.5">
                           <span
-                            className={`rounded-full px-2.5 py-0.5 font-mono text-[10px] font-bold ${
+                            className={`rounded-md border px-2 py-0.5 font-mono text-[10px] font-medium ${
                               vec.status === "RECOVERED"
-                                ? "bg-emerald-500/20 text-emerald-300"
+                                ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-300"
                                 : vec.status === "AUDITING"
-                                  ? "bg-amber-500/20 text-amber-300"
-                                  : "bg-red-500/20 text-red-300"
+                                  ? "border-amber-500/35 bg-amber-500/10 text-amber-300"
+                                  : "border-rose-500/35 bg-rose-500/10 text-rose-300"
                             }`}
                           >
                             {vec.status}
                           </span>
                         </td>
-                        <td className="px-4 py-4 text-right">
+                        <td className="px-4 py-2.5 text-right">
                           {vec.status !== "RECOVERED" ? (
                             <button
                               type="button"
                               onClick={() =>
                                 void handleLeakageAction(vec.id, "RECOVERED")
                               }
-                              className="rounded-lg bg-emerald-500 px-3 py-1.5 font-mono text-[10px] font-bold text-slate-950 hover:bg-emerald-400"
+                              className="h-7 rounded-md bg-emerald-500 px-2.5 text-[11px] font-semibold text-zinc-950 hover:bg-emerald-400"
                             >
-                              Mark Reconciled
+                              Reconcile
                             </button>
                           ) : (
-                            <span className="font-mono text-[10px] text-emerald-400">
-                              ✓ Reconciled
+                            <span className="font-mono text-[11px] text-emerald-400">
+                              Reconciled
                             </span>
                           )}
                         </td>
@@ -715,78 +646,54 @@ export default function AnalyticsPage() {
         )}
 
         {activeTab === "ROADMAP_PERF" && (
-          <div className="space-y-6">
-            {/* Production Rollout Plan */}
-            <section className="rounded-2xl border border-slate-800 bg-slate-900/70 p-6">
-              <div className="mb-4 flex items-center justify-between flex-wrap gap-2">
-                <div>
-                  <span className="font-mono text-xs font-bold uppercase text-emerald-400">
-                    Locked Production Stack · India Cloud Kitchens
-                  </span>
-                  <h2 className="mt-1 text-lg font-black text-white">
-                    Sprints 1–4 Rollout Blueprint
-                  </h2>
-                </div>
-                <span className="rounded-full bg-sky-500/20 px-3 py-1 font-mono text-xs font-bold text-sky-300">
-                  Sprint 0 Showcase Verified
-                </span>
+          <div className="space-y-5">
+            <section className="overflow-hidden rounded-lg border border-white/[0.06] bg-[#151519]/60">
+              <div className="border-b border-white/[0.06] px-4 py-2.5">
+                <h2 className="text-xs font-semibold text-zinc-200">
+                  Production Rollout Blueprint (Sprints 1–5 Complete)
+                </h2>
               </div>
-
-              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+              <div className="grid divide-y divide-white/[0.06] sm:grid-cols-2 sm:divide-x lg:grid-cols-3">
                 {PRODUCTION_MILESTONES.map((ms) => (
-                  <div
-                    key={ms.id}
-                    className="rounded-xl border border-slate-800 bg-slate-950 p-4"
-                  >
+                  <div key={ms.id} className="p-4 text-xs">
                     <div className="flex items-center justify-between font-mono text-[10px]">
-                      <span className="text-sky-400 font-bold">{ms.id}</span>
-                      <span
-                        className={
-                          ms.status === "NEXT"
-                            ? "text-emerald-400 font-bold"
-                            : "text-slate-400"
-                        }
-                      >
-                        ● {ms.status}
+                      <span className="font-semibold text-zinc-300">
+                        {ms.id}
+                      </span>
+                      <span className="rounded bg-emerald-500/15 px-1.5 py-0.5 font-semibold text-emerald-300">
+                        {ms.status}
                       </span>
                     </div>
-                    <p className="mt-1.5 text-xs font-bold text-white">
+                    <p className="mt-1.5 font-semibold text-zinc-100">
                       {ms.name}
                     </p>
-                    <p className="text-[11px] text-amber-300 mt-0.5">
-                      {ms.domain}
-                    </p>
-                    <p className="mt-2 text-xs text-slate-400">{ms.task}</p>
+                    <p className="text-[11px] text-zinc-500">{ms.domain}</p>
+                    <p className="mt-2 text-zinc-400">{ms.task}</p>
                   </div>
                 ))}
               </div>
             </section>
 
-            {/* Real Scaling Hotspots */}
-            <section className="rounded-2xl border border-slate-800 bg-slate-900/70 p-6">
-              <h2 className="text-lg font-black text-white mb-4">
-                Verified Scaling Gaps &amp; Engineering Fixes
-              </h2>
-              <div className="grid gap-4 lg:grid-cols-3">
+            <section className="overflow-hidden rounded-lg border border-white/[0.06] bg-[#151519]/60">
+              <div className="border-b border-white/[0.06] px-4 py-2.5">
+                <h2 className="text-xs font-semibold text-zinc-200">
+                  Scaling Architecture Notes
+                </h2>
+              </div>
+              <div className="divide-y divide-white/[0.06]">
                 {PERFORMANCE_HOTSPOTS.map((issue) => (
-                  <div
-                    key={issue.title}
-                    className="rounded-xl border border-slate-800 bg-slate-950 p-4"
-                  >
+                  <div key={issue.title} className="p-4 text-xs">
                     <div className="flex items-center justify-between gap-2">
-                      <h3 className="font-bold text-sm text-white">
+                      <h3 className="font-semibold text-zinc-100">
                         {issue.title}
                       </h3>
-                      <span className="rounded bg-amber-500/20 px-2 py-0.5 font-mono text-[10px] font-bold text-amber-300 shrink-0">
+                      <span className="shrink-0 rounded bg-[#1d1d22] px-2 py-0.5 font-mono text-[10px] text-zinc-300">
                         {issue.severity}
                       </span>
                     </div>
-                    <p className="mt-2 text-xs text-slate-300">
-                      {issue.detail}
-                    </p>
-                    <p className="mt-2 text-xs text-slate-400">
-                      <strong className="text-sky-300">Target Fix:</strong>{" "}
-                      {issue.fix}
+                    <p className="mt-1 text-zinc-400">{issue.detail}</p>
+                    <p className="mt-1 font-mono text-[11px] text-zinc-500">
+                      Target: {issue.fix}
                     </p>
                   </div>
                 ))}

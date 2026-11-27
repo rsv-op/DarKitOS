@@ -13,35 +13,27 @@ interface LoginFormProps {
 const DEMO_ACCOUNTS = [
   {
     code: "OWNER-01",
-    label: "Owner — Patric Revuelto",
+    label: "Patric Revuelto",
     role: "OWNER",
-    scope: "Global (ORG-001 • K1–K4)",
-    accent:
-      "border-amber-500/40 bg-amber-500/10 text-amber-300 hover:bg-amber-500/20",
+    scope: "Global · ORG-001 (K1–K4)",
   },
   {
     code: "0001",
-    label: "Manager — Priya Sharma",
+    label: "Priya Sharma",
     role: "MANAGER",
-    scope: "K1 Gurugram Central Hub",
-    accent:
-      "border-emerald-500/40 bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/20",
+    scope: "K1 Gurugram Hub",
   },
   {
     code: "2001",
-    label: "Line Cook — Rajesh Kumar",
+    label: "Rajesh Kumar",
     role: "LINE_COOK",
-    scope: "K1 KDS Station",
-    accent:
-      "border-sky-500/40 bg-sky-500/10 text-sky-300 hover:bg-sky-500/20",
+    scope: "K1 Cook KDS",
   },
   {
     code: "3001",
-    label: "Dispatch — Arjun Mehta",
+    label: "Arjun Mehta",
     role: "DISPATCH",
-    scope: "K1 Courier Staging",
-    accent:
-      "border-purple-500/40 bg-purple-500/10 text-purple-300 hover:bg-purple-500/20",
+    scope: "K1 Courier Pass",
   },
 ];
 
@@ -85,7 +77,9 @@ export default function LoginForm({
   const [submitting, setSubmitting] = useState(false);
   const [notice, setNotice] = useState("");
   const [error, setError] = useState(
-    initialErrorCode ? ERROR_MESSAGES[initialErrorCode] || initialErrorCode : "",
+    initialErrorCode
+      ? ERROR_MESSAGES[initialErrorCode] || initialErrorCode
+      : "",
   );
 
   async function completeLogin(payload: Record<string, unknown>) {
@@ -118,7 +112,7 @@ export default function LoginForm({
       const destination =
         typeof data.redirectTo === "string" && data.redirectTo.startsWith("/")
           ? data.redirectTo
-          : "/dashboard";
+          : "/owner";
 
       router.push(destination);
       router.refresh();
@@ -168,31 +162,29 @@ export default function LoginForm({
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-[#090d14] px-4 py-12 text-slate-100">
-      <div className="w-full max-w-lg rounded-2xl border border-slate-800 bg-[#111622] p-7 shadow-2xl">
+    <div className="flex min-h-screen items-center justify-center bg-[#09090b] px-4 py-12 text-zinc-100">
+      <div className="w-full max-w-md overflow-hidden rounded-lg border border-white/[0.08] bg-[#0e0e11]">
         {/* Header */}
-        <div className="mb-6 flex items-center justify-between gap-3">
+        <div className="flex items-center justify-between gap-3 border-b border-white/[0.06] px-5 py-4">
           <div className="flex items-center gap-3">
-            <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-amber-500 text-lg font-black text-slate-950">
+            <div className="flex h-8 w-8 items-center justify-center rounded-md border border-white/[0.1] bg-[#151519] text-xs font-bold tracking-tighter text-zinc-100">
               DK
             </div>
             <div>
-              <h1 className="text-xl font-bold tracking-tight text-white">
-                DarKitOS Station Sign-In
+              <h1 className="text-sm font-semibold tracking-tight text-zinc-100">
+                DarKitOS
               </h1>
-              <p className="text-xs text-slate-400">
-                Multi-Tenant Cloud Kitchen RBAC &amp; Realtime KDS
-              </p>
+              <p className="text-[11px] text-zinc-500">Station Sign-In</p>
             </div>
           </div>
 
           <span
-            className={`rounded-full border px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider ${
+            className={`rounded-md border px-2 py-0.5 font-mono text-[10px] font-medium ${
               supabaseConfigured
-                ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-300"
+                ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-300"
                 : demoSandboxEnabled
-                  ? "border-amber-500/40 bg-amber-500/10 text-amber-300"
-                  : "border-red-500/40 bg-red-500/10 text-red-300"
+                  ? "border-amber-500/35 bg-amber-500/10 text-amber-300"
+                  : "border-rose-500/35 bg-rose-500/10 text-rose-300"
             }`}
           >
             {supabaseConfigured
@@ -203,299 +195,289 @@ export default function LoginForm({
           </span>
         </div>
 
-        {/* Strict Production Missing Provider Banner */}
-        {!supabaseConfigured && !demoSandboxEnabled ? (
-          <div className="mb-5 rounded-xl border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-xs text-amber-200">
-            Authentication provider is not configured on this production
-            deployment. Configure{" "}
-            <code className="font-mono text-amber-100">
-              NEXT_PUBLIC_SUPABASE_URL
-            </code>{" "}
-            and{" "}
-            <code className="font-mono text-amber-100">
-              NEXT_PUBLIC_SUPABASE_ANON_KEY
-            </code>{" "}
-            to enable Email/Password and OTP login.
-          </div>
-        ) : null}
+        <div className="p-5">
+          {/* Missing Provider Banner */}
+          {!supabaseConfigured && !demoSandboxEnabled ? (
+            <div className="mb-4 rounded-md border border-amber-500/35 bg-amber-500/10 px-3 py-2.5 text-xs text-amber-200">
+              Configure{" "}
+              <code className="font-mono">NEXT_PUBLIC_SUPABASE_URL</code> and{" "}
+              <code className="font-mono">NEXT_PUBLIC_SUPABASE_ANON_KEY</code>{" "}
+              (or set <code className="font-mono">DEMO_SANDBOX_MODE=true</code>{" "}
+              for preview).
+            </div>
+          ) : null}
 
-        {/* Auth Method Tabs */}
-        <div className="mb-5 grid grid-cols-2 gap-2 rounded-xl border border-slate-800 bg-[#0b0f17] p-1 sm:flex">
-          <button
-            type="button"
-            onClick={() => {
-              setActiveTab("password");
-              setError("");
-              setNotice("");
-            }}
-            className={`flex-1 rounded-lg px-3 py-2 text-xs font-semibold transition ${
-              activeTab === "password"
-                ? "bg-amber-500 text-slate-950"
-                : "text-slate-400 hover:text-white"
-            }`}
-          >
-            Email &amp; Password
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              setActiveTab("otp");
-              setError("");
-              setNotice("");
-            }}
-            className={`flex-1 rounded-lg px-3 py-2 text-xs font-semibold transition ${
-              activeTab === "otp"
-                ? "bg-amber-500 text-slate-950"
-                : "text-slate-400 hover:text-white"
-            }`}
-          >
-            Email / Phone OTP
-          </button>
-          {demoSandboxEnabled ? (
+          {/* Segmented Tabs */}
+          <div className="mb-5 flex rounded-md border border-white/[0.06] bg-[#151519] p-0.5">
             <button
               type="button"
               onClick={() => {
-                setActiveTab("demo");
+                setActiveTab("password");
                 setError("");
                 setNotice("");
               }}
-              className={`col-span-2 flex-1 rounded-lg px-3 py-2 text-xs font-semibold transition sm:col-span-1 ${
-                activeTab === "demo"
-                  ? "bg-emerald-500 text-slate-950"
-                  : "text-slate-400 hover:text-white"
+              className={`flex-1 rounded-[5px] px-2.5 py-1.5 text-xs font-medium transition-colors ${
+                activeTab === "password"
+                  ? "bg-[#27272e] text-zinc-100"
+                  : "text-zinc-400 hover:text-zinc-200"
               }`}
             >
-              Demo Sandbox
+              Staff Sign-In
             </button>
+            <button
+              type="button"
+              onClick={() => {
+                setActiveTab("otp");
+                setError("");
+                setNotice("");
+              }}
+              className={`flex-1 rounded-[5px] px-2.5 py-1.5 text-xs font-medium transition-colors ${
+                activeTab === "otp"
+                  ? "bg-[#27272e] text-zinc-100"
+                  : "text-zinc-400 hover:text-zinc-200"
+              }`}
+            >
+              OTP
+            </button>
+            {demoSandboxEnabled ? (
+              <button
+                type="button"
+                onClick={() => {
+                  setActiveTab("demo");
+                  setError("");
+                  setNotice("");
+                }}
+                className={`flex-1 rounded-[5px] px-2.5 py-1.5 text-xs font-medium transition-colors ${
+                  activeTab === "demo"
+                    ? "bg-[#27272e] text-zinc-100"
+                    : "text-zinc-400 hover:text-zinc-200"
+                }`}
+              >
+                Demo Sandbox
+              </button>
+            ) : null}
+          </div>
+
+          {error ? (
+            <div className="mb-4 rounded-md border border-rose-500/35 bg-rose-500/10 px-3 py-2.5 text-xs text-rose-200">
+              {error}
+            </div>
+          ) : null}
+
+          {notice ? (
+            <div className="mb-4 rounded-md border border-emerald-500/35 bg-emerald-500/10 px-3 py-2.5 text-xs text-emerald-200">
+              {notice}
+            </div>
+          ) : null}
+
+          {/* Tab 1: Staff Sign-In */}
+          {activeTab === "password" ? (
+            <form onSubmit={handlePasswordSubmit} className="space-y-3.5">
+              <div>
+                <label className="mb-1 block text-[11px] font-medium text-zinc-400">
+                  Work Email
+                </label>
+                <input
+                  type="email"
+                  required
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="priya.k1@darkit.in"
+                  className="h-9 w-full rounded-md border border-white/[0.08] bg-[#151519] px-3 text-xs text-zinc-100 placeholder:text-zinc-500 outline-none focus:border-white/[0.22]"
+                />
+              </div>
+
+              <div>
+                <label className="mb-1 block text-[11px] font-medium text-zinc-400">
+                  Password
+                </label>
+                <input
+                  type="password"
+                  required
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="••••••••••••"
+                  className="h-9 w-full rounded-md border border-white/[0.08] bg-[#151519] px-3 text-xs text-zinc-100 placeholder:text-zinc-500 outline-none focus:border-white/[0.22]"
+                />
+              </div>
+
+              <button
+                type="submit"
+                disabled={submitting}
+                className="h-9 w-full rounded-md bg-zinc-100 text-xs font-semibold text-zinc-950 transition-colors hover:bg-white disabled:opacity-50"
+              >
+                {submitting ? "Signing in..." : "Sign In"}
+              </button>
+            </form>
+          ) : null}
+
+          {/* Tab 2: OTP */}
+          {activeTab === "otp" ? (
+            <div className="space-y-3.5">
+              <div className="flex gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setOtpChannel("email");
+                    setOtpRequested(false);
+                  }}
+                  className={`flex-1 rounded-md border py-1.5 text-[11px] font-medium ${
+                    otpChannel === "email"
+                      ? "border-white/[0.2] bg-[#1d1d22] text-zinc-100"
+                      : "border-white/[0.06] bg-[#151519] text-zinc-400"
+                  }`}
+                >
+                  Email OTP
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setOtpChannel("phone");
+                    setOtpRequested(false);
+                  }}
+                  className={`flex-1 rounded-md border py-1.5 text-[11px] font-medium ${
+                    otpChannel === "phone"
+                      ? "border-white/[0.2] bg-[#1d1d22] text-zinc-100"
+                      : "border-white/[0.06] bg-[#151519] text-zinc-400"
+                  }`}
+                >
+                  SMS OTP
+                </button>
+              </div>
+
+              <form
+                onSubmit={otpRequested ? handleOtpVerify : handleOtpRequest}
+                className="space-y-3.5"
+              >
+                {otpChannel === "email" ? (
+                  <div>
+                    <label className="mb-1 block text-[11px] font-medium text-zinc-400">
+                      Staff Email
+                    </label>
+                    <input
+                      type="email"
+                      required
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                      placeholder="rajesh.k1@darkit.in"
+                      className="h-9 w-full rounded-md border border-white/[0.08] bg-[#151519] px-3 text-xs text-zinc-100 placeholder:text-zinc-500 outline-none focus:border-white/[0.22]"
+                    />
+                  </div>
+                ) : (
+                  <div>
+                    <label className="mb-1 block text-[11px] font-medium text-zinc-400">
+                      Phone (E.164)
+                    </label>
+                    <input
+                      type="tel"
+                      required
+                      value={phone}
+                      onChange={(e) => setPhone(e.target.value)}
+                      placeholder="+919810000012"
+                      className="h-9 w-full rounded-md border border-white/[0.08] bg-[#151519] px-3 text-xs text-zinc-100 placeholder:text-zinc-500 outline-none focus:border-white/[0.22]"
+                    />
+                  </div>
+                )}
+
+                {otpRequested ? (
+                  <div>
+                    <label className="mb-1 block text-[11px] font-medium text-zinc-400">
+                      6-Digit Verification Code
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      inputMode="numeric"
+                      value={otpToken}
+                      onChange={(e) => setOtpToken(e.target.value)}
+                      placeholder="123456"
+                      className="h-9 w-full rounded-md border border-white/[0.08] bg-[#151519] px-3 font-mono text-xs tracking-widest text-zinc-100 placeholder:text-zinc-500 outline-none focus:border-white/[0.22]"
+                    />
+                  </div>
+                ) : null}
+
+                <div className="flex gap-2">
+                  <button
+                    type="submit"
+                    disabled={submitting}
+                    className="h-9 flex-1 rounded-md bg-zinc-100 text-xs font-semibold text-zinc-950 transition-colors hover:bg-white disabled:opacity-50"
+                  >
+                    {submitting
+                      ? "Processing..."
+                      : otpRequested
+                        ? "Verify & Sign In"
+                        : "Send One-Time Code"}
+                  </button>
+                  {otpRequested ? (
+                    <button
+                      type="button"
+                      disabled={submitting}
+                      onClick={() => setOtpRequested(false)}
+                      className="h-9 rounded-md border border-white/[0.08] bg-[#151519] px-3 text-xs text-zinc-300 hover:text-white"
+                    >
+                      Resend
+                    </button>
+                  ) : null}
+                </div>
+              </form>
+            </div>
+          ) : null}
+
+          {/* Tab 3: Demo Sandbox */}
+          {activeTab === "demo" && demoSandboxEnabled ? (
+            <div className="space-y-3.5">
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                {DEMO_ACCOUNTS.map((acct) => (
+                  <button
+                    key={acct.code}
+                    type="button"
+                    disabled={submitting}
+                    onClick={() =>
+                      void completeLogin({ employeeCode: acct.code })
+                    }
+                    className="rounded-md border border-white/[0.08] bg-[#151519] p-3 text-left transition-colors hover:border-white/[0.2] hover:bg-[#1d1d22] disabled:opacity-50"
+                  >
+                    <div className="flex items-center justify-between font-mono text-[10px]">
+                      <span className="font-semibold text-zinc-300">
+                        {acct.role}
+                      </span>
+                      <span className="text-zinc-500">{acct.code}</span>
+                    </div>
+                    <p className="mt-1 text-xs font-semibold text-zinc-100">
+                      {acct.label}
+                    </p>
+                    <p className="mt-0.5 text-[11px] text-zinc-500">
+                      {acct.scope}
+                    </p>
+                  </button>
+                ))}
+              </div>
+
+              <form
+                onSubmit={handleDemoSubmit}
+                className="flex gap-2 border-t border-white/[0.06] pt-3.5"
+              >
+                <input
+                  type="text"
+                  value={employeeCode}
+                  onChange={(e) => setEmployeeCode(e.target.value)}
+                  placeholder="Code or shift PIN (e.g. 0002, 2002)"
+                  className="h-8 flex-1 rounded-md border border-white/[0.08] bg-[#151519] px-2.5 text-xs text-zinc-100 placeholder:text-zinc-500 outline-none focus:border-white/[0.22]"
+                />
+                <button
+                  type="submit"
+                  disabled={submitting || !employeeCode.trim()}
+                  className="h-8 rounded-md bg-zinc-100 px-3 text-xs font-semibold text-zinc-950 hover:bg-white disabled:opacity-40"
+                >
+                  Launch
+                </button>
+              </form>
+            </div>
           ) : null}
         </div>
 
-        {/* Alerts */}
-        {error ? (
-          <div className="mb-4 rounded-xl border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-200">
-            {error}
-          </div>
-        ) : null}
-
-        {notice ? (
-          <div className="mb-4 rounded-xl border border-emerald-500/40 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-200">
-            {notice}
-          </div>
-        ) : null}
-
-        {/* Tab 1: Email + Password */}
-        {activeTab === "password" ? (
-          <form onSubmit={handlePasswordSubmit} className="space-y-4">
-            <div>
-              <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-slate-400">
-                Work Email
-              </label>
-              <input
-                type="email"
-                required
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder="priya.k1@darkit.in"
-                className="w-full rounded-xl border border-slate-700 bg-[#0b0f17] px-3.5 py-2.5 text-sm text-white placeholder-slate-500 outline-none focus:border-amber-500"
-              />
-            </div>
-
-            <div>
-              <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-slate-400">
-                Password
-              </label>
-              <input
-                type="password"
-                required
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder="••••••••••••"
-                className="w-full rounded-xl border border-slate-700 bg-[#0b0f17] px-3.5 py-2.5 text-sm text-white placeholder-slate-500 outline-none focus:border-amber-500"
-              />
-            </div>
-
-            <button
-              type="submit"
-              disabled={submitting}
-              className="w-full rounded-xl bg-amber-500 py-2.5 text-sm font-bold text-slate-950 transition hover:bg-amber-400 disabled:opacity-50"
-            >
-              {submitting ? "Signing in..." : "Sign In to Kitchen OS"}
-            </button>
-          </form>
-        ) : null}
-
-        {/* Tab 2: Email / Phone OTP */}
-        {activeTab === "otp" ? (
-          <div className="space-y-4">
-            <div className="flex gap-2">
-              <button
-                type="button"
-                onClick={() => {
-                  setOtpChannel("email");
-                  setOtpRequested(false);
-                }}
-                className={`flex-1 rounded-lg border px-3 py-1.5 text-xs font-semibold ${
-                  otpChannel === "email"
-                    ? "border-amber-500/50 bg-amber-500/15 text-amber-200"
-                    : "border-slate-700 bg-[#0b0f17] text-slate-400"
-                }`}
-              >
-                Email OTP / Magic Link
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setOtpChannel("phone");
-                  setOtpRequested(false);
-                }}
-                className={`flex-1 rounded-lg border px-3 py-1.5 text-xs font-semibold ${
-                  otpChannel === "phone"
-                    ? "border-amber-500/50 bg-amber-500/15 text-amber-200"
-                    : "border-slate-700 bg-[#0b0f17] text-slate-400"
-                }`}
-              >
-                Phone SMS OTP
-              </button>
-            </div>
-
-            <form
-              onSubmit={otpRequested ? handleOtpVerify : handleOtpRequest}
-              className="space-y-4"
-            >
-              {otpChannel === "email" ? (
-                <div>
-                  <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-slate-400">
-                    Provisioned Staff Email
-                  </label>
-                  <input
-                    type="email"
-                    required
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    placeholder="rajesh.k1@darkit.in"
-                    className="w-full rounded-xl border border-slate-700 bg-[#0b0f17] px-3.5 py-2.5 text-sm text-white placeholder-slate-500 outline-none focus:border-amber-500"
-                  />
-                </div>
-              ) : (
-                <div>
-                  <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-slate-400">
-                    Provisioned Phone (E.164)
-                  </label>
-                  <input
-                    type="tel"
-                    required
-                    value={phone}
-                    onChange={(e) => setPhone(e.target.value)}
-                    placeholder="+919810000012"
-                    className="w-full rounded-xl border border-slate-700 bg-[#0b0f17] px-3.5 py-2.5 text-sm text-white placeholder-slate-500 outline-none focus:border-amber-500"
-                  />
-                </div>
-              )}
-
-              {otpRequested ? (
-                <div>
-                  <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-slate-400">
-                    6-Digit OTP Verification Code
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    inputMode="numeric"
-                    value={otpToken}
-                    onChange={(e) => setOtpToken(e.target.value)}
-                    placeholder="123456"
-                    className="w-full rounded-xl border border-slate-700 bg-[#0b0f17] px-3.5 py-2.5 font-mono text-sm tracking-widest text-white placeholder-slate-500 outline-none focus:border-amber-500"
-                  />
-                </div>
-              ) : null}
-
-              <div className="flex gap-2">
-                <button
-                  type="submit"
-                  disabled={submitting}
-                  className="flex-1 rounded-xl bg-amber-500 py-2.5 text-sm font-bold text-slate-950 transition hover:bg-amber-400 disabled:opacity-50"
-                >
-                  {submitting
-                    ? "Processing..."
-                    : otpRequested
-                      ? "Verify Code & Sign In"
-                      : "Send One-Time Code"}
-                </button>
-                {otpRequested ? (
-                  <button
-                    type="button"
-                    disabled={submitting}
-                    onClick={() => setOtpRequested(false)}
-                    className="rounded-xl border border-slate-700 px-3.5 py-2.5 text-xs font-semibold text-slate-300 hover:bg-slate-800"
-                  >
-                    Resend
-                  </button>
-                ) : null}
-              </div>
-            </form>
-          </div>
-        ) : null}
-
-        {/* Tab 3: Demo Sandbox Quick-Login (NEVER rendered in production unless DEMO_SANDBOX_MODE=true) */}
-        {activeTab === "demo" && demoSandboxEnabled ? (
-          <div className="space-y-4">
-            <p className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-3.5 py-2.5 text-xs text-emerald-200">
-              Demo Sandbox Mode active. Pick a pre-seeded kitchen role or enter
-              an employee terminal code to launch a signed HS256 demo session.
-            </p>
-
-            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-              {DEMO_ACCOUNTS.map((acct) => (
-                <button
-                  key={acct.code}
-                  type="button"
-                  disabled={submitting}
-                  onClick={() => void completeLogin({ employeeCode: acct.code })}
-                  className={`rounded-xl border p-3 text-left transition ${acct.accent} disabled:opacity-50`}
-                >
-                  <div className="flex items-center justify-between">
-                    <span className="text-[10px] font-bold uppercase tracking-wider">
-                      {acct.role}
-                    </span>
-                    <span className="font-mono text-[10px] opacity-80">
-                      {acct.code}
-                    </span>
-                  </div>
-                  <div className="mt-1 text-sm font-semibold text-white">
-                    {acct.label}
-                  </div>
-                  <div className="mt-0.5 text-[11px] opacity-80">
-                    {acct.scope}
-                  </div>
-                </button>
-              ))}
-            </div>
-
-            <form
-              onSubmit={handleDemoSubmit}
-              className="flex gap-2 border-t border-slate-800 pt-4"
-            >
-              <input
-                type="text"
-                value={employeeCode}
-                onChange={(e) => setEmployeeCode(e.target.value)}
-                placeholder="Employee code (e.g. 0002, 2002)"
-                className="flex-1 rounded-xl border border-slate-700 bg-[#0b0f17] px-3.5 py-2 text-sm text-white placeholder-slate-500 outline-none focus:border-emerald-500"
-              />
-              <button
-                type="submit"
-                disabled={submitting || !employeeCode.trim()}
-                className="rounded-xl bg-emerald-500 px-4 py-2 text-xs font-bold text-slate-950 hover:bg-emerald-400 disabled:opacity-50"
-              >
-                Launch
-              </button>
-            </form>
-          </div>
-        ) : null}
-
-        <div className="mt-6 border-t border-slate-800 pt-4 text-center text-[11px] text-slate-500">
-          Protected by Two-Level Organization &amp; Kitchen RBAC • Immediate
-          Account Revocation
+        <div className="border-t border-white/[0.06] bg-[#09090b]/50 px-5 py-2.5 text-center font-mono text-[10px] text-zinc-500">
+          Two-Level Organization &amp; Kitchen RBAC · Instant Revocation
         </div>
       </div>
     </div>

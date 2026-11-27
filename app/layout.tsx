@@ -3,9 +3,9 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "DarKitOS — Cloud Kitchen Workspace",
+  title: "DarKitOS — Cloud Kitchen Operating System",
   description:
-    "Explore DarKitOS, the workspace for delivery kitchens to track orders, prep meals, hand off to couriers, and monitor stock.",
+    "Native operational workspace for Indian multi-brand cloud kitchens: live KDS, dispatch, per-kitchen inventory, GST invoicing, and Gemini copilot.",
 };
 
 export default function RootLayout({
@@ -15,7 +15,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <body className="min-h-screen bg-slate-950 text-slate-100 antialiased">
+      <body className="min-h-screen bg-[#09090b] text-zinc-100 antialiased">
         {children}
       </body>
     </html>
