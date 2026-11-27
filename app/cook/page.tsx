@@ -16,7 +16,6 @@ import { useKitchenAudioAlerts } from "@/hooks/useKitchenAudioAlerts";
 import { useRealtimeKitchenSync } from "@/hooks/useRealtimeKitchenSync";
 import {
   BRANDS_DB,
-  KITCHENS_DB,
   type Employee,
   type KitchenStation,
   type Order,
@@ -33,7 +32,7 @@ function formatTime(value?: string): string {
   if (!value) return "--";
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "--";
-  return date.toLocaleTimeString([], {
+  return date.toLocaleTimeString("en-IN", {
     hour: "2-digit",
     minute: "2-digit",
   });
@@ -43,37 +42,34 @@ function getOrderAgeMins(value?: string): number {
   if (!value) return 0;
   const created = new Date(value).getTime();
   if (Number.isNaN(created)) return 0;
-  return Math.max(
-    0,
-    Math.floor((Date.now() - created) / 60000),
-  );
+  return Math.max(0, Math.floor((Date.now() - created) / 60000));
+}
+
+function groupItemsByStation(order: Order): Array<[string, Order["items"]]> {
+  const map = new Map<string, Order["items"]>();
+  for (const item of order.items) {
+    const station = item.station || "Assembly";
+    const list = map.get(station) ?? [];
+    list.push(item);
+    map.set(station, list);
+  }
+  return Array.from(map.entries());
 }
 
 export default function CookPage() {
-  const [orders, setOrders] = useState<Order[]>(
-    [],
-  );
+  const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [depletionNotice, setDepletionNotice] =
-    useState("");
-  const [updatingOrderId, setUpdatingOrderId] =
-    useState<string | null>(null);
+  const [depletionNotice, setDepletionNotice] = useState("");
+  const [updatingOrderId, setUpdatingOrderId] = useState<string | null>(null);
 
-  const [kitchenFilter, setKitchenFilter] =
-    useState<string>("ALL");
-  const [brandFilter, setBrandFilter] =
-    useState<string>("ALL");
-  const [stationFilter, setStationFilter] =
-    useState<string>("ALL");
-  const [currentEmployee, setCurrentEmployee] =
-    useState<Employee | null>(null);
-  const [prepSlaMinutes, setPrepSlaMinutes] =
-    useState<number>(12);
-  const [kotOrder, setKotOrder] =
-    useState<Order | null>(null);
-  const [autoPrintKotOnPrep, setAutoPrintKotOnPrep] =
-    useState<boolean>(false);
+  const [kitchenFilter, setKitchenFilter] = useState<string>("ALL");
+  const [brandFilter, setBrandFilter] = useState<string>("ALL");
+  const [stationFilter, setStationFilter] = useState<string>("ALL");
+  const [currentEmployee, setCurrentEmployee] = useState<Employee | null>(null);
+  const [prepSlaMinutes, setPrepSlaMinutes] = useState<number>(12);
+  const [kotOrder, setKotOrder] = useState<Order | null>(null);
+  const [autoPrintKotOnPrep, setAutoPrintKotOnPrep] = useState<boolean>(false);
 
   const audio = useKitchenAudioAlerts();
   const seenPendingIdsRef = useRef<Set<string> | null>(null);
@@ -94,7 +90,10 @@ export default function CookPage() {
     setAutoPrintKotOnPrep((prev) => {
       const next = !prev;
       try {
-        window.localStorage.setItem("darkit:auto-print-kot-on-prep", String(next));
+        window.localStorage.setItem(
+          "darkit:auto-print-kot-on-prep",
+          String(next),
+        );
       } catch {
         // ignore storage failures
       }
@@ -109,42 +108,37 @@ export default function CookPage() {
       .then((data) => {
         if (!active || !data) return;
         if (data.employee) {
-          setCurrentEmployee(data.employee as Employee);
+          const emp = data.employee as Employee;
+          setCurrentEmployee(emp);
+          if (emp.role !== "OWNER" && emp.kitchenId) {
+            setKitchenFilter(emp.kitchenId);
+          }
         }
         if (typeof data.settings?.prepSlaMinutes === "number") {
           setPrepSlaMinutes(data.settings.prepSlaMinutes);
         }
       })
-      .catch(() => {
-        // ignore transient error
-      });
+      .catch(() => {});
+
+    const onHubChanged = (event: Event) => {
+      const custom = event as CustomEvent<{ kitchenId?: string }>;
+      if (custom.detail?.kitchenId) setKitchenFilter(custom.detail.kitchenId);
+    };
+    window.addEventListener("darkit:hub-changed", onHubChanged);
     return () => {
       active = false;
+      window.removeEventListener("darkit:hub-changed", onHubChanged);
     };
   }, []);
 
   const loadOrders = useCallback(async () => {
     try {
-      const response = await fetch(
-        "/api/orders",
-        {
-          cache: "no-store",
-        },
-      );
+      const response = await fetch("/api/orders", { cache: "no-store" });
       const data = await response.json();
-
       if (!response.ok) {
-        throw new Error(
-          data.error ??
-            "Unable to load kitchen orders.",
-        );
+        throw new Error(data.error ?? "Unable to load kitchen orders.");
       }
-
-      setOrders(
-        Array.isArray(data.orders)
-          ? data.orders
-          : [],
-      );
+      setOrders(Array.isArray(data.orders) ? data.orders : []);
       setError("");
     } catch (loadError) {
       setError(
@@ -179,43 +173,29 @@ export default function CookPage() {
         order.status === "PREPARING" ||
         order.status === "READY_FOR_PICKUP";
       if (!statusOk) return false;
-      if (
-        kitchenFilter !== "ALL" &&
-        order.kitchenId !== kitchenFilter
-      )
+      if (kitchenFilter !== "ALL" && order.kitchenId !== kitchenFilter) {
         return false;
-      if (
-        brandFilter !== "ALL" &&
-        order.brandId !== brandFilter
-      )
+      }
+      if (brandFilter !== "ALL" && order.brandId !== brandFilter) {
         return false;
+      }
       if (
         stationFilter !== "ALL" &&
-        !order.items.some(
-          (i) => i.station === stationFilter,
-        )
-      )
+        !order.items.some((i) => i.station === stationFilter)
+      ) {
         return false;
+      }
       return true;
     });
-  }, [
-    orders,
-    kitchenFilter,
-    brandFilter,
-    stationFilter,
-  ]);
+  }, [orders, kitchenFilter, brandFilter, stationFilter]);
 
-  const pendingOrders = activeOrders.filter(
-    (o) => o.status === "PENDING",
-  );
-  const preparingOrders = activeOrders.filter(
-    (o) => o.status === "PREPARING",
-  );
+  const pendingOrders = activeOrders.filter((o) => o.status === "PENDING");
+  const preparingOrders = activeOrders.filter((o) => o.status === "PREPARING");
   const readyOrders = activeOrders.filter(
     (o) => o.status === "READY_FOR_PICKUP",
   );
 
-  // Trigger deduplicated New Ticket Chime whenever a brand-new PENDING order arrives
+  // Deduplicated New Ticket Chime when brand-new PENDING order arrives
   useEffect(() => {
     if (loading) return;
     const currentPendingIds = new Set(pendingOrders.map((o) => o.id));
@@ -240,39 +220,22 @@ export default function CookPage() {
     setDepletionNotice("");
 
     try {
-      const response = await fetch(
-        "/api/orders",
-        {
-          method: "PATCH",
-          headers: {
-            "Content-Type":
-              "application/json",
-          },
-          body: JSON.stringify({
-            orderId,
-            action,
-          }),
-        },
-      );
-
+      const response = await fetch("/api/orders", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ orderId, action }),
+      });
       const data = await response.json();
 
       if (!response.ok) {
-        throw new Error(
-          data.error ??
-            "Unable to update order.",
-        );
+        throw new Error(data.error ?? "Unable to update order.");
       }
 
       if (action === "PREPARING") {
-        const depleted = Array.isArray(
-          data.depletedItems,
-        )
+        const depleted = Array.isArray(data.depletedItems)
           ? data.depletedItems.join(", ")
           : "Recipe items";
-        const alerts = Array.isArray(
-          data.lowStockAlerts,
-        )
+        const alerts = Array.isArray(data.lowStockAlerts)
           ? data.lowStockAlerts
           : [];
         let autoPrintNote = "";
@@ -285,22 +248,20 @@ export default function CookPage() {
             });
             const kotData = await kotRes.json();
             if (kotRes.ok && kotData?.printJobId) {
-              autoPrintNote = ` • Auto-Printed 80mm KOT [${kotData.printJobId}]`;
+              autoPrintNote = ` · Auto-printed 80mm KOT [${kotData.printJobId}]`;
             }
           } catch {
             // Non-blocking hardware bridge failure
           }
         }
         setDepletionNotice(
-          `Atomic Inventory Consumption Executed for ${orderId}: Depleted [${depleted}]${
-            alerts.length > 0
-              ? ` • Low-Stock Threshold Triggered: ${alerts.join(", ")}`
-              : ""
+          `Prep started for ${orderId}: Depleted [${depleted}]${
+            alerts.length > 0 ? ` · Low stock: ${alerts.join(", ")}` : ""
           }${autoPrintNote}.`,
         );
       } else {
         setDepletionNotice(
-          `Order ${orderId} marked READY_FOR_PICKUP → routed to Dispatch Pass.`,
+          `${orderId} bumped to READY_FOR_PICKUP -> routed to Dispatch.`,
         );
       }
 
@@ -316,162 +277,130 @@ export default function CookPage() {
     }
   }
 
-  function renderOrderCard(order: Order) {
-    const isUpdating =
-      updatingOrderId === order.id;
-    const hasWarnings = Boolean(
-      order.inventoryWarnings?.length,
-    );
-    const isUnavailable = Boolean(
-      order.inventoryUnavailable?.length,
-    );
-    const ageMins = getOrderAgeMins(
-      order.receivedAt ?? order.createdAt,
-    );
+  function renderTicket(order: Order) {
+    const isUpdating = updatingOrderId === order.id;
+    const hasWarnings = Boolean(order.inventoryWarnings?.length);
+    const isUnavailable = Boolean(order.inventoryUnavailable?.length);
+    const ageMins = getOrderAgeMins(order.receivedAt ?? order.createdAt);
     const isUrgent =
       order.priority === "RUSH" ||
       order.priority === "VIP" ||
-      ageMins >= 12;
+      ageMins >= prepSlaMinutes;
+    const groupedStations = groupItemsByStation(order);
 
     return (
       <article
         key={order.id}
-        className={`rounded-2xl border p-4 shadow-lg transition-all ${
-          isUrgent
-            ? "border-amber-500/60 bg-slate-900/95 shadow-[0_0_20px_rgba(245,158,11,0.12)]"
-            : "border-slate-800 bg-slate-900/80"
+        className={`flex flex-col overflow-hidden rounded-lg border bg-[#151519] ${
+          isUrgent ? "border-amber-500/50" : "border-white/[0.08]"
         }`}
       >
-        <div className="flex items-start justify-between gap-3">
-          <div>
+        {/* High-Contrast Ticket Header */}
+        <div className="flex items-start justify-between gap-2 border-b border-white/[0.06] bg-[#1d1d22]/60 px-3.5 py-2.5">
+          <div className="min-w-0">
             <div className="flex items-center gap-2">
-              <p className="font-mono text-lg font-black text-white">
-                {order.id}
-              </p>
-              {order.priority &&
-                order.priority !== "NORMAL" && (
-                  <span className="rounded bg-red-500/20 px-2 py-0.5 font-mono text-[10px] font-bold text-red-300">
-                    {order.priority}
-                  </span>
-                )}
+              <span className="font-mono text-sm font-bold tracking-tight text-zinc-100 tabular-nums">
+                #{order.id}
+              </span>
+              {order.priority && order.priority !== "NORMAL" && (
+                <span className="rounded bg-rose-500/20 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-rose-300">
+                  {order.priority}
+                </span>
+              )}
             </div>
-            <p className="text-xs font-semibold text-sky-400">
-              {order.brandId} •{" "}
-              <span className="text-slate-400">
-                {order.kitchenId} •{" "}
-                {order.channel}
+            <p className="mt-0.5 truncate text-[11px] text-zinc-400">
+              <span className="font-medium text-zinc-200">{order.brandId}</span>{" "}
+              · {order.kitchenId} · {order.channel} ·{" "}
+              <span className="font-mono tabular-nums">
+                {formatTime(order.receivedAt ?? order.createdAt)}
               </span>
             </p>
           </div>
 
-          <div className="text-right font-mono text-xs">
-            <div className="flex flex-col items-end gap-1">
-              <KitchenSlaBadge
-                orderId={order.id}
-                anchorIso={
-                  order.prepStartedAt ?? order.receivedAt ?? order.createdAt
-                }
-                slaMinutes={prepSlaMinutes}
-                labelPrefix="Prep SLA"
-                onBreach={audio.playSlaBreachAlert}
-              />
-              <button
-                type="button"
-                onClick={() => setKotOrder(order)}
-                className="rounded-lg border border-slate-700 bg-slate-800 px-2 py-0.5 text-[10px] font-bold text-sky-300 hover:border-sky-500/50 hover:bg-slate-700"
-              >
-                🖨 Print KOT
-              </button>
-            </div>
-            <p className="mt-1 text-[10px] text-slate-500">
-              In{" "}
-              {formatTime(
-                order.receivedAt ??
-                  order.createdAt,
-              )}
-            </p>
+          <div className="flex shrink-0 items-center gap-1.5">
+            <KitchenSlaBadge
+              orderId={order.id}
+              anchorIso={
+                order.prepStartedAt ?? order.receivedAt ?? order.createdAt
+              }
+              slaMinutes={prepSlaMinutes}
+              labelPrefix="Prep SLA"
+              onBreach={audio.playSlaBreachAlert}
+            />
+            <button
+              type="button"
+              onClick={() => setKotOrder(order)}
+              title="Print 80mm KOT"
+              className="inline-flex h-6 items-center rounded-md border border-white/[0.1] bg-[#151519] px-2 font-mono text-[10px] font-medium text-zinc-300 transition-colors hover:border-white/[0.2] hover:text-zinc-100"
+            >
+              KOT
+            </button>
           </div>
         </div>
 
-        <div className="mt-4 space-y-2">
-          {order.items.map((item, index) => (
-            <div
-              key={
-                item.id ??
-                item.menuItemId ??
-                `${order.id}-${index}`
-              }
-              className="rounded-xl border border-slate-800 bg-slate-950 px-3 py-2.5"
-            >
-              <div className="flex items-center justify-between">
-                <span className="font-semibold text-sm text-white">
-                  {item.name}
-                </span>
-                <div className="flex items-center gap-2">
-                  <span className="rounded bg-slate-800 px-2 py-0.5 font-mono text-[10px] text-sky-300">
-                    {item.station}
-                  </span>
-                  <span className="font-mono text-base font-black text-emerald-400">
-                    ×{item.quantity}
-                  </span>
-                </div>
+        {/* Station-Grouped Items */}
+        <div className="divide-y divide-white/[0.06] px-3.5 py-2">
+          {groupedStations.map(([station, items]) => (
+            <div key={station} className="py-1.5 first:pt-0.5 last:pb-0.5">
+              <p className="mb-1 font-mono text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
+                {station}
+              </p>
+              <div className="space-y-1">
+                {items.map((item, idx) => (
+                  <div
+                    key={item.id ?? item.menuItemId ?? `${order.id}-${idx}`}
+                    className="flex items-start justify-between gap-2 text-xs"
+                  >
+                    <div className="min-w-0">
+                      <span className="font-medium text-zinc-100">
+                        {item.name}
+                      </span>
+                      {item.notes && (
+                        <p className="mt-0.5 font-mono text-[11px] text-amber-300">
+                          Note: {item.notes}
+                        </p>
+                      )}
+                    </div>
+                    <span className="shrink-0 font-mono text-sm font-bold text-zinc-100 tabular-nums">
+                      ×{item.quantity}
+                    </span>
+                  </div>
+                ))}
               </div>
-              {item.notes && (
-                <p className="mt-1 font-mono text-[11px] text-amber-300">
-                  Note: {item.notes}
-                </p>
-              )}
             </div>
           ))}
         </div>
 
-        {hasWarnings && (
-          <div className="mt-3 rounded-xl border border-amber-500/40 bg-amber-500/10 p-3 text-xs text-amber-300">
-            <p className="font-mono font-bold uppercase">
-              ⚠ Low Stock Alert on Station
-            </p>
-            <p className="mt-0.5">
-              {order.inventoryWarnings?.join(
-                ", ",
-              )}
-            </p>
+        {/* Stock Warnings / Blocks */}
+        {(hasWarnings || isUnavailable) && (
+          <div className="space-y-1.5 border-t border-white/[0.06] px-3.5 py-2 text-[11px]">
+            {hasWarnings && (
+              <div className="rounded-md border border-amber-500/35 bg-amber-500/10 px-2.5 py-1.5 text-amber-200">
+                Low stock: {order.inventoryWarnings?.join(", ")}
+              </div>
+            )}
+            {isUnavailable && (
+              <div className="rounded-md border border-rose-500/40 bg-rose-500/10 px-2.5 py-1.5 text-rose-200">
+                Stock-out block: {order.inventoryUnavailable?.join(", ")}
+              </div>
+            )}
           </div>
         )}
 
-        {isUnavailable && (
-          <div className="mt-3 rounded-xl border border-red-500/40 bg-red-500/10 p-3 text-xs text-red-300">
-            <p className="font-mono font-bold uppercase">
-              ✕ Stock-Out Block
-            </p>
-            <p className="mt-0.5">
-              Missing:{" "}
-              {order.inventoryUnavailable?.join(
-                ", ",
-              )}
-            </p>
-          </div>
-        )}
-
-        <div className="mt-4">
+        {/* 48px Full-Width Tactile Bottom Action */}
+        <div className="border-t border-white/[0.06] p-2">
           {order.status === "PENDING" && (
             <button
               type="button"
-              disabled={
-                isUpdating || isUnavailable
-              }
-              onClick={() =>
-                void updateOrder(
-                  order.id,
-                  "PREPARING",
-                )
-              }
-              className="w-full rounded-xl bg-sky-500 px-4 py-3.5 font-mono text-sm font-black uppercase tracking-wider text-slate-950 transition hover:bg-sky-400 disabled:cursor-not-allowed disabled:opacity-40"
+              disabled={isUpdating || isUnavailable}
+              onClick={() => void updateOrder(order.id, "PREPARING")}
+              className="h-12 w-full rounded-md bg-zinc-100 font-mono text-xs font-bold uppercase tracking-wider text-zinc-950 transition-colors hover:bg-white active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-40"
             >
               {isUpdating
-                ? "Starting prep…"
+                ? "Depleting stock..."
                 : isUnavailable
-                  ? "Inventory Unavailable"
-                  : "Start preparing"}
+                  ? "Stock Unavailable"
+                  : "Start Prep"}
             </button>
           )}
 
@@ -479,31 +408,21 @@ export default function CookPage() {
             <button
               type="button"
               disabled={isUpdating}
-              onClick={() =>
-                void updateOrder(
-                  order.id,
-                  "READY_FOR_PICKUP",
-                )
-              }
-              className="w-full rounded-xl bg-emerald-500 px-4 py-3.5 font-mono text-sm font-black uppercase tracking-wider text-slate-950 transition hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-40"
+              onClick={() => void updateOrder(order.id, "READY_FOR_PICKUP")}
+              className="h-12 w-full rounded-md bg-emerald-500 font-mono text-xs font-bold uppercase tracking-wider text-zinc-950 transition-colors hover:bg-emerald-400 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-40"
             >
-              {isUpdating
-                ? "Updating..."
-                : "Mark ready for pickup"}
+              {isUpdating ? "Bumping..." : "Bump Ready"}
             </button>
           )}
 
-          {order.status ===
-            "READY_FOR_PICKUP" && (
-            <div className="flex items-center justify-between rounded-xl border border-emerald-500/40 bg-emerald-500/10 px-4 py-3 font-mono text-xs font-bold text-emerald-300">
-              <span>Waiting for courier pickup</span>
-              <Link
-                href="/dispatch"
-                className="underline hover:text-white"
-              >
-                Handoff →
-              </Link>
-            </div>
+          {order.status === "READY_FOR_PICKUP" && (
+            <Link
+              href="/dispatch"
+              className="flex h-12 w-full items-center justify-between rounded-md border border-emerald-500/35 bg-emerald-500/10 px-3.5 font-mono text-xs font-semibold text-emerald-300 transition-colors hover:bg-emerald-500/20"
+            >
+              <span>Staged at Pass</span>
+              <span>Dispatch →</span>
+            </Link>
           )}
         </div>
       </article>
@@ -512,242 +431,182 @@ export default function CookPage() {
 
   return (
     <AppShell
-      title="Kitchen Board"
-      subtitle="See which meals need cooking, start preparing an order, and mark it ready for pickup."
-      actions={
+      title="Cook KDS"
+      subtitle={`${activeOrders.length} active tickets`}
+      activeHub={kitchenFilter}
+      onHubChange={setKitchenFilter}
+      fullBleed
+      rightActions={
         <>
           <RealtimeSyncBadge
             connectionMode={realtimeSync.connectionMode}
             lastEventAt={realtimeSync.lastEventAt}
             topic={realtimeSync.topic}
           />
-
           <button
             type="button"
             onClick={audio.toggleAudio}
-            className={`rounded-xl border px-3 py-2 font-mono text-xs font-bold transition ${
+            className={`inline-flex h-7 items-center rounded-md border px-2.5 font-mono text-[11px] font-medium transition-colors ${
               audio.audioEnabled
-                ? "border-emerald-500/50 bg-emerald-500/15 text-emerald-300"
-                : "border-slate-700 bg-slate-900 text-slate-400 hover:text-white"
+                ? "border-emerald-500/40 bg-emerald-500/15 text-emerald-300"
+                : "border-white/[0.08] bg-[#151519] text-zinc-400 hover:text-zinc-200"
             }`}
           >
-            {audio.audioEnabled ? "🔔 Audio Chimes: ON" : "🔕 Audio Chimes: OFF"}
+            Chimes: {audio.audioEnabled ? "ON" : "OFF"}
           </button>
-
           <button
             type="button"
             onClick={toggleAutoPrintKot}
-            className={`rounded-xl border px-3 py-2 font-mono text-xs font-bold transition ${
+            className={`inline-flex h-7 items-center rounded-md border px-2.5 font-mono text-[11px] font-medium transition-colors ${
               autoPrintKotOnPrep
-                ? "border-sky-500/50 bg-sky-500/15 text-sky-300"
-                : "border-slate-700 bg-slate-900 text-slate-400 hover:text-white"
+                ? "border-sky-500/40 bg-sky-500/15 text-sky-300"
+                : "border-white/[0.08] bg-[#151519] text-zinc-400 hover:text-zinc-200"
             }`}
           >
-            {autoPrintKotOnPrep ? "🖨 Auto-Print KOT: ON" : "🖨 Auto-Print KOT: OFF"}
+            Auto-KOT: {autoPrintKotOnPrep ? "ON" : "OFF"}
           </button>
-
-          <Link
-            href="/dispatch"
-            className="rounded-xl border border-slate-700 bg-slate-900 px-3.5 py-2 font-mono text-xs font-bold text-emerald-300 hover:border-emerald-500/40"
-          >
-            Open Dispatch →
-          </Link>
-
           <button
             type="button"
             onClick={() => void loadOrders()}
-            className="rounded-xl border border-slate-700 bg-slate-800 px-3.5 py-2 font-mono text-xs font-bold text-white hover:bg-slate-700"
+            className="inline-flex h-7 items-center rounded-md border border-white/[0.08] bg-[#151519] px-2.5 text-[11px] font-medium text-zinc-300 transition-colors hover:border-white/[0.16] hover:text-zinc-100"
           >
-            ↻ Sync Now
+            Sync
           </button>
         </>
       }
     >
-      <div className="space-y-6">
-        {/* KDS Station & Kitchen Filter Bar */}
-        <section className="grid gap-3 rounded-2xl border border-slate-800 bg-slate-900/60 p-4 sm:grid-cols-3">
-          <label className="block">
-            <span className="font-mono text-[10px] font-bold uppercase text-slate-400">
-              Kitchen Facility
-            </span>
-            <select
-              value={kitchenFilter}
-              onChange={(e) =>
-                setKitchenFilter(e.target.value)
-              }
-              className="mt-1 w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-xs text-white"
-            >
-              <option value="ALL">
-                All Kitchen Hubs
+      {/* Compact Station & Brand Filter Strip */}
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-white/[0.06] bg-[#09090b]/50 px-4 py-2">
+        <div
+          role="group"
+          aria-label="Prep station filter"
+          className="flex flex-wrap items-center rounded-md border border-white/[0.06] bg-[#151519] p-0.5"
+        >
+          {(["ALL", ...STATIONS] as const).map((station) => {
+            const active = stationFilter === station;
+            return (
+              <button
+                key={station}
+                type="button"
+                onClick={() => setStationFilter(station)}
+                className={`rounded-[5px] px-2.5 py-1 text-[11px] font-medium transition-colors ${
+                  active
+                    ? "bg-[#27272e] text-zinc-100"
+                    : "text-zinc-400 hover:text-zinc-200"
+                }`}
+              >
+                {station === "ALL" ? "All Stations" : station}
+              </button>
+            );
+          })}
+        </div>
+
+        <div className="flex items-center gap-2">
+          <select
+            aria-label="Filter brand"
+            value={brandFilter}
+            onChange={(e) => setBrandFilter(e.target.value)}
+            className="h-7 rounded-md border border-white/[0.08] bg-[#151519] px-2 text-[11px] text-zinc-200 outline-none focus:border-white/[0.2]"
+          >
+            <option value="ALL">All Brands</option>
+            {BRANDS_DB.map((b) => (
+              <option key={b.id} value={b.id}>
+                {b.name}
               </option>
-              {KITCHENS_DB.map((k) => (
-                <option key={k.id} value={k.id}>
-                  {k.id} • {k.name}
-                </option>
-              ))}
-            </select>
-          </label>
-
-          <label className="block">
-            <span className="font-mono text-[10px] font-bold uppercase text-slate-400">
-              Virtual Brand
-            </span>
-            <select
-              value={brandFilter}
-              onChange={(e) =>
-                setBrandFilter(e.target.value)
-              }
-              className="mt-1 w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-xs text-white"
-            >
-              <option value="ALL">
-                All Virtual Brands
-              </option>
-              {BRANDS_DB.map((b) => (
-                <option key={b.id} value={b.id}>
-                  {b.name}
-                </option>
-              ))}
-            </select>
-          </label>
-
-          <label className="block">
-            <span className="font-mono text-[10px] font-bold uppercase text-slate-400">
-              Prep Station Filter
-            </span>
-            <select
-              value={stationFilter}
-              onChange={(e) =>
-                setStationFilter(e.target.value)
-              }
-              className="mt-1 w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-xs text-white"
-            >
-              <option value="ALL">
-                All Stations (Grill / Fryer /
-                Assembly / Cold Prep)
-              </option>
-              {STATIONS.map((s) => (
-                <option key={s} value={s}>
-                  {s} Station
-                </option>
-              ))}
-            </select>
-          </label>
-        </section>
-
-        {error && (
-          <div className="rounded-xl border border-red-500/40 bg-red-500/10 px-4 py-3 font-mono text-xs text-red-300">
-            ⚠ {error}
-          </div>
-        )}
-
-        {depletionNotice && (
-          <div className="rounded-xl border border-emerald-500/40 bg-emerald-500/10 px-4 py-3 font-mono text-xs text-emerald-300">
-            ✓ {depletionNotice}
-          </div>
-        )}
-
-        {/* Queue Summary Counters */}
-        <section className="grid grid-cols-3 gap-4">
-          <div className="rounded-2xl border border-amber-500/30 bg-amber-500/5 p-4">
-            <p className="font-mono text-xs font-bold uppercase text-amber-300">
-              1. Pending Queue
-            </p>
-            <p className="mt-1 text-3xl font-black text-white">
-              {pendingOrders.length}
-            </p>
-            <p className="text-[11px] text-slate-400">
-              Awaiting cook acceptance & stock depletion
-            </p>
-          </div>
-
-          <div className="rounded-2xl border border-sky-500/30 bg-sky-500/5 p-4">
-            <p className="font-mono text-xs font-bold uppercase text-sky-300">
-              2. Preparing on Line
-            </p>
-            <p className="mt-1 text-3xl font-black text-white">
-              {preparingOrders.length}
-            </p>
-            <p className="text-[11px] text-slate-400">
-              Ingredients deducted from active ledger
-            </p>
-          </div>
-
-          <div className="rounded-2xl border border-emerald-500/30 bg-emerald-500/5 p-4">
-            <p className="font-mono text-xs font-bold uppercase text-emerald-300">
-              3. Staged Ready
-            </p>
-            <p className="mt-1 text-3xl font-black text-white">
-              {readyOrders.length}
-            </p>
-            <p className="text-[11px] text-slate-400">
-              Ready for courier handoff at Dispatch
-            </p>
-          </div>
-        </section>
-
-        {loading ? (
-          <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-10 text-center font-mono text-sm text-slate-400">
-            Loading KDS tickets...
-          </div>
-        ) : activeOrders.length === 0 ? (
-          <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-12 text-center">
-            <p className="text-lg font-bold text-white">
-              No active kitchen orders waiting for preparation
-            </p>
-            <p className="mt-1 text-xs text-slate-400">
-              New tickets injected via webhooks or Order Injection will appear here automatically.
-            </p>
-          </div>
-        ) : (
-          <div className="grid gap-6 lg:grid-cols-3">
-            <section>
-              <div className="mb-3 flex items-center justify-between border-b border-amber-500/30 pb-2">
-                <h2 className="font-mono text-sm font-black uppercase text-amber-300">
-                  Pending Tickets
-                </h2>
-                <span className="rounded-full bg-amber-500/20 px-2.5 py-0.5 font-mono text-xs font-bold text-amber-300">
-                  {pendingOrders.length}
-                </span>
-              </div>
-              <div className="space-y-4">
-                {pendingOrders.map(
-                  renderOrderCard,
-                )}
-              </div>
-            </section>
-
-            <section>
-              <div className="mb-3 flex items-center justify-between border-b border-sky-500/30 pb-2">
-                <h2 className="font-mono text-sm font-black uppercase text-sky-300">
-                  On Station (Preparing)
-                </h2>
-                <span className="rounded-full bg-sky-500/20 px-2.5 py-0.5 font-mono text-xs font-bold text-sky-300">
-                  {preparingOrders.length}
-                </span>
-              </div>
-              <div className="space-y-4">
-                {preparingOrders.map(
-                  renderOrderCard,
-                )}
-              </div>
-            </section>
-
-            <section>
-              <div className="mb-3 flex items-center justify-between border-b border-emerald-500/30 pb-2">
-                <h2 className="font-mono text-sm font-black uppercase text-emerald-300">
-                  Ready for Pickup
-                </h2>
-                <span className="rounded-full bg-emerald-500/20 px-2.5 py-0.5 font-mono text-xs font-bold text-emerald-300">
-                  {readyOrders.length}
-                </span>
-              </div>
-              <div className="space-y-4">
-                {readyOrders.map(renderOrderCard)}
-              </div>
-            </section>
-          </div>
-        )}
+            ))}
+          </select>
+          <span className="hidden font-mono text-[11px] text-zinc-500 tabular-nums sm:inline">
+            SLA ≤ {prepSlaMinutes}m
+          </span>
+        </div>
       </div>
+
+      {error && (
+        <div className="border-b border-rose-500/30 bg-rose-500/10 px-4 py-2 text-xs text-rose-200">
+          {error}
+        </div>
+      )}
+
+      {depletionNotice && (
+        <div className="border-b border-emerald-500/30 bg-emerald-500/10 px-4 py-2 text-xs text-emerald-200">
+          {depletionNotice}
+        </div>
+      )}
+
+      {/* Full-Viewport 3-Lane Hairline KDS Board */}
+      {loading ? (
+        <div className="flex flex-1 items-center justify-center p-12 text-xs text-zinc-500">
+          Loading KDS tickets...
+        </div>
+      ) : (
+        <div className="grid flex-1 divide-y divide-white/[0.06] lg:grid-cols-3 lg:divide-x lg:divide-y-0">
+          {/* Lane 1: PENDING */}
+          <section className="flex min-h-[300px] flex-col">
+            <div className="flex items-center justify-between border-b border-white/[0.06] bg-[#09090b]/40 px-4 py-2.5">
+              <span className="flex items-center gap-2 text-xs font-semibold text-zinc-200">
+                <span className="h-2 w-2 rounded-full bg-amber-400" />
+                PENDING
+              </span>
+              <span className="rounded bg-amber-500/15 px-2 py-0.5 font-mono text-[11px] font-semibold text-amber-300 tabular-nums">
+                {pendingOrders.length}
+              </span>
+            </div>
+            <div className="flex-1 space-y-3 overflow-y-auto p-3.5">
+              {pendingOrders.length === 0 ? (
+                <p className="py-10 text-center text-xs text-zinc-600">
+                  No pending tickets
+                </p>
+              ) : (
+                pendingOrders.map(renderTicket)
+              )}
+            </div>
+          </section>
+
+          {/* Lane 2: PREPARING */}
+          <section className="flex min-h-[300px] flex-col">
+            <div className="flex items-center justify-between border-b border-white/[0.06] bg-[#09090b]/40 px-4 py-2.5">
+              <span className="flex items-center gap-2 text-xs font-semibold text-zinc-200">
+                <span className="h-2 w-2 rounded-full bg-sky-400" />
+                PREPARING
+              </span>
+              <span className="rounded bg-sky-500/15 px-2 py-0.5 font-mono text-[11px] font-semibold text-sky-300 tabular-nums">
+                {preparingOrders.length}
+              </span>
+            </div>
+            <div className="flex-1 space-y-3 overflow-y-auto p-3.5">
+              {preparingOrders.length === 0 ? (
+                <p className="py-10 text-center text-xs text-zinc-600">
+                  No orders on line
+                </p>
+              ) : (
+                preparingOrders.map(renderTicket)
+              )}
+            </div>
+          </section>
+
+          {/* Lane 3: READY_FOR_PICKUP */}
+          <section className="flex min-h-[300px] flex-col">
+            <div className="flex items-center justify-between border-b border-white/[0.06] bg-[#09090b]/40 px-4 py-2.5">
+              <span className="flex items-center gap-2 text-xs font-semibold text-zinc-200">
+                <span className="h-2 w-2 rounded-full bg-emerald-400" />
+                READY FOR PICKUP
+              </span>
+              <span className="rounded bg-emerald-500/15 px-2 py-0.5 font-mono text-[11px] font-semibold text-emerald-300 tabular-nums">
+                {readyOrders.length}
+              </span>
+            </div>
+            <div className="flex-1 space-y-3 overflow-y-auto p-3.5">
+              {readyOrders.length === 0 ? (
+                <p className="py-10 text-center text-xs text-zinc-600">
+                  No staged orders
+                </p>
+              ) : (
+                readyOrders.map(renderTicket)
+              )}
+            </div>
+          </section>
+        </div>
+      )}
 
       <KotPrintTicketModal
         order={kotOrder}

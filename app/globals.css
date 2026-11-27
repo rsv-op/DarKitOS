@@ -2,6 +2,61 @@
 @tailwind components;
 @tailwind utilities;
 
+:root {
+  --surface-canvas: #09090b;
+  --surface-pane: #0e0e11;
+  --surface-elevated: #151519;
+  --surface-control: #1d1d22;
+  --hairline: rgba(255, 255, 255, 0.06);
+  --hairline-strong: rgba(255, 255, 255, 0.12);
+}
+
+@view-transition {
+  navigation: auto;
+}
+
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation-duration: 180ms;
+  animation-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-old(root),
+  ::view-transition-new(root) {
+    animation-duration: 0ms;
+  }
+}
+
+html,
+body {
+  background-color: var(--surface-canvas);
+  color: #f4f4f5;
+}
+
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
+
+@keyframes darkitRowFlash {
+  0% {
+    background-color: rgba(99, 102, 241, 0.22);
+  }
+  100% {
+    background-color: transparent;
+  }
+}
+
+.animate-row-flash {
+  animation: darkitRowFlash 600ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-row-flash {
+    animation: none;
+  }
+}
+
 @media print {
   @page {
     size: 80mm auto;
@@ -13,11 +68,14 @@
   }
 
   body.kot-printing #kot-thermal-print-area,
-  body.kot-printing #kot-thermal-print-area * {
+  body.kot-printing #kot-thermal-print-area *,
+  body.kot-printing #kot-print-area,
+  body.kot-printing #kot-print-area * {
     visibility: visible !important;
   }
 
-  body.kot-printing #kot-thermal-print-area {
+  body.kot-printing #kot-thermal-print-area,
+  body.kot-printing #kot-print-area {
     position: fixed !important;
     inset: 0 auto auto 0 !important;
     width: 76mm !important;

@@ -1,17 +1,19 @@
 "use client";
 
 import {
+  Suspense,
   useCallback,
   useEffect,
   useMemo,
   useState,
 } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import AppShell from "@/components/AppShell";
-import DesktopWindowManager from "@/components/DesktopWindowManager";
+import KitchenSlaBadge from "@/components/KitchenSlaBadge";
 import OwnerBottleneckBriefBuilder from "@/components/OwnerBottleneckBriefBuilder";
 import RealtimeSyncBadge from "@/components/RealtimeSyncBadge";
-import WorkspaceQuickStart from "@/components/WorkspaceQuickStart";
+import { SplitInspector } from "@/components/SplitInspector";
 import { useRealtimeKitchenSync } from "@/hooks/useRealtimeKitchenSync";
 import { formatCurrency, type SupportedCurrency } from "@/lib/currency";
 import {
@@ -26,7 +28,6 @@ import {
   type Order,
   type RevenueLeakageVector,
   type SystemSettings,
-  type VirtualFileAsset,
 } from "@/lib/db";
 
 interface SystemResponse {
@@ -35,7 +36,6 @@ interface SystemResponse {
   cancellations?: CancellationRecord[];
   activities?: OperationalActivity[];
   leakageVectors?: RevenueLeakageVector[];
-  files?: VirtualFileAsset[];
   brands?: BrandConfig[];
   kitchens?: KitchenConfig[];
   settings?: SystemSettings;
@@ -62,15 +62,43 @@ function formatDuration(start?: string, end?: string): string {
   return `${((e - s) / 60000).toFixed(1)}m`;
 }
 
-const STATUS_BADGE: Record<Order["status"], string> = {
-  PENDING: "border-amber-500/40 bg-amber-500/10 text-amber-300",
-  PREPARING: "border-sky-500/40 bg-sky-500/10 text-sky-300",
-  READY_FOR_PICKUP: "border-emerald-500/40 bg-emerald-500/10 text-emerald-300",
-  DRIVER_ASSIGNED: "border-purple-500/40 bg-purple-500/10 text-purple-300",
-  PICKED_UP: "border-indigo-500/40 bg-indigo-500/10 text-indigo-300",
-  DISPATCHED: "border-teal-500/40 bg-teal-500/10 text-teal-300",
-  CANCELLED: "border-red-500/40 bg-red-500/10 text-red-300",
+function elapsedMinutes(iso?: string): number {
+  if (!iso) return 0;
+  const ts = new Date(iso).getTime();
+  if (Number.isNaN(ts)) return 0;
+  return Math.max(0, Math.floor((Date.now() - ts) / 60000));
+}
+
+const STATUS_DOT: Record<Order["status"], string> = {
+  PENDING: "bg-amber-400",
+  PREPARING: "bg-sky-400",
+  READY_FOR_PICKUP: "bg-emerald-400",
+  DRIVER_ASSIGNED: "bg-violet-400",
+  PICKED_UP: "bg-indigo-400",
+  DISPATCHED: "bg-teal-400",
+  CANCELLED: "bg-rose-400",
 };
+
+const STATUS_TEXT: Record<Order["status"], string> = {
+  PENDING: "text-amber-300",
+  PREPARING: "text-sky-300",
+  READY_FOR_PICKUP: "text-emerald-300",
+  DRIVER_ASSIGNED: "text-violet-300",
+  PICKED_UP: "text-indigo-300",
+  DISPATCHED: "text-teal-300",
+  CANCELLED: "text-rose-300",
+};
+
+function CopilotParamTrigger({ onOpen }: { onOpen: () => void }) {
+  const params = useSearchParams();
+  const copilot = params.get("copilot");
+  useEffect(() => {
+    if (copilot === "1") {
+      onOpen();
+    }
+  }, [copilot, onOpen]);
+  return null;
+}
 
 export default function OwnerPage() {
   const [orders, setOrders] = useState<Order[]>([]);
@@ -80,7 +108,6 @@ export default function OwnerPage() {
   const [leakageVectors, setLeakageVectors] = useState<RevenueLeakageVector[]>(
     [],
   );
-  const [files, setFiles] = useState<VirtualFileAsset[]>([]);
   const [brands, setBrands] = useState<BrandConfig[]>(BRANDS_DB);
   const [kitchens, setKitchens] = useState<KitchenConfig[]>(KITCHENS_DB);
   const [currency, setCurrency] = useState<SupportedCurrency>("INR");
@@ -90,10 +117,12 @@ export default function OwnerPage() {
 
   const [kitchenScope, setKitchenScope] = useState<string>("ALL");
   const [brandScope, setBrandScope] = useState<string>("ALL");
-  const [showDesktopOs, setShowDesktopOs] = useState<boolean>(false);
+  const [copilotOpen, setCopilotOpen] = useState<boolean>(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+
+  const openCopilot = useCallback(() => setCopilotOpen(true), []);
 
   const fmt = useCallback(
     (amount: number) => formatCurrency(amount, currency),
@@ -106,7 +135,7 @@ export default function OwnerPage() {
       const data = (await res.json()) as SystemResponse;
 
       if (!res.ok) {
-        throw new Error(data.error || "Unable to load kitchen overview.");
+        throw new Error(data.error || "Unable to load command center.");
       }
 
       setOrders(Array.isArray(data.orders) ? data.orders : []);
@@ -118,7 +147,6 @@ export default function OwnerPage() {
       setLeakageVectors(
         Array.isArray(data.leakageVectors) ? data.leakageVectors : [],
       );
-      setFiles(Array.isArray(data.files) ? data.files : []);
       if (Array.isArray(data.brands) && data.brands.length > 0) {
         setBrands(data.brands);
       }
@@ -133,6 +161,12 @@ export default function OwnerPage() {
       }
       if (data.currentEmployee) {
         setCurrentEmployee(data.currentEmployee);
+        if (
+          data.currentEmployee.role !== "OWNER" &&
+          data.currentEmployee.kitchenId
+        ) {
+          setKitchenScope(data.currentEmployee.kitchenId);
+        }
       }
       setDemoSandboxEnabled(Boolean(data.demoSandboxEnabled));
       setError("");
@@ -151,6 +185,28 @@ export default function OwnerPage() {
     void loadData();
   }, [loadData]);
 
+  useEffect(() => {
+    const onHubChanged = (event: Event) => {
+      const custom = event as CustomEvent<{ kitchenId?: string }>;
+      if (custom.detail?.kitchenId) {
+        setKitchenScope(custom.detail.kitchenId);
+      }
+    };
+    const onSettingsUpdated = (event: Event) => {
+      const custom = event as CustomEvent<SystemSettings>;
+      if (custom.detail?.currency) setCurrency(custom.detail.currency);
+      if (typeof custom.detail?.prepSlaMinutes === "number") {
+        setPrepSlaMinutes(custom.detail.prepSlaMinutes);
+      }
+    };
+    window.addEventListener("darkit:hub-changed", onHubChanged);
+    window.addEventListener("darkit:settings-updated", onSettingsUpdated);
+    return () => {
+      window.removeEventListener("darkit:hub-changed", onHubChanged);
+      window.removeEventListener("darkit:settings-updated", onSettingsUpdated);
+    };
+  }, []);
+
   const realtimeSync = useRealtimeKitchenSync({
     organizationId: currentEmployee?.organizationId,
     kitchenId:
@@ -161,40 +217,6 @@ export default function OwnerPage() {
           : null,
     onSync: loadData,
   });
-
-  useEffect(() => {
-    const onSettingsUpdated = (event: Event) => {
-      const custom = event as CustomEvent<SystemSettings>;
-      if (custom.detail?.currency) setCurrency(custom.detail.currency);
-      if (typeof custom.detail?.prepSlaMinutes === "number") {
-        setPrepSlaMinutes(custom.detail.prepSlaMinutes);
-      }
-    };
-    window.addEventListener("darkit:settings-updated", onSettingsUpdated);
-    return () =>
-      window.removeEventListener("darkit:settings-updated", onSettingsUpdated);
-  }, []);
-
-  async function handleQuickTransition(
-    orderId: string,
-    status: Order["status"],
-  ) {
-    try {
-      const res = await fetch("/api/orders", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ orderId, action: status }),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data.error || "Order update failed");
-      }
-      setError("");
-      await loadData();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Action failed");
-    }
-  }
 
   async function handleStoreAction(action: "RESET_STORE" | "CLEAR_ORDERS") {
     try {
@@ -211,7 +233,7 @@ export default function OwnerPage() {
       }
       setNotice(
         action === "RESET_STORE"
-          ? "Demo workspace reset to clean INR sample state."
+          ? "Sandbox workspace reset to clean INR seed state."
           : "Active order queue cleared.",
       );
       await loadData();
@@ -262,6 +284,20 @@ export default function OwnerPage() {
     [inventory, kitchenScope],
   );
 
+  const slaRiskOrders = useMemo(() => {
+    return filteredOrders.filter((o) => {
+      if (
+        o.status !== "PENDING" &&
+        o.status !== "PREPARING" &&
+        o.status !== "READY_FOR_PICKUP"
+      ) {
+        return false;
+      }
+      const mins = elapsedMinutes(o.prepStartedAt ?? o.receivedAt ?? o.createdAt);
+      return mins >= Math.floor(prepSlaMinutes * 0.8);
+    });
+  }, [filteredOrders, prepSlaMinutes]);
+
   const analytics = useMemo(() => {
     const activeOrders = filteredOrders.filter(
       (o) =>
@@ -290,6 +326,14 @@ export default function OwnerPage() {
       (sum, o) => sum + (o.totalAmount ?? 0),
       0,
     );
+    const netCollected = nonCancelled
+      .filter(
+        (o) =>
+          o.paymentStatus === "CAPTURED" ||
+          o.paymentStatus === "AGGREGATOR_SETTLED" ||
+          !o.paymentStatus,
+      )
+      .reduce((sum, o) => sum + (o.totalAmount ?? 0), 0);
     const aov =
       nonCancelled.length > 0 ? grossRevenue / nonCancelled.length : 0;
 
@@ -330,7 +374,10 @@ export default function OwnerPage() {
       const rev = list
         .filter((o) => o.status !== "CANCELLED")
         .reduce((s, o) => s + (o.totalAmount ?? 0), 0);
-      return { ...k, count: list.length, revenue: rev };
+      const activeCount = list.filter(
+        (o) => o.status !== "DISPATCHED" && o.status !== "CANCELLED",
+      ).length;
+      return { ...k, count: list.length, activeCount, revenue: rev };
     });
 
     const channelMap: Record<string, { count: number; revenue: number }> = {};
@@ -353,6 +400,7 @@ export default function OwnerPage() {
       completedOrders: completedOrders.length,
       cancelledOrders: cancelledOrders.length,
       grossRevenue,
+      netCollected,
       aov,
       totalLoss,
       totalClaims,
@@ -363,22 +411,10 @@ export default function OwnerPage() {
     };
   }, [filteredOrders, brands, kitchens]);
 
-  const totalPotentialRev = useMemo(
-    () => leakageVectors.reduce((s, v) => s + v.potentialRevenue, 0),
-    [leakageVectors],
-  );
-  const totalCollectedRev = useMemo(
-    () => leakageVectors.reduce((s, v) => s + v.actualCollected, 0),
-    [leakageVectors],
-  );
   const totalLeakedAmount = useMemo(
     () => leakageVectors.reduce((s, v) => s + v.leakedAmount, 0),
     [leakageVectors],
   );
-  const leakagePct =
-    totalPotentialRev > 0
-      ? ((totalPotentialRev - totalCollectedRev) / totalPotentialRev) * 100
-      : 0;
 
   const selectedKitchenLabel = useMemo(() => {
     if (kitchenScope === "ALL") {
@@ -390,675 +426,638 @@ export default function OwnerPage() {
 
   return (
     <AppShell
-      title="Owner Showcase"
-      subtitle="Live INR sales, order throughput, low-stock risks, and a 1-click Bottleneck Brief builder for your cloud kitchens."
-      actions={
+      title="Command Center"
+      subtitle={selectedKitchenLabel}
+      activeHub={kitchenScope}
+      onHubChange={setKitchenScope}
+      toolbar={
+        <select
+          aria-label="Filter by brand"
+          value={brandScope}
+          onChange={(e) => setBrandScope(e.target.value)}
+          className="h-7 rounded-md border border-white/[0.08] bg-[#151519] px-2 text-[11px] font-medium text-zinc-200 outline-none focus:border-white/[0.2]"
+        >
+          <option value="ALL">All Brands</option>
+          {brands.map((b) => (
+            <option key={b.id} value={b.id}>
+              {b.name}
+            </option>
+          ))}
+        </select>
+      }
+      rightActions={
         <>
           <RealtimeSyncBadge
             connectionMode={realtimeSync.connectionMode}
             lastEventAt={realtimeSync.lastEventAt}
             topic={realtimeSync.topic}
           />
-          <a
-            href="#owner-bottleneck-brief"
-            className="rounded-xl border border-emerald-500/40 bg-emerald-500/15 px-3.5 py-2 text-xs font-bold text-emerald-200 transition hover:bg-emerald-500/25"
-          >
-            Export Dev Brief (.md)
-          </a>
-
-          <Link
-            href="/order-injection"
-            className="rounded-xl bg-sky-500 px-3.5 py-2 text-xs font-bold text-slate-950 transition hover:bg-sky-400"
-          >
-            + Add Sample Order
-          </Link>
-
           <button
             type="button"
-            onClick={() => void loadData()}
-            className="rounded-xl border border-slate-700 bg-slate-800 px-3.5 py-2 text-xs font-bold text-white hover:bg-slate-700"
+            onClick={() => setCopilotOpen(true)}
+            className="inline-flex h-7 items-center gap-1.5 rounded-md border border-indigo-500/40 bg-indigo-500/15 px-2.5 text-[11px] font-medium text-indigo-200 transition-colors hover:bg-indigo-500/25"
           >
-            ↻ Refresh
+            Diagnose with Gemini
           </button>
+          <Link
+            href="/live-orders?action=inject"
+            className="inline-flex h-7 items-center rounded-md bg-zinc-100 px-2.5 text-[11px] font-semibold text-zinc-950 transition-colors hover:bg-white"
+          >
+            + Inject Order
+          </Link>
         </>
       }
     >
-      {error && (
-        <div className="mb-5 rounded-2xl border border-red-500/40 bg-red-500/10 px-4 py-3 text-xs font-medium text-red-200">
-          ⚠ {error}
-        </div>
-      )}
+      <Suspense fallback={null}>
+        <CopilotParamTrigger onOpen={openCopilot} />
+      </Suspense>
 
-      {notice && (
-        <div className="mb-5 rounded-2xl border border-emerald-500/40 bg-emerald-500/10 px-4 py-3 text-xs font-medium text-emerald-200">
-          ✓ {notice}
-        </div>
-      )}
-
-      {showDesktopOs ? (
-        <div className="space-y-4">
-          <div className="flex items-center justify-between rounded-2xl border border-slate-800 bg-slate-900/70 px-4 py-3">
-            <p className="text-xs text-slate-300">
-              Viewing optional multi-window Desktop Workbench mode.
-            </p>
-            <button
-              type="button"
-              onClick={() => setShowDesktopOs(false)}
-              className="rounded-lg bg-sky-500 px-3 py-1.5 text-xs font-bold text-slate-950 hover:bg-sky-400"
-            >
-              Return to Owner Showcase
-            </button>
+      <div className="space-y-5">
+        {error && (
+          <div className="rounded-lg border border-rose-500/35 bg-rose-500/10 px-3.5 py-2.5 text-xs text-rose-200">
+            {error}
           </div>
-          <DesktopWindowManager
-            orders={filteredOrders}
-            inventory={inventory}
-            files={files}
-            onQuickTransition={handleQuickTransition}
-          />
-        </div>
-      ) : (
-        <div className="space-y-6">
-          <WorkspaceQuickStart />
+        )}
 
-          {/* Scope Filters */}
-          <section
-            aria-label="Overview filters"
-            className="grid gap-4 rounded-2xl border border-slate-800/90 bg-slate-900/60 p-4 sm:grid-cols-2"
-          >
-            <label className="block">
-              <span className="font-mono text-[11px] font-bold uppercase tracking-wider text-slate-400">
-                Kitchen location
-              </span>
-              <select
-                value={kitchenScope}
-                onChange={(e) => setKitchenScope(e.target.value)}
-                className="mt-1.5 w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm text-white outline-none focus:border-sky-400"
-              >
-                <option value="ALL">All kitchens</option>
-                {kitchens.map((k) => (
-                  <option key={k.id} value={k.id}>
-                    {k.id} • {k.name}
-                  </option>
-                ))}
-              </select>
-            </label>
+        {notice && (
+          <div className="rounded-lg border border-emerald-500/35 bg-emerald-500/10 px-3.5 py-2.5 text-xs text-emerald-200">
+            {notice}
+          </div>
+        )}
 
-            <label className="block">
-              <span className="font-mono text-[11px] font-bold uppercase tracking-wider text-slate-400">
-                Food brand
-              </span>
-              <select
-                value={brandScope}
-                onChange={(e) => setBrandScope(e.target.value)}
-                className="mt-1.5 w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm text-white outline-none focus:border-sky-400"
-              >
-                <option value="ALL">All brands</option>
-                {brands.map((b) => (
-                  <option key={b.id} value={b.id}>
-                    {b.name} ({b.code})
-                  </option>
-                ))}
-              </select>
-            </label>
-          </section>
+        {/* Single Hairline Executive Metric Strip */}
+        <section
+          aria-label="Executive metrics"
+          className="grid grid-cols-2 divide-y divide-white/[0.06] overflow-hidden rounded-lg border border-white/[0.06] bg-[#151519] sm:grid-cols-3 sm:divide-x sm:divide-y-0 lg:grid-cols-5"
+        >
+          <div className="px-4 py-3">
+            <p className="text-[11px] font-medium text-zinc-400">Gross Revenue</p>
+            <p className="mt-1 text-lg font-semibold tracking-tight text-zinc-100 tabular-nums">
+              {fmt(analytics.grossRevenue)}
+            </p>
+            <p className="mt-0.5 text-[11px] text-zinc-500 tabular-nums">
+              AOV {fmt(analytics.aov)}
+            </p>
+          </div>
 
-          {/* 6 Business-First INR KPI Cards */}
-          <section className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-6">
-            <KpiCard
-              label="Gross Sales"
-              value={fmt(analytics.grossRevenue)}
-              sub={`Avg ${fmt(analytics.aov)} / order`}
-              tone="emerald"
-            />
-            <KpiCard
-              label="Active Queue"
-              value={String(analytics.activeOrders)}
-              sub={`${analytics.pendingOrders} Pending · ${analytics.preparingOrders} Cooking`}
-              tone="sky"
-            />
-            <KpiCard
-              label="Dispatched"
-              value={String(analytics.completedOrders)}
-              sub={`${analytics.readyOrders} ready at pass`}
-              tone="teal"
-            />
-            <KpiCard
-              label="Avg Prep Time"
-              value={
-                analytics.averagePrepMinutes !== null
-                  ? `${analytics.averagePrepMinutes.toFixed(1)}m`
-                  : "--"
-              }
-              sub={`Target SLA ≤ ${prepSlaMinutes}m`}
-              tone="purple"
-            />
-            <KpiCard
-              label="Cancellation Loss"
-              value={fmt(analytics.totalLoss)}
-              sub={`${analytics.cancelledOrders} cancelled · ${fmt(analytics.totalClaims)} claims`}
-              tone="red"
-            />
-            <KpiCard
-              label="Low-Stock Alerts"
-              value={String(lowStockItems.length)}
-              sub={
-                lowStockItems.length === 0
-                  ? "All SKUs healthy"
-                  : "Needs reorder check"
-              }
-              tone="amber"
-            />
-          </section>
+          <div className="px-4 py-3">
+            <p className="text-[11px] font-medium text-zinc-400">Net Collected</p>
+            <p className="mt-1 text-lg font-semibold tracking-tight text-emerald-300 tabular-nums">
+              {fmt(analytics.netCollected)}
+            </p>
+            <p className="mt-0.5 text-[11px] text-zinc-500 tabular-nums">
+              Leakage {fmt(totalLeakedAmount)}
+            </p>
+          </div>
 
-          {/* Order Flow by Status */}
-          <section className="rounded-2xl border border-slate-800/90 bg-slate-900/60 p-5">
-            <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
-              <div>
-                <h2 className="text-sm font-bold uppercase tracking-wider text-white">
-                  Live Order Pipeline
-                </h2>
-                <p className="text-xs text-slate-400">
-                  Click any stage to jump directly into the station board.
-                </p>
-              </div>
+          <div className="px-4 py-3">
+            <p className="text-[11px] font-medium text-zinc-400">Active Orders</p>
+            <p className="mt-1 text-lg font-semibold tracking-tight text-zinc-100 tabular-nums">
+              {analytics.activeOrders}
+            </p>
+            <p className="mt-0.5 text-[11px] text-zinc-500 tabular-nums">
+              {analytics.pendingOrders} pending · {analytics.preparingOrders} cooking ·{" "}
+              {analytics.averagePrepMinutes !== null
+                ? `${analytics.averagePrepMinutes.toFixed(1)}m avg`
+                : `SLA ${prepSlaMinutes}m`}
+            </p>
+          </div>
+
+          <div className="px-4 py-3">
+            <p className="text-[11px] font-medium text-zinc-400">Food &amp; Labor Loss</p>
+            <p className="mt-1 text-lg font-semibold tracking-tight text-rose-300 tabular-nums">
+              {fmt(analytics.totalLoss)}
+            </p>
+            <p className="mt-0.5 text-[11px] text-zinc-500 tabular-nums">
+              {analytics.cancelledOrders} cancelled ticket(s)
+            </p>
+          </div>
+
+          <div className="col-span-2 px-4 py-3 sm:col-span-1">
+            <p className="text-[11px] font-medium text-zinc-400">Aggregator Claims</p>
+            <p className="mt-1 text-lg font-semibold tracking-tight text-amber-300 tabular-nums">
+              {fmt(analytics.totalClaims)}
+            </p>
+            <p className="mt-0.5 text-[11px] text-zinc-500 tabular-nums">
+              {analytics.completedOrders} dispatched
+            </p>
+          </div>
+        </section>
+
+        {/* Compact Stage Pipeline Strip */}
+        <section
+          aria-label="Order pipeline"
+          className="grid grid-cols-2 divide-x divide-y divide-white/[0.06] overflow-hidden rounded-lg border border-white/[0.06] bg-[#151519]/60 sm:grid-cols-4 lg:grid-cols-7 lg:divide-y-0"
+        >
+          {(
+            [
+              { status: "PENDING", label: "Pending", href: "/cook" },
+              { status: "PREPARING", label: "Preparing", href: "/cook" },
+              { status: "READY_FOR_PICKUP", label: "Ready", href: "/dispatch" },
+              { status: "DRIVER_ASSIGNED", label: "Assigned", href: "/dispatch" },
+              { status: "PICKED_UP", label: "Picked Up", href: "/dispatch" },
+              { status: "DISPATCHED", label: "Dispatched", href: "/live-orders" },
+              { status: "CANCELLED", label: "Cancelled", href: "/analytics" },
+            ] as const
+          ).map((st) => {
+            const count = filteredOrders.filter((o) => o.status === st.status).length;
+            return (
               <Link
-                href="/live-orders"
-                className="font-mono text-xs font-bold text-sky-400 hover:underline"
+                key={st.status}
+                href={st.href}
+                className="flex items-center justify-between px-3.5 py-2.5 transition-colors hover:bg-[#1d1d22]"
               >
-                Open Live Orders →
+                <span className="flex items-center gap-2 text-xs text-zinc-400">
+                  <span className={`h-1.5 w-1.5 rounded-full ${STATUS_DOT[st.status]}`} />
+                  {st.label}
+                </span>
+                <span className={`font-mono text-sm font-semibold tabular-nums ${STATUS_TEXT[st.status]}`}>
+                  {count}
+                </span>
               </Link>
-            </div>
+            );
+          })}
+        </section>
 
-            <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-4 lg:grid-cols-7">
-              {(
-                [
-                  { status: "PENDING", label: "Pending", href: "/kds" },
-                  { status: "PREPARING", label: "Preparing", href: "/kds" },
-                  {
-                    status: "READY_FOR_PICKUP",
-                    label: "Ready",
-                    href: "/dispatch",
-                  },
-                  {
-                    status: "DRIVER_ASSIGNED",
-                    label: "Driver Assigned",
-                    href: "/dispatch",
-                  },
-                  { status: "PICKED_UP", label: "Picked Up", href: "/dispatch" },
-                  {
-                    status: "DISPATCHED",
-                    label: "Dispatched",
-                    href: "/live-orders",
-                  },
-                  { status: "CANCELLED", label: "Cancelled", href: "/analytics" },
-                ] as const
-              ).map((st) => {
-                const count = filteredOrders.filter(
-                  (o) => o.status === st.status,
-                ).length;
-                return (
-                  <Link
-                    key={st.status}
-                    href={st.href}
-                    className={`rounded-xl border p-3 transition hover:scale-[1.02] ${STATUS_BADGE[st.status]}`}
-                  >
-                    <p className="font-mono text-[10px] font-bold uppercase">
-                      {st.label}
-                    </p>
-                    <p className="mt-1 text-2xl font-black">{count}</p>
-                  </Link>
-                );
-              })}
-            </div>
-          </section>
-
-          {/* 3 Business Health Highlights: Revenue Leakage, Stock Watch, Cancellations */}
-          <section className="grid gap-5 lg:grid-cols-3">
-            <div className="rounded-2xl border border-purple-500/30 bg-slate-900/70 p-5">
-              <div className="flex items-center justify-between">
-                <span className="font-mono text-xs font-bold uppercase text-purple-400">
-                  Margin &amp; Payout Leakage
-                </span>
-                <Link
-                  href="/analytics"
-                  className="font-mono text-xs text-purple-300 hover:underline"
-                >
-                  Full Audit →
-                </Link>
-              </div>
-              <p className="mt-2 text-3xl font-black text-white">
-                {leakagePct.toFixed(2)}%{" "}
-                <span className="text-sm font-normal text-slate-400">
-                  ({fmt(totalLeakedAmount)})
-                </span>
-              </p>
-              <p className="mt-1 text-xs text-slate-400">
-                Collected {fmt(totalCollectedRev)} of {fmt(totalPotentialRev)}{" "}
-                potential across Swiggy, Zomato &amp; Direct orders.
-              </p>
-              <div className="mt-3 flex flex-wrap gap-1.5">
-                {leakageVectors.slice(0, 3).map((v) => (
-                  <span
-                    key={v.id}
-                    className="rounded-lg border border-slate-800 bg-slate-950 px-2 py-1 font-mono text-[10px] text-slate-300"
-                  >
-                    {v.vector}: -{fmt(v.leakedAmount)}
-                  </span>
-                ))}
-              </div>
-            </div>
-
-            <div className="rounded-2xl border border-amber-500/30 bg-slate-900/70 p-5">
-              <div className="flex items-center justify-between">
-                <span className="font-mono text-xs font-bold uppercase text-amber-400">
-                  Inventory Reorder Watch
-                </span>
-                <Link
-                  href="/inventory"
-                  className="font-mono text-xs text-amber-300 hover:underline"
-                >
-                  Restock →
-                </Link>
-              </div>
-              <p className="mt-2 text-3xl font-black text-white">
-                {lowStockItems.length}{" "}
-                <span className="text-sm font-normal text-slate-400">
-                  Low-Stock SKUs
-                </span>
-              </p>
-              <p className="mt-1 text-xs text-slate-400">
-                Ingredients at or below reorder threshold in selected scope.
-              </p>
-              <div className="mt-3 flex flex-wrap gap-1.5">
-                {lowStockItems.length === 0 ? (
-                  <span className="text-xs text-emerald-400">
-                    All inventory SKUs are healthy.
-                  </span>
-                ) : (
-                  lowStockItems.map((i) => (
-                    <span
-                      key={`${i.kitchenId ?? "K1"}-${i.id}`}
-                      className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-2 py-1 font-mono text-[10px] text-amber-300"
-                    >
-                      {i.kitchenId ? `[${i.kitchenId}] ` : ""}
-                      {i.name}: {i.currentStock} {i.unit}
-                    </span>
-                  ))
-                )}
-              </div>
-            </div>
-
-            <div className="rounded-2xl border border-red-500/30 bg-slate-900/70 p-5">
-              <div className="flex items-center justify-between">
-                <span className="font-mono text-xs font-bold uppercase text-red-400">
-                  Cancellation Impact Ledger
-                </span>
-                <Link
-                  href="/live-orders"
-                  className="font-mono text-xs text-red-300 hover:underline"
-                >
-                  Manage →
-                </Link>
-              </div>
-              <div className="mt-2 grid grid-cols-2 gap-3">
-                <div>
-                  <p className="text-xs text-slate-400">Food &amp; Labor Loss</p>
-                  <p className="text-2xl font-black text-red-400">
-                    {fmt(analytics.totalLoss)}
-                  </p>
-                </div>
-                <div>
-                  <p className="text-xs text-slate-400">Aggregator Claims</p>
-                  <p className="text-2xl font-black text-amber-300">
-                    {fmt(analytics.totalClaims)}
-                  </p>
-                </div>
-              </div>
-              <p className="mt-2 text-xs text-slate-400">
-                {filteredCancellations.length} cancellation event(s) in current
-                filter scope.
-              </p>
-            </div>
-          </section>
-
-          {/* Brand, Kitchen & Channel Performance */}
-          <section className="grid gap-5 lg:grid-cols-3">
-            <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-5">
-              <div className="mb-4 flex items-center justify-between">
-                <h2 className="text-base font-bold text-white">
-                  Brand Performance
-                </h2>
-                <Link
-                  href="/brands"
-                  className="font-mono text-xs text-sky-400 hover:underline"
-                >
-                  Brands &amp; Menus →
-                </Link>
-              </div>
-              <div className="space-y-2.5">
-                {analytics.brandStats.map((b) => (
-                  <div
-                    key={b.id}
-                    className="flex items-center justify-between rounded-xl border border-slate-800/80 bg-slate-950 px-3.5 py-2.5"
-                  >
-                    <div>
-                      <p className="font-semibold text-white">{b.name}</p>
-                      <p className="font-mono text-[10px] text-slate-400">
-                        {b.cuisine}
-                      </p>
-                    </div>
-                    <div className="text-right">
-                      <p className="font-mono text-sm font-bold text-emerald-400">
-                        {fmt(b.revenue)}
-                      </p>
-                      <p className="font-mono text-[10px] text-slate-400">
-                        {b.count} order(s)
-                      </p>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-5">
-              <div className="mb-4 flex items-center justify-between">
-                <h2 className="text-base font-bold text-white">
-                  Kitchen Performance
+        {/* Main 2-Column Operational Split */}
+        <div className="grid gap-5 lg:grid-cols-[minmax(0,1.3fr)_minmax(0,0.9fr)]">
+          {/* LEFT: Hub Throughput, Brand Breakdown & Recent Orders */}
+          <div className="space-y-5">
+            {/* Kitchen Hub Throughput Table */}
+            <section className="overflow-hidden rounded-lg border border-white/[0.06] bg-[#151519]/60">
+              <div className="flex items-center justify-between border-b border-white/[0.06] px-4 py-2.5">
+                <h2 className="text-xs font-semibold text-zinc-200">
+                  Kitchen Hub Throughput
                 </h2>
                 <Link
                   href="/kitchens"
-                  className="font-mono text-xs text-sky-400 hover:underline"
+                  className="text-[11px] font-medium text-zinc-400 transition-colors hover:text-zinc-100"
                 >
-                  Facilities →
+                  Manage hubs
                 </Link>
               </div>
-              <div className="space-y-2.5">
-                {analytics.kitchenStats.map((k) => (
-                  <div
-                    key={k.id}
-                    className="flex items-center justify-between rounded-xl border border-slate-800/80 bg-slate-950 px-3.5 py-2.5"
-                  >
-                    <div>
-                      <p className="font-semibold text-white">
-                        {k.id} • {k.name}
-                      </p>
-                      <p className="font-mono text-[10px] text-slate-400">
-                        {k.location}
-                      </p>
-                    </div>
-                    <div className="text-right">
-                      <p className="font-mono text-sm font-bold text-sky-400">
-                        {fmt(k.revenue)}
-                      </p>
-                      <p className="font-mono text-[10px] text-slate-400">
-                        {k.count} order(s)
-                      </p>
-                    </div>
-                  </div>
-                ))}
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs">
+                  <thead>
+                    <tr className="border-b border-white/[0.06] bg-[#09090b]/40 text-[11px] font-medium text-zinc-500">
+                      <th className="px-4 py-2">Hub</th>
+                      <th className="px-4 py-2">Location</th>
+                      <th className="px-4 py-2 text-right">Active</th>
+                      <th className="px-4 py-2 text-right">Orders</th>
+                      <th className="px-4 py-2 text-right">Gross Revenue</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-white/[0.06]">
+                    {analytics.kitchenStats.map((k) => (
+                      <tr
+                        key={k.id}
+                        onClick={() => setKitchenScope(k.id)}
+                        className={`cursor-pointer transition-colors hover:bg-[#1d1d22]/70 ${
+                          kitchenScope === k.id ? "bg-[#1d1d22]" : ""
+                        }`}
+                      >
+                        <td className="px-4 py-2.5 font-medium text-zinc-100">
+                          <span className="mr-2 rounded bg-[#1d1d22] px-1.5 py-0.5 font-mono text-[10px] text-zinc-300">
+                            {k.id}
+                          </span>
+                          {k.name}
+                        </td>
+                        <td className="px-4 py-2.5 text-zinc-400">{k.location}</td>
+                        <td className="px-4 py-2.5 text-right font-mono text-sky-300 tabular-nums">
+                          {k.activeCount}
+                        </td>
+                        <td className="px-4 py-2.5 text-right font-mono text-zinc-300 tabular-nums">
+                          {k.count}
+                        </td>
+                        <td className="px-4 py-2.5 text-right font-mono font-medium text-emerald-300 tabular-nums">
+                          {fmt(k.revenue)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
-            </div>
+            </section>
 
-            <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-5">
-              <div className="mb-4 flex items-center justify-between">
-                <h2 className="text-base font-bold text-white">
-                  Channel Breakdown
-                </h2>
-                <Link
-                  href="/order-injection"
-                  className="font-mono text-xs text-sky-400 hover:underline"
-                >
-                  Test Order →
-                </Link>
-              </div>
-              {Object.keys(analytics.channelMap).length === 0 ? (
-                <p className="rounded-xl bg-slate-950 p-6 text-center text-xs text-slate-500">
-                  No channel order data available yet.
-                </p>
-              ) : (
-                <div className="space-y-2.5">
-                  {Object.entries(analytics.channelMap).map(
-                    ([channel, stat]) => (
+            {/* Brand & Channel Breakdown Split */}
+            <div className="grid gap-5 md:grid-cols-2">
+              <section className="overflow-hidden rounded-lg border border-white/[0.06] bg-[#151519]/60">
+                <div className="flex items-center justify-between border-b border-white/[0.06] px-4 py-2.5">
+                  <h2 className="text-xs font-semibold text-zinc-200">
+                    Brand Breakdown
+                  </h2>
+                  <Link
+                    href="/brands"
+                    className="text-[11px] font-medium text-zinc-400 hover:text-zinc-100"
+                  >
+                    Menus
+                  </Link>
+                </div>
+                <div className="divide-y divide-white/[0.06]">
+                  {analytics.brandStats.map((b) => (
+                    <div
+                      key={b.id}
+                      className="flex items-center justify-between px-4 py-2.5 text-xs"
+                    >
+                      <div className="min-w-0">
+                        <p className="truncate font-medium text-zinc-100">
+                          {b.name}
+                        </p>
+                        <p className="truncate text-[11px] text-zinc-500">
+                          {b.cuisine}
+                        </p>
+                      </div>
+                      <div className="text-right font-mono tabular-nums">
+                        <p className="font-medium text-emerald-300">
+                          {fmt(b.revenue)}
+                        </p>
+                        <p className="text-[10px] text-zinc-500">
+                          {b.count} ord
+                        </p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </section>
+
+              <section className="overflow-hidden rounded-lg border border-white/[0.06] bg-[#151519]/60">
+                <div className="flex items-center justify-between border-b border-white/[0.06] px-4 py-2.5">
+                  <h2 className="text-xs font-semibold text-zinc-200">
+                    Channel Mix
+                  </h2>
+                  <Link
+                    href="/analytics"
+                    className="text-[11px] font-medium text-zinc-400 hover:text-zinc-100"
+                  >
+                    Audit
+                  </Link>
+                </div>
+                <div className="divide-y divide-white/[0.06]">
+                  {Object.keys(analytics.channelMap).length === 0 ? (
+                    <p className="px-4 py-6 text-center text-xs text-zinc-500">
+                      No orders in scope.
+                    </p>
+                  ) : (
+                    Object.entries(analytics.channelMap).map(([channel, stat]) => (
                       <div
                         key={channel}
-                        className="flex items-center justify-between rounded-xl border border-slate-800/80 bg-slate-950 px-3.5 py-2.5"
+                        className="flex items-center justify-between px-4 py-2.5 text-xs"
                       >
-                        <span className="font-semibold text-slate-200">
-                          {channel}
+                        <span className="font-medium text-zinc-200">{channel}</span>
+                        <span className="font-mono tabular-nums">
+                          <span className="text-zinc-400">{stat.count} · </span>
+                          <span className="font-medium text-zinc-100">
+                            {fmt(stat.revenue)}
+                          </span>
                         </span>
-                        <div className="text-right font-mono">
-                          <span className="text-sm font-bold text-white">
-                            {stat.count}
-                          </span>
-                          <span className="ml-2 text-xs text-emerald-400">
-                            ({fmt(stat.revenue)})
-                          </span>
-                        </div>
                       </div>
-                    ),
+                    ))
                   )}
                 </div>
-              )}
+              </section>
             </div>
-          </section>
 
-          {/* Interactive Owner Bottleneck -> Downloadable .md Brief Builder */}
-          <OwnerBottleneckBriefBuilder
-            ownerName={currentEmployee?.name || "Cloud Kitchen Owner"}
-            kitchenScope={selectedKitchenLabel}
-            telemetry={{
-              grossRevenue: analytics.grossRevenue,
-              aov: analytics.aov,
-              activeOrdersCount: analytics.activeOrders,
-              completedOrdersCount: analytics.completedOrders,
-              cancelledOrdersCount: analytics.cancelledOrders,
-              totalLoss: analytics.totalLoss,
-              totalClaims: analytics.totalClaims,
-              totalLeakage: totalLeakedAmount,
-              lowStockItems: lowStockItems.map(
-                (i) => `${i.name} (${i.currentStock} ${i.unit})`,
-              ),
-              activeBrandsCount: brands.filter((b) => b.active).length,
-              onlineKitchensCount: kitchens.filter((k) => k.active).length,
-              currency,
-            }}
-            onSavedToExplorer={() => void loadData()}
-          />
-
-          {/* Recent Orders & Live Operational Activity */}
-          <section className="grid gap-5 lg:grid-cols-2">
-            <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-5">
-              <div className="mb-4 flex items-center justify-between">
-                <h2 className="text-base font-bold text-white">
+            {/* Recent Orders Table */}
+            <section className="overflow-hidden rounded-lg border border-white/[0.06] bg-[#151519]/60">
+              <div className="flex items-center justify-between border-b border-white/[0.06] px-4 py-2.5">
+                <h2 className="text-xs font-semibold text-zinc-200">
                   Recent Orders
                 </h2>
                 <Link
                   href="/live-orders"
-                  className="font-mono text-xs text-sky-400 hover:underline"
+                  className="text-[11px] font-medium text-zinc-400 hover:text-zinc-100"
                 >
-                  Open Monitor →
+                  Open inbox
                 </Link>
               </div>
-
               {loading && filteredOrders.length === 0 ? (
-                <p className="text-xs text-slate-400">Loading orders...</p>
+                <p className="px-4 py-8 text-center text-xs text-zinc-500">
+                  Loading orders...
+                </p>
               ) : filteredOrders.length === 0 ? (
-                <p className="rounded-xl bg-slate-950 p-6 text-center text-xs text-slate-500">
+                <p className="px-4 py-8 text-center text-xs text-zinc-500">
                   No orders in current filter scope.
                 </p>
               ) : (
-                <div className="max-h-96 space-y-2.5 overflow-y-auto pr-1">
-                  {filteredOrders.slice(0, 10).map((order) => (
-                    <div
-                      key={order.id}
-                      className="rounded-xl border border-slate-800/90 bg-slate-950 p-3"
-                    >
-                      <div className="flex items-center justify-between gap-2">
-                        <div>
-                          <span className="font-mono text-sm font-bold text-white">
-                            {order.id}
-                          </span>
-                          <span className="ml-2 text-xs text-slate-400">
-                            {order.brandId} • {order.kitchenId} •{" "}
-                            {order.channel}
-                          </span>
-                        </div>
-                        <span
-                          className={`rounded-full border px-2.5 py-0.5 font-mono text-[10px] font-bold ${STATUS_BADGE[order.status]}`}
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs">
+                    <thead>
+                      <tr className="border-b border-white/[0.06] bg-[#09090b]/40 text-[11px] font-medium text-zinc-500">
+                        <th className="px-4 py-2">Order</th>
+                        <th className="px-4 py-2">Hub / Channel</th>
+                        <th className="px-4 py-2">Status</th>
+                        <th className="px-4 py-2 text-right">Prep</th>
+                        <th className="px-4 py-2 text-right">Total</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-white/[0.06]">
+                      {filteredOrders.slice(0, 8).map((order) => (
+                        <tr
+                          key={order.id}
+                          className="transition-colors hover:bg-[#1d1d22]/60"
                         >
-                          {order.status.replaceAll("_", " ")}
-                        </span>
-                      </div>
-                      <p className="mt-1.5 text-xs text-slate-300">
-                        {order.items
-                          .map((i) => `${i.quantity}× ${i.name}`)
-                          .join(", ")}
-                      </p>
-                      <div className="mt-2 flex flex-wrap items-center justify-between gap-2 font-mono text-[10px] text-slate-500">
-                        <span>
-                          Received:{" "}
-                          {formatTime(order.receivedAt || order.createdAt)}
-                        </span>
-                        <span>
-                          Prep:{" "}
-                          {formatDuration(
-                            order.prepStartedAt,
-                            order.prepCompletedAt,
-                          )}
-                        </span>
-                        <span className="text-emerald-400 font-bold">
-                          {fmt(order.totalAmount ?? 0)}
-                        </span>
-                      </div>
-                    </div>
-                  ))}
+                          <td className="px-4 py-2">
+                            <Link
+                              href={`/live-orders?order=${encodeURIComponent(order.id)}`}
+                              className="font-mono font-medium text-zinc-100 hover:underline tabular-nums"
+                            >
+                              {order.id}
+                            </Link>
+                            <p className="truncate text-[11px] text-zinc-500">
+                              {order.items
+                                .map((i) => `${i.quantity}x ${i.name}`)
+                                .join(", ")}
+                            </p>
+                          </td>
+                          <td className="px-4 py-2 font-mono text-[11px] text-zinc-400">
+                            {order.kitchenId} · {order.channel}
+                          </td>
+                          <td className="px-4 py-2">
+                            <span
+                              className={`inline-flex items-center gap-1.5 font-mono text-[10px] font-semibold uppercase ${STATUS_TEXT[order.status]}`}
+                            >
+                              <span
+                                className={`h-1.5 w-1.5 rounded-full ${STATUS_DOT[order.status]}`}
+                              />
+                              {order.status.replaceAll("_", " ")}
+                            </span>
+                          </td>
+                          <td className="px-4 py-2 text-right font-mono text-[11px] text-zinc-400 tabular-nums">
+                            {formatDuration(
+                              order.prepStartedAt,
+                              order.prepCompletedAt,
+                            )}
+                          </td>
+                          <td className="px-4 py-2 text-right font-mono font-medium text-zinc-100 tabular-nums">
+                            {fmt(order.totalAmount ?? 0)}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
                 </div>
               )}
-            </div>
+            </section>
+          </div>
 
-            <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-5">
-              <div className="mb-4 flex items-center justify-between">
-                <h2 className="text-base font-bold text-white">
-                  Live Kitchen Activity Stream
-                </h2>
-                <span className="font-mono text-[10px] text-slate-400">
-                  Audit Log
-                </span>
+          {/* RIGHT: Actionable Exceptions (Low Stock + SLA Breaches + Recent Cancellations + Audit) */}
+          <div className="space-y-5">
+            {/* Low-Stock Watch */}
+            <section className="overflow-hidden rounded-lg border border-white/[0.06] bg-[#151519]/60">
+              <div className="flex items-center justify-between border-b border-white/[0.06] px-4 py-2.5">
+                <div className="flex items-center gap-2">
+                  <h2 className="text-xs font-semibold text-zinc-200">
+                    Low-Stock SKUs
+                  </h2>
+                  <span className="rounded bg-amber-500/15 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-amber-300 tabular-nums">
+                    {lowStockItems.length}
+                  </span>
+                </div>
+                <Link
+                  href="/inventory"
+                  className="text-[11px] font-medium text-zinc-400 hover:text-zinc-100"
+                >
+                  Restock
+                </Link>
               </div>
-
-              {loading && filteredActivities.length === 0 ? (
-                <p className="text-xs text-slate-400">
-                  Loading operational activity...
-                </p>
-              ) : filteredActivities.length === 0 ? (
-                <p className="rounded-xl bg-slate-950 p-6 text-center text-xs text-slate-500">
-                  No activity in current filter scope.
-                </p>
-              ) : (
-                <div className="max-h-96 space-y-2.5 overflow-y-auto pr-1">
-                  {filteredActivities.slice(0, 12).map((act) => (
+              <div className="divide-y divide-white/[0.06]">
+                {lowStockItems.length === 0 ? (
+                  <p className="px-4 py-5 text-xs text-emerald-300">
+                    All inventory SKUs are above reorder thresholds.
+                  </p>
+                ) : (
+                  lowStockItems.slice(0, 6).map((item) => (
                     <div
-                      key={act.id}
-                      className="rounded-xl border border-slate-800/90 bg-slate-950 p-3"
+                      key={`${item.kitchenId ?? "K1"}-${item.id}`}
+                      className="flex items-center justify-between px-4 py-2.5 text-xs"
                     >
-                      <div className="flex items-start justify-between gap-2">
-                        <span className="font-semibold text-xs text-white">
-                          {act.title}
-                        </span>
-                        <span className="font-mono text-[10px] text-slate-500 shrink-0">
-                          {formatTime(act.timestamp)}
-                        </span>
+                      <div className="min-w-0">
+                        <p className="truncate font-medium text-zinc-100">
+                          {item.name}
+                        </p>
+                        <p className="font-mono text-[10px] text-zinc-500">
+                          {item.kitchenId ?? "K1"} · {item.sku}
+                        </p>
                       </div>
-                      <p className="mt-1 text-xs text-slate-400">
-                        {act.details}
-                      </p>
-                      <div className="mt-2 flex items-center gap-2 font-mono text-[10px] text-slate-500">
-                        <span>Actor: {act.actor}</span>
-                        {act.kitchenId && (
-                          <span>• Kitchen: {act.kitchenId}</span>
+                      <div className="text-right font-mono tabular-nums">
+                        <span
+                          className={
+                            item.currentStock <= 0
+                              ? "font-semibold text-rose-400"
+                              : "font-semibold text-amber-300"
+                          }
+                        >
+                          {item.currentStock} {item.unit}
+                        </span>
+                        <p className="text-[10px] text-zinc-500">
+                          min {item.reorderThreshold}
+                        </p>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </section>
+
+            {/* Active SLA Breaches */}
+            <section className="overflow-hidden rounded-lg border border-white/[0.06] bg-[#151519]/60">
+              <div className="flex items-center justify-between border-b border-white/[0.06] px-4 py-2.5">
+                <div className="flex items-center gap-2">
+                  <h2 className="text-xs font-semibold text-zinc-200">
+                    SLA Watch &amp; Breaches
+                  </h2>
+                  <span className="rounded bg-rose-500/15 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-rose-300 tabular-nums">
+                    {slaRiskOrders.length}
+                  </span>
+                </div>
+                <Link
+                  href="/cook"
+                  className="text-[11px] font-medium text-zinc-400 hover:text-zinc-100"
+                >
+                  Open KDS
+                </Link>
+              </div>
+              <div className="divide-y divide-white/[0.06]">
+                {slaRiskOrders.length === 0 ? (
+                  <p className="px-4 py-5 text-xs text-zinc-500">
+                    No active orders breaching the {prepSlaMinutes}m prep SLA.
+                  </p>
+                ) : (
+                  slaRiskOrders.slice(0, 5).map((o) => (
+                    <Link
+                      key={o.id}
+                      href={`/live-orders?order=${encodeURIComponent(o.id)}`}
+                      className="flex items-center justify-between px-4 py-2.5 text-xs transition-colors hover:bg-[#1d1d22]/60"
+                    >
+                      <div>
+                        <p className="font-mono font-medium text-zinc-100 tabular-nums">
+                          {o.id}
+                        </p>
+                        <p className="text-[11px] text-zinc-500">
+                          {o.kitchenId} · {o.brandId} · {o.status.replaceAll("_", " ")}
+                        </p>
+                      </div>
+                      <KitchenSlaBadge
+                        orderId={o.id}
+                        anchorIso={o.prepStartedAt ?? o.receivedAt ?? o.createdAt}
+                        slaMinutes={prepSlaMinutes}
+                      />
+                    </Link>
+                  ))
+                )}
+              </div>
+            </section>
+
+            {/* Recent Cancellations */}
+            <section className="overflow-hidden rounded-lg border border-white/[0.06] bg-[#151519]/60">
+              <div className="flex items-center justify-between border-b border-white/[0.06] px-4 py-2.5">
+                <div className="flex items-center gap-2">
+                  <h2 className="text-xs font-semibold text-zinc-200">
+                    Recent Cancellations
+                  </h2>
+                  <span className="rounded bg-white/[0.06] px-1.5 py-0.5 font-mono text-[10px] text-zinc-400 tabular-nums">
+                    {filteredCancellations.length}
+                  </span>
+                </div>
+                <Link
+                  href="/analytics"
+                  className="text-[11px] font-medium text-zinc-400 hover:text-zinc-100"
+                >
+                  Ledger
+                </Link>
+              </div>
+              <div className="divide-y divide-white/[0.06]">
+                {filteredCancellations.length === 0 ? (
+                  <p className="px-4 py-5 text-xs text-zinc-500">
+                    No cancellations recorded in current scope.
+                  </p>
+                ) : (
+                  filteredCancellations.slice(0, 5).map((rec) => (
+                    <div
+                      key={rec.id}
+                      className="flex items-center justify-between gap-2 px-4 py-2.5 text-xs"
+                    >
+                      <div className="min-w-0">
+                        <p className="font-mono font-medium text-zinc-100 tabular-nums">
+                          {rec.orderId}{" "}
+                          <span className="text-[10px] text-zinc-500">
+                            {rec.kitchenId} · {rec.stage}
+                          </span>
+                        </p>
+                        <p className="truncate text-[11px] text-zinc-400">
+                          {rec.reason}
+                        </p>
+                      </div>
+                      <div className="shrink-0 text-right font-mono text-[11px] tabular-nums">
+                        <p className="text-rose-300">-{fmt(rec.financialLoss)}</p>
+                        {rec.claimAmount > 0 && (
+                          <p className="text-[10px] text-amber-300">
+                            Claim {fmt(rec.claimAmount)}
+                          </p>
                         )}
                       </div>
                     </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          </section>
+                  ))
+                )}
+              </div>
+            </section>
+
+            {/* Activity Audit Feed */}
+            <section className="overflow-hidden rounded-lg border border-white/[0.06] bg-[#151519]/60">
+              <div className="flex items-center justify-between border-b border-white/[0.06] px-4 py-2.5">
+                <h2 className="text-xs font-semibold text-zinc-200">
+                  Operational Audit Feed
+                </h2>
+                <button
+                  type="button"
+                  onClick={() => void loadData()}
+                  className="text-[11px] font-medium text-zinc-400 hover:text-zinc-100"
+                >
+                  Refresh
+                </button>
+              </div>
+              <div className="max-h-72 divide-y divide-white/[0.06] overflow-y-auto">
+                {filteredActivities.length === 0 ? (
+                  <p className="px-4 py-5 text-xs text-zinc-500">
+                    No activity events yet.
+                  </p>
+                ) : (
+                  filteredActivities.slice(0, 10).map((act) => (
+                    <div key={act.id} className="px-4 py-2.5 text-xs">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="truncate font-medium text-zinc-200">
+                          {act.title}
+                        </span>
+                        <span className="shrink-0 font-mono text-[10px] text-zinc-500 tabular-nums">
+                          {formatTime(act.timestamp)}
+                        </span>
+                      </div>
+                      <p className="mt-0.5 line-clamp-2 text-[11px] text-zinc-400">
+                        {act.details}
+                      </p>
+                    </div>
+                  ))
+                )}
+              </div>
+            </section>
+          </div>
         </div>
-      )}
 
-      {/* Collapsed-by-default Developer & Sandbox Drawer */}
-      <details className="mt-6 rounded-2xl border border-slate-800 bg-slate-900/50 p-4">
-        <summary className="cursor-pointer text-xs font-semibold uppercase tracking-wider text-slate-400 hover:text-slate-200">
-          Developer &amp; Sandbox Tools (Hidden from daily kitchen flow)
-        </summary>
-        <p className="mt-2 text-xs text-slate-400">
-          Optional multi-window workbench and demo reset actions. Destructive
-          sandbox resets are strictly disabled when Demo Sandbox Mode is off.
-        </p>
-        <div className="mt-3 flex flex-wrap gap-2">
-          <button
-            type="button"
-            onClick={() => setShowDesktopOs((v) => !v)}
-            className="rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-xs font-semibold text-slate-200 hover:border-emerald-500/40"
-          >
-            {showDesktopOs
-              ? "Switch back to Owner Showcase"
-              : "Open Desktop Workbench View"}
-          </button>
-
-          {demoSandboxEnabled && currentEmployee?.role === "OWNER" && (
-            <>
+        {/* Minimal Sandbox Reset Controls (Demo Owner only) */}
+        {demoSandboxEnabled && currentEmployee?.role === "OWNER" && (
+          <div className="flex flex-wrap items-center justify-between gap-2 border-t border-white/[0.06] pt-4 text-xs text-zinc-500">
+            <span>Demo sandbox controls</span>
+            <div className="flex items-center gap-2">
               <button
                 type="button"
                 onClick={() => void handleStoreAction("RESET_STORE")}
-                className="rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-xs font-semibold text-slate-200 hover:border-sky-500/40"
+                className="h-7 rounded-md border border-white/[0.08] bg-[#151519] px-2.5 text-[11px] font-medium text-zinc-300 transition-colors hover:border-white/[0.16] hover:text-zinc-100"
               >
                 Reset Sample INR Data
               </button>
               <button
                 type="button"
                 onClick={() => void handleStoreAction("CLEAR_ORDERS")}
-                className="rounded-lg border border-amber-500/25 bg-slate-950 px-3 py-2 text-xs font-semibold text-amber-200 hover:border-amber-500/60"
+                className="h-7 rounded-md border border-amber-500/30 bg-amber-500/10 px-2.5 text-[11px] font-medium text-amber-200 transition-colors hover:bg-amber-500/20"
               >
                 Clear Active Orders
               </button>
-            </>
-          )}
-        </div>
-      </details>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* On-Demand Gemini Operational Copilot Slide-Over */}
+      <SplitInspector
+        open={copilotOpen}
+        mode="overlay"
+        widthClassName="max-w-[680px]"
+        title="Gemini Operational Copilot"
+        subtitle={`Live telemetry diagnosis · ${selectedKitchenLabel}`}
+        onClose={() => setCopilotOpen(false)}
+      >
+        <OwnerBottleneckBriefBuilder
+          ownerName={currentEmployee?.name || "Cloud Kitchen Owner"}
+          kitchenScope={selectedKitchenLabel}
+          telemetry={{
+            grossRevenue: analytics.grossRevenue,
+            aov: analytics.aov,
+            activeOrdersCount: analytics.activeOrders,
+            completedOrdersCount: analytics.completedOrders,
+            cancelledOrdersCount: analytics.cancelledOrders,
+            totalLoss: analytics.totalLoss,
+            totalClaims: analytics.totalClaims,
+            totalLeakage: totalLeakedAmount,
+            lowStockItems: lowStockItems.map(
+              (i) => `${i.name} (${i.currentStock} ${i.unit})`,
+            ),
+            activeBrandsCount: brands.filter((b) => b.active).length,
+            onlineKitchensCount: kitchens.filter((k) => k.active).length,
+            currency,
+          }}
+          onSavedToExplorer={() => void loadData()}
+        />
+      </SplitInspector>
     </AppShell>
-  );
-}
-
-function KpiCard({
-  label,
-  value,
-  sub,
-  tone,
-}: {
-  label: string;
-  value: string;
-  sub: string;
-  tone: "slate" | "emerald" | "sky" | "amber" | "teal" | "red" | "purple";
-}) {
-  const toneStyles: Record<string, string> = {
-    slate: "border-slate-800 bg-slate-900/70 text-white",
-    emerald: "border-emerald-500/30 bg-emerald-500/5 text-emerald-300",
-    sky: "border-sky-500/30 bg-sky-500/5 text-sky-300",
-    amber: "border-amber-500/30 bg-amber-500/5 text-amber-300",
-    teal: "border-teal-500/30 bg-teal-500/5 text-teal-300",
-    red: "border-red-500/30 bg-red-500/5 text-red-300",
-    purple: "border-purple-500/30 bg-purple-500/5 text-purple-300",
-  };
-
-  return (
-    <div className={`rounded-2xl border p-3.5 ${toneStyles[tone]}`}>
-      <p className="font-mono text-[10px] font-bold uppercase tracking-wider text-slate-400">
-        {label}
-      </p>
-      <p className="mt-1.5 text-2xl font-black">{value}</p>
-      <p className="mt-1 font-mono text-[10px] text-slate-400">{sub}</p>
-    </div>
   );
 }

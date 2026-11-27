@@ -4,6 +4,7 @@ import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import AppShell from "@/components/AppShell";
+import { SplitInspector } from "@/components/SplitInspector";
 import { formatCurrency } from "@/lib/currency";
 import {
   type Employee,
@@ -52,17 +53,17 @@ interface InvoiceDetailPayload {
 }
 
 const INVOICE_STATUS_BADGE: Record<TaxInvoiceStatus, string> = {
-  ISSUED: "border-emerald-500/40 bg-emerald-500/10 text-emerald-300",
-  CREDIT_NOTE: "border-amber-500/40 bg-amber-500/10 text-amber-300",
-  VOIDED: "border-red-500/40 bg-red-500/10 text-red-300",
+  ISSUED: "border-emerald-500/35 bg-emerald-500/10 text-emerald-300",
+  CREDIT_NOTE: "border-amber-500/35 bg-amber-500/10 text-amber-300",
+  VOIDED: "border-rose-500/35 bg-rose-500/10 text-rose-300",
 };
 
 const PAYMENT_STATUS_BADGE: Record<OrderPaymentStatus, string> = {
-  CAPTURED: "border-emerald-500/40 bg-emerald-500/10 text-emerald-300",
-  AGGREGATOR_SETTLED: "border-sky-500/40 bg-sky-500/10 text-sky-300",
-  PENDING: "border-amber-500/40 bg-amber-500/10 text-amber-300",
-  UNPAID: "border-rose-500/40 bg-rose-500/10 text-rose-300",
-  REFUNDED: "border-purple-500/40 bg-purple-500/10 text-purple-300",
+  CAPTURED: "border-emerald-500/35 bg-emerald-500/10 text-emerald-300",
+  AGGREGATOR_SETTLED: "border-sky-500/35 bg-sky-500/10 text-sky-300",
+  PENDING: "border-amber-500/35 bg-amber-500/10 text-amber-300",
+  UNPAID: "border-rose-500/35 bg-rose-500/10 text-rose-300",
+  REFUNDED: "border-violet-500/35 bg-violet-500/10 text-violet-300",
 };
 
 function formatDate(value?: string): string {
@@ -145,11 +146,16 @@ export default function InvoicesPage() {
           setKitchens(sysData.kitchens as KitchenConfig[]);
         }
       })
-      .catch(() => {
-        // ignore transient metadata error
-      });
+      .catch(() => {});
+
+    const onHubChanged = (event: Event) => {
+      const custom = event as CustomEvent<{ kitchenId?: string }>;
+      if (custom.detail?.kitchenId) setKitchenFilter(custom.detail.kitchenId);
+    };
+    window.addEventListener("darkit:hub-changed", onHubChanged);
     return () => {
       active = false;
+      window.removeEventListener("darkit:hub-changed", onHubChanged);
     };
   }, []);
 
@@ -230,7 +236,11 @@ export default function InvoicesPage() {
   }, [buildQueryString]);
 
   const fyOptions = useMemo(() => {
-    const set = new Set<string>([getIndianFinancialYear(), "FY26-27", "FY27-28"]);
+    const set = new Set<string>([
+      getIndianFinancialYear(),
+      "FY26-27",
+      "FY27-28",
+    ]);
     for (const inv of invoices) set.add(inv.financialYear);
     return Array.from(set).sort().reverse();
   }, [invoices]);
@@ -239,239 +249,209 @@ export default function InvoicesPage() {
 
   return (
     <AppShell
-      title="GST Tax Invoices & Accounting Exports"
-      subtitle="Indian GST (CGST/SGST/IGST), gapless per-hub FY sequencing, credit notes, Tally Prime & Zoho Books exports, and Razorpay settlement status."
+      title="GST Tax Invoices"
+      subtitle={`SAC ${DEFAULT_SAC_RESTAURANT_SERVICE} · ${fyFilter === "ALL" ? "All FYs" : fyFilter}`}
+      activeHub={kitchenFilter}
+      onHubChange={setKitchenFilter}
+      rightActions={
+        <>
+          <a
+            href={`/api/invoices/export?${buildQueryString({ format: "tally_csv" })}`}
+            className="inline-flex h-7 items-center rounded-md border border-emerald-500/35 bg-emerald-500/10 px-2.5 text-[11px] font-medium text-emerald-300 transition-colors hover:bg-emerald-500/20"
+          >
+            Tally CSV
+          </a>
+          <a
+            href={`/api/invoices/export?${buildQueryString({ format: "zoho_csv" })}`}
+            className="inline-flex h-7 items-center rounded-md border border-sky-500/35 bg-sky-500/10 px-2.5 text-[11px] font-medium text-sky-300 transition-colors hover:bg-sky-500/20"
+          >
+            Zoho CSV
+          </a>
+          <button
+            type="button"
+            onClick={() => void handleLoadGstrSummary()}
+            className="inline-flex h-7 items-center rounded-md border border-white/[0.08] bg-[#151519] px-2.5 text-[11px] font-medium text-zinc-300 hover:border-white/[0.16] hover:text-zinc-100"
+          >
+            GSTR-1 JSON
+          </button>
+        </>
+      }
     >
       <Suspense fallback={null}>
         <LinkedInvoiceOpener onOpen={openInvoiceDetail} />
       </Suspense>
 
-      <div className="space-y-6">
-        {/* KPI Strip */}
-        <section className="grid grid-cols-2 gap-3 lg:grid-cols-5">
-          <div className="rounded-2xl border border-slate-800 bg-slate-900/70 p-4">
-            <span className="font-mono text-[11px] font-bold uppercase text-slate-400">
-              Net Taxable Value
-            </span>
-            <p className="mt-1 font-mono text-xl font-black text-white">
+      <div className="space-y-5">
+        {/* Hairline GST KPI Strip */}
+        <section className="grid grid-cols-2 divide-y divide-white/[0.06] overflow-hidden rounded-lg border border-white/[0.06] bg-[#151519] sm:grid-cols-5 sm:divide-x sm:divide-y-0">
+          <div className="px-4 py-3">
+            <p className="text-[11px] font-medium text-zinc-400">Net Taxable</p>
+            <p className="mt-1 font-mono text-lg font-semibold text-zinc-100 tabular-nums">
               {fmt(summary.taxableSubtotal)}
             </p>
-            <p className="mt-0.5 font-mono text-[11px] text-slate-400">
-              {summary.issuedCount} issued • {summary.creditNoteCount} credit notes
+            <p className="mt-0.5 text-[11px] text-zinc-500 tabular-nums">
+              {summary.issuedCount} issued · {summary.creditNoteCount} CN
             </p>
           </div>
-          <div className="rounded-2xl border border-slate-800 bg-slate-900/70 p-4">
-            <span className="font-mono text-[11px] font-bold uppercase text-emerald-400">
-              CGST + SGST (Intra)
-            </span>
-            <p className="mt-1 font-mono text-xl font-black text-emerald-300">
+          <div className="px-4 py-3">
+            <p className="text-[11px] font-medium text-zinc-400">
+              CGST + SGST
+            </p>
+            <p className="mt-1 font-mono text-lg font-semibold text-emerald-300 tabular-nums">
               {fmt(summary.cgstTotal + summary.sgstTotal)}
             </p>
-            <p className="mt-0.5 font-mono text-[11px] text-slate-400">
-              CGST {fmt(summary.cgstTotal)} • SGST {fmt(summary.sgstTotal)}
+            <p className="mt-0.5 font-mono text-[10px] text-zinc-500 tabular-nums">
+              {fmt(summary.cgstTotal)} / {fmt(summary.sgstTotal)}
             </p>
           </div>
-          <div className="rounded-2xl border border-slate-800 bg-slate-900/70 p-4">
-            <span className="font-mono text-[11px] font-bold uppercase text-cyan-400">
+          <div className="px-4 py-3">
+            <p className="text-[11px] font-medium text-zinc-400">
               IGST (Inter-State)
-            </span>
-            <p className="mt-1 font-mono text-xl font-black text-cyan-300">
+            </p>
+            <p className="mt-1 font-mono text-lg font-semibold text-cyan-300 tabular-nums">
               {fmt(summary.igstTotal)}
             </p>
-            <p className="mt-0.5 font-mono text-[11px] text-slate-400">
-              SAC {DEFAULT_SAC_RESTAURANT_SERVICE} (5% Restaurant)
-            </p>
+            <p className="mt-0.5 text-[11px] text-zinc-500">5% Restaurant</p>
           </div>
-          <div className="rounded-2xl border border-slate-800 bg-slate-900/70 p-4">
-            <span className="font-mono text-[11px] font-bold uppercase text-amber-400">
-              Total GST Liability
-            </span>
-            <p className="mt-1 font-mono text-xl font-black text-amber-300">
+          <div className="px-4 py-3">
+            <p className="text-[11px] font-medium text-zinc-400">
+              GST Liability
+            </p>
+            <p className="mt-1 font-mono text-lg font-semibold text-amber-300 tabular-nums">
               {fmt(summary.totalTax)}
             </p>
-            <p className="mt-0.5 font-mono text-[11px] text-slate-400">
-              Excludes credited / voided bills
-            </p>
+            <p className="mt-0.5 text-[11px] text-zinc-500">Net of credits</p>
           </div>
-          <div className="col-span-2 rounded-2xl border border-emerald-500/30 bg-emerald-500/5 p-4 lg:col-span-1">
-            <span className="font-mono text-[11px] font-bold uppercase text-emerald-300">
+          <div className="col-span-2 px-4 py-3 sm:col-span-1">
+            <p className="text-[11px] font-medium text-zinc-400">
               Net Invoice Total
-            </span>
-            <p className="mt-1 font-mono text-xl font-black text-white">
+            </p>
+            <p className="mt-1 font-mono text-lg font-semibold text-zinc-100 tabular-nums">
               {fmt(summary.grandTotal)}
             </p>
-            <p className="mt-0.5 font-mono text-[11px] text-emerald-300/80">
-              FY {fyFilter === "ALL" ? "All Years" : fyFilter}
+            <p className="mt-0.5 font-mono text-[10px] text-zinc-500">
+              {fyFilter === "ALL" ? "All FYs" : fyFilter}
             </p>
-          </div>
-        </section>
-
-        {/* Filters & Accounting Export Toolbar */}
-        <section className="rounded-2xl border border-slate-800 bg-slate-900/70 p-4">
-          <div className="flex flex-wrap items-end justify-between gap-4">
-            <div className="grid flex-1 grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
-              <label className="block">
-                <span className="mb-1 block font-mono text-[10px] font-bold uppercase text-slate-400">
-                  Kitchen Hub
-                </span>
-                <select
-                  value={kitchenFilter}
-                  disabled={!isOwner && Boolean(employee?.kitchenId)}
-                  onChange={(e) => setKitchenFilter(e.target.value)}
-                  className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-xs text-white disabled:opacity-70"
-                >
-                  {isOwner && <option value="ALL">All Organization Hubs</option>}
-                  {kitchens.map((k) => (
-                    <option key={k.id} value={k.id}>
-                      {k.id} • {k.code} ({getIndianStateName(k.stateCode)})
-                    </option>
-                  ))}
-                </select>
-              </label>
-
-              <label className="block">
-                <span className="mb-1 block font-mono text-[10px] font-bold uppercase text-slate-400">
-                  Financial Year
-                </span>
-                <select
-                  value={fyFilter}
-                  onChange={(e) => setFyFilter(e.target.value)}
-                  className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-xs text-white"
-                >
-                  <option value="ALL">All FYs</option>
-                  {fyOptions.map((fy) => (
-                    <option key={fy} value={fy}>
-                      {fy}
-                    </option>
-                  ))}
-                </select>
-              </label>
-
-              <label className="block">
-                <span className="mb-1 block font-mono text-[10px] font-bold uppercase text-slate-400">
-                  Invoice Status
-                </span>
-                <select
-                  value={statusFilter}
-                  onChange={(e) => setStatusFilter(e.target.value)}
-                  className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-xs text-white"
-                >
-                  <option value="ALL">All Statuses</option>
-                  <option value="ISSUED">ISSUED (Tax Invoice)</option>
-                  <option value="CREDIT_NOTE">CREDIT_NOTE</option>
-                  <option value="VOIDED">VOIDED</option>
-                </select>
-              </label>
-
-              <label className="block">
-                <span className="mb-1 block font-mono text-[10px] font-bold uppercase text-slate-400">
-                  From Date
-                </span>
-                <input
-                  type="date"
-                  value={fromDate}
-                  onChange={(e) => setFromDate(e.target.value)}
-                  className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-xs text-white"
-                />
-              </label>
-
-              <label className="block">
-                <span className="mb-1 block font-mono text-[10px] font-bold uppercase text-slate-400">
-                  To Date
-                </span>
-                <input
-                  type="date"
-                  value={toDate}
-                  onChange={(e) => setToDate(e.target.value)}
-                  className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-xs text-white"
-                />
-              </label>
-            </div>
-
-            <div className="flex flex-wrap items-center gap-2">
-              <a
-                href={`/api/invoices/export?${buildQueryString({ format: "tally_csv" })}`}
-                className="rounded-xl border border-emerald-500/40 bg-emerald-500/10 px-3.5 py-2 font-mono text-xs font-bold text-emerald-300 transition hover:bg-emerald-500/20"
-              >
-                ↓ Export Tally CSV
-              </a>
-              <a
-                href={`/api/invoices/export?${buildQueryString({ format: "zoho_csv" })}`}
-                className="rounded-xl border border-sky-500/40 bg-sky-500/10 px-3.5 py-2 font-mono text-xs font-bold text-sky-300 transition hover:bg-sky-500/20"
-              >
-                ↓ Export Zoho Books CSV
-              </a>
-              <button
-                type="button"
-                onClick={() => void handleLoadGstrSummary()}
-                className="rounded-xl border border-slate-700 bg-slate-950 px-3.5 py-2 font-mono text-xs font-bold text-slate-200 transition hover:border-slate-500"
-              >
-                GSTR-1 JSON
-              </button>
-            </div>
           </div>
         </section>
 
         {error && (
-          <div className="rounded-2xl border border-red-500/40 bg-red-500/10 p-4 font-mono text-xs text-red-300">
+          <div className="rounded-lg border border-rose-500/35 bg-rose-500/10 px-3.5 py-2.5 text-xs text-rose-200">
             {error}
           </div>
         )}
 
         {gstrPreview && (
-          <section className="rounded-2xl border border-sky-500/30 bg-slate-950 p-4">
-            <div className="mb-2 flex items-center justify-between">
-              <span className="font-mono text-xs font-bold uppercase text-sky-400">
-                GSTR-1 Structured Summary JSON Preview
+          <section className="overflow-hidden rounded-lg border border-white/[0.08] bg-[#151519]">
+            <div className="flex items-center justify-between border-b border-white/[0.06] px-4 py-2">
+              <span className="font-mono text-[11px] font-semibold text-zinc-200">
+                GSTR-1 Structured Summary JSON
               </span>
               <button
                 type="button"
                 onClick={() => setGstrPreview(null)}
-                className="font-mono text-xs text-slate-400 hover:text-white"
+                className="text-xs text-zinc-400 hover:text-zinc-100"
               >
-                Close ✕
+                Close
               </button>
             </div>
-            <pre className="max-h-64 overflow-auto rounded-xl bg-slate-900 p-3 font-mono text-[11px] text-emerald-300">
+            <pre className="max-h-60 overflow-auto bg-[#09090b] p-3.5 font-mono text-[11px] text-emerald-300">
               {gstrPreview}
             </pre>
           </section>
         )}
 
-        {/* Invoices Table */}
-        <section className="overflow-hidden rounded-2xl border border-slate-800 bg-slate-900/70">
+        {/* Invoices Table + Inline Filters */}
+        <section className="overflow-hidden rounded-lg border border-white/[0.06] bg-[#151519]/60">
+          <div className="flex flex-wrap items-center gap-2 border-b border-white/[0.06] bg-[#09090b]/40 px-4 py-2.5">
+            <select
+              aria-label="Filter hub"
+              value={kitchenFilter}
+              disabled={!isOwner && Boolean(employee?.kitchenId)}
+              onChange={(e) => setKitchenFilter(e.target.value)}
+              className="h-7 rounded-md border border-white/[0.08] bg-[#151519] px-2 text-[11px] text-zinc-200 disabled:opacity-60"
+            >
+              {isOwner && <option value="ALL">All Hubs</option>}
+              {kitchens.map((k) => (
+                <option key={k.id} value={k.id}>
+                  {k.id} · {k.code}
+                </option>
+              ))}
+            </select>
+
+            <select
+              aria-label="Filter FY"
+              value={fyFilter}
+              onChange={(e) => setFyFilter(e.target.value)}
+              className="h-7 rounded-md border border-white/[0.08] bg-[#151519] px-2 text-[11px] text-zinc-200"
+            >
+              <option value="ALL">All FYs</option>
+              {fyOptions.map((fy) => (
+                <option key={fy} value={fy}>
+                  {fy}
+                </option>
+              ))}
+            </select>
+
+            <select
+              aria-label="Filter status"
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value)}
+              className="h-7 rounded-md border border-white/[0.08] bg-[#151519] px-2 text-[11px] text-zinc-200"
+            >
+              <option value="ALL">All Statuses</option>
+              <option value="ISSUED">ISSUED</option>
+              <option value="CREDIT_NOTE">CREDIT_NOTE</option>
+              <option value="VOIDED">VOIDED</option>
+            </select>
+
+            <input
+              type="date"
+              aria-label="From date"
+              value={fromDate}
+              onChange={(e) => setFromDate(e.target.value)}
+              className="h-7 rounded-md border border-white/[0.08] bg-[#151519] px-2 font-mono text-[11px] text-zinc-200"
+            />
+            <input
+              type="date"
+              aria-label="To date"
+              value={toDate}
+              onChange={(e) => setToDate(e.target.value)}
+              className="h-7 rounded-md border border-white/[0.08] bg-[#151519] px-2 font-mono text-[11px] text-zinc-200"
+            />
+          </div>
+
           <div className="overflow-x-auto">
-            <table className="w-full border-collapse text-left text-xs">
+            <table className="w-full text-left text-xs">
               <thead>
-                <tr className="border-b border-slate-800 bg-slate-950/80 font-mono text-[10px] uppercase tracking-wider text-slate-400">
-                  <th className="px-4 py-3">Invoice Number</th>
-                  <th className="px-4 py-3">Issued</th>
-                  <th className="px-4 py-3">Order / Hub</th>
-                  <th className="px-4 py-3">Supply State</th>
-                  <th className="px-4 py-3 text-right">Taxable</th>
-                  <th className="px-4 py-3 text-right">CGST / SGST</th>
-                  <th className="px-4 py-3 text-right">IGST</th>
-                  <th className="px-4 py-3 text-right">Grand Total</th>
-                  <th className="px-4 py-3">Payment</th>
-                  <th className="px-4 py-3">Status</th>
-                  <th className="px-4 py-3 text-right">Action</th>
+                <tr className="border-b border-white/[0.06] bg-[#09090b]/40 text-[11px] font-medium text-zinc-500">
+                  <th className="px-4 py-2">Invoice #</th>
+                  <th className="px-4 py-2">Issued</th>
+                  <th className="px-4 py-2">Order / Hub</th>
+                  <th className="px-4 py-2">Supply</th>
+                  <th className="px-4 py-2 text-right">Taxable</th>
+                  <th className="px-4 py-2 text-right">CGST / SGST</th>
+                  <th className="px-4 py-2 text-right">IGST</th>
+                  <th className="px-4 py-2 text-right">Total</th>
+                  <th className="px-4 py-2">Payment</th>
+                  <th className="px-4 py-2">Status</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-800/70">
+              <tbody className="divide-y divide-white/[0.06]">
                 {loading ? (
                   <tr>
                     <td
-                      colSpan={11}
-                      className="px-4 py-10 text-center font-mono text-slate-400"
+                      colSpan={10}
+                      className="px-4 py-10 text-center text-xs text-zinc-500"
                     >
-                      Loading sequential GST tax invoices…
+                      Loading sequential GST tax invoices...
                     </td>
                   </tr>
                 ) : invoices.length === 0 ? (
                   <tr>
                     <td
-                      colSpan={11}
-                      className="px-4 py-10 text-center font-mono text-slate-400"
+                      colSpan={10}
+                      className="px-4 py-10 text-center text-xs text-zinc-500"
                     >
                       No GST tax invoices match the selected filters.
                     </td>
@@ -481,48 +461,45 @@ export default function InvoicesPage() {
                     <tr
                       key={inv.id}
                       onClick={() => void openInvoiceDetail(inv.id)}
-                      className="cursor-pointer transition hover:bg-slate-800/40"
+                      className="cursor-pointer transition-colors hover:bg-[#1d1d22]/60"
                     >
-                      <td className="px-4 py-3 font-mono font-bold text-white">
+                      <td className="px-4 py-2.5 font-mono font-medium text-zinc-100 tabular-nums">
                         {inv.invoiceNumber}
-                        <span className="block text-[10px] font-normal text-slate-400">
-                          GSTIN: {inv.sellerGstin}
+                        <span className="block text-[10px] font-normal text-zinc-500">
+                          {inv.sellerGstin}
                         </span>
                       </td>
-                      <td className="px-4 py-3 font-mono text-[11px] text-slate-300">
+                      <td className="px-4 py-2.5 font-mono text-[11px] text-zinc-400 tabular-nums">
                         {formatDate(inv.issuedAt)}
                       </td>
-                      <td className="px-4 py-3">
-                        <span className="font-mono font-bold text-sky-300">
+                      <td className="px-4 py-2.5">
+                        <span className="font-mono font-medium text-zinc-200 tabular-nums">
                           {inv.orderId}
                         </span>
-                        <span className="block text-[11px] text-slate-400">
-                          {inv.kitchenId} • {inv.brandId || "Brand"} ({inv.channel || "Channel"})
+                        <span className="block text-[11px] text-zinc-500">
+                          {inv.kitchenId} · {inv.channel || "Channel"}
                         </span>
                       </td>
-                      <td className="px-4 py-3 font-mono text-[11px] text-slate-300">
+                      <td className="px-4 py-2.5 font-mono text-[11px] text-zinc-400 tabular-nums">
                         {inv.sellerStateCode} → {inv.placeOfSupplyStateCode}
-                        <span className="block text-[10px] text-slate-400">
-                          {inv.igstAmount > 0 ? "Inter-State" : "Intra-State"}
-                        </span>
                       </td>
-                      <td className="px-4 py-3 text-right font-mono text-slate-200">
+                      <td className="px-4 py-2.5 text-right font-mono text-zinc-200 tabular-nums">
                         {fmt(inv.taxableSubtotal)}
                       </td>
-                      <td className="px-4 py-3 text-right font-mono text-emerald-300">
+                      <td className="px-4 py-2.5 text-right font-mono text-emerald-300 tabular-nums">
                         {inv.igstAmount > 0
                           ? "—"
                           : `${fmt(inv.cgstAmount)} / ${fmt(inv.sgstAmount)}`}
                       </td>
-                      <td className="px-4 py-3 text-right font-mono text-cyan-300">
+                      <td className="px-4 py-2.5 text-right font-mono text-cyan-300 tabular-nums">
                         {inv.igstAmount > 0 ? fmt(inv.igstAmount) : "—"}
                       </td>
-                      <td className="px-4 py-3 text-right font-mono font-bold text-white">
+                      <td className="px-4 py-2.5 text-right font-mono font-semibold text-zinc-100 tabular-nums">
                         {fmt(inv.grandTotal)}
                       </td>
-                      <td className="px-4 py-3">
+                      <td className="px-4 py-2.5">
                         <span
-                          className={`inline-block rounded-full border px-2 py-0.5 font-mono text-[10px] font-bold ${
+                          className={`inline-block rounded-md border px-1.5 py-0.5 font-mono text-[10px] font-medium ${
                             PAYMENT_STATUS_BADGE[
                               inv.paymentStatus ?? "AGGREGATOR_SETTLED"
                             ]
@@ -534,24 +511,12 @@ export default function InvoicesPage() {
                           )}
                         </span>
                       </td>
-                      <td className="px-4 py-3">
+                      <td className="px-4 py-2.5">
                         <span
-                          className={`inline-block rounded-full border px-2 py-0.5 font-mono text-[10px] font-bold ${INVOICE_STATUS_BADGE[inv.status]}`}
+                          className={`inline-block rounded-md border px-1.5 py-0.5 font-mono text-[10px] font-medium ${INVOICE_STATUS_BADGE[inv.status]}`}
                         >
                           {inv.status}
                         </span>
-                      </td>
-                      <td className="px-4 py-3 text-right">
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            void openInvoiceDetail(inv.id);
-                          }}
-                          className="rounded-lg border border-slate-700 bg-slate-950 px-2.5 py-1 font-mono text-[11px] font-bold text-sky-300 hover:border-sky-500"
-                        >
-                          Inspect
-                        </button>
                       </td>
                     </tr>
                   ))
@@ -560,209 +525,188 @@ export default function InvoicesPage() {
             </table>
           </div>
         </section>
+      </div>
 
-        {/* Indian GST Tax Invoice Print-Ready Preview Modal */}
-        {(detail || detailLoading) && (
-          <div
-            className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 p-4 backdrop-blur-sm"
-            onClick={() => setDetail(null)}
-          >
-            <div
-              className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-2xl border border-slate-700 bg-slate-900 p-6 text-slate-100 shadow-2xl"
-              onClick={(e) => e.stopPropagation()}
+      {/* GST Tax Invoice Slide-Over Inspector */}
+      <SplitInspector
+        open={Boolean(detail || detailLoading)}
+        mode="overlay"
+        widthClassName="max-w-[580px]"
+        title={
+          detail ? detail.invoice.invoiceNumber : "Loading Tax Invoice..."
+        }
+        subtitle={
+          detail
+            ? `${detail.organization?.name || "DarKit Hospitality Pvt. Ltd."} · ${detail.kitchen?.name || detail.invoice.kitchenId}`
+            : undefined
+        }
+        badge={
+          detail ? (
+            <span
+              className={`rounded-md border px-1.5 py-0.5 font-mono text-[10px] font-medium ${INVOICE_STATUS_BADGE[detail.invoice.status]}`}
             >
-              {detailLoading || !detail ? (
-                <p className="py-12 text-center font-mono text-xs text-slate-400">
-                  Loading Indian GST Tax Invoice…
-                </p>
-              ) : (
-                <div className="space-y-5">
-                  <div className="flex flex-wrap items-start justify-between gap-3 border-b border-slate-800 pb-4">
-                    <div>
-                      <span className="font-mono text-[11px] font-bold uppercase tracking-wider text-emerald-400">
-                        {detail.invoice.status === "CREDIT_NOTE"
-                          ? "GST Credit Note (Pre-Prep Cancellation)"
-                          : "Indian GST Tax Invoice (SAC 996331)"}
-                      </span>
-                      <h2 className="mt-1 font-mono text-2xl font-black text-white">
-                        {detail.invoice.invoiceNumber}
-                      </h2>
-                      <p className="mt-1 text-xs text-slate-300">
-                        {detail.organization?.name ||
-                          "DarKit Hospitality Pvt. Ltd."}{" "}
-                        • {detail.kitchen?.name || detail.invoice.kitchenId}
-                      </p>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={() => window.print()}
-                        className="rounded-xl border border-emerald-500/40 bg-emerald-500/10 px-3 py-1.5 font-mono text-xs font-bold text-emerald-300 hover:bg-emerald-500/20"
-                      >
-                        Print / PDF
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setDetail(null)}
-                        className="rounded-xl border border-slate-700 bg-slate-950 px-3 py-1.5 font-mono text-xs text-slate-300 hover:text-white"
-                      >
-                        Close ✕
-                      </button>
-                    </div>
-                  </div>
-
-                  {detail.invoice.status === "CREDIT_NOTE" && (
-                    <div className="rounded-xl border border-amber-500/40 bg-amber-500/10 p-3 font-mono text-xs text-amber-200">
-                      <strong>CREDIT NOTE ISSUED:</strong> Credited on{" "}
-                      {formatDate(detail.invoice.voidedAt)}. Reason:{" "}
-                      {detail.invoice.voidReason || "Cancelled before prep"}.
-                    </div>
-                  )}
-
-                  <div className="grid grid-cols-2 gap-3 rounded-xl border border-slate-800 bg-slate-950 p-4 font-mono text-xs">
-                    <div>
-                      <span className="text-slate-500">Seller GSTIN</span>
-                      <p className="font-bold text-white">
-                        {detail.invoice.sellerGstin}
-                      </p>
-                    </div>
-                    <div>
-                      <span className="text-slate-500">FSSAI License No.</span>
-                      <p className="font-bold text-white">
-                        {detail.invoice.sellerFssai}
-                      </p>
-                    </div>
-                    <div>
-                      <span className="text-slate-500">
-                        Seller State → Place of Supply
-                      </span>
-                      <p className="font-bold text-sky-300">
-                        {detail.invoice.sellerStateCode} (
-                        {getIndianStateName(detail.invoice.sellerStateCode)}) →{" "}
-                        {detail.invoice.placeOfSupplyStateCode} (
-                        {getIndianStateName(
-                          detail.invoice.placeOfSupplyStateCode,
-                        )}
-                        )
-                      </p>
-                    </div>
-                    <div>
-                      <span className="text-slate-500">Customer / Order</span>
-                      <p className="font-bold text-white">
-                        {detail.invoice.customerName || "Walk-In Guest"} •{" "}
-                        <Link
-                          href={`/live-orders?order=${encodeURIComponent(detail.invoice.orderId)}`}
-                          className="text-sky-400 underline"
-                        >
-                          {detail.invoice.orderId}
-                        </Link>
-                      </p>
-                    </div>
-                  </div>
-
-                  {detail.order && (
-                    <div className="overflow-hidden rounded-xl border border-slate-800">
-                      <table className="w-full text-left text-xs">
-                        <thead className="bg-slate-950 font-mono text-[10px] uppercase text-slate-400">
-                          <tr>
-                            <th className="px-3 py-2">Item (SAC 996331)</th>
-                            <th className="px-3 py-2 text-right">Qty</th>
-                            <th className="px-3 py-2 text-right">Rate</th>
-                            <th className="px-3 py-2 text-right">Amount</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-slate-800">
-                          {detail.order.items.map((item) => (
-                            <tr key={item.id}>
-                              <td className="px-3 py-2 text-slate-200">
-                                {item.name}
-                              </td>
-                              <td className="px-3 py-2 text-right font-mono">
-                                {item.quantity}
-                              </td>
-                              <td className="px-3 py-2 text-right font-mono">
-                                {fmt(item.price ?? 0)}
-                              </td>
-                              <td className="px-3 py-2 text-right font-mono text-white">
-                                {fmt((item.price ?? 0) * item.quantity)}
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  )}
-
-                  {/* GST Tax Breakup */}
-                  <div className="space-y-1.5 rounded-xl border border-slate-800 bg-slate-950 p-4 font-mono text-xs">
-                    <div className="flex justify-between text-slate-300">
-                      <span>Taxable Value (incl. packaging {fmt(detail.invoice.packagingFee)})</span>
-                      <span>{fmt(detail.invoice.taxableSubtotal)}</span>
-                    </div>
-                    {detail.invoice.igstAmount > 0 ? (
-                      <div className="flex justify-between text-cyan-300">
-                        <span>IGST ({detail.invoice.igstRate}%)</span>
-                        <span>{fmt(detail.invoice.igstAmount)}</span>
-                      </div>
-                    ) : (
-                      <>
-                        <div className="flex justify-between text-emerald-300">
-                          <span>CGST ({detail.invoice.cgstRate}%)</span>
-                          <span>{fmt(detail.invoice.cgstAmount)}</span>
-                        </div>
-                        <div className="flex justify-between text-emerald-300">
-                          <span>SGST ({detail.invoice.sgstRate}%)</span>
-                          <span>{fmt(detail.invoice.sgstAmount)}</span>
-                        </div>
-                      </>
-                    )}
-                    <div className="flex justify-between border-t border-slate-800 pt-2 text-sm font-black text-white">
-                      <span>Grand Total (INR)</span>
-                      <span>{fmt(detail.invoice.grandTotal)}</span>
-                    </div>
-                  </div>
-
-                  {/* Payment Ledger */}
-                  {detail.paymentTransactions.length > 0 && (
-                    <div className="rounded-xl border border-slate-800 bg-slate-950 p-4 font-mono text-xs">
-                      <span className="font-bold uppercase text-sky-400">
-                        Razorpay / Payment Transactions
-                      </span>
-                      <div className="mt-2 space-y-2">
-                        {detail.paymentTransactions.map((tx) => (
-                          <div
-                            key={tx.id}
-                            className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-800 bg-slate-900 p-2.5"
-                          >
-                            <div>
-                              <span className="font-bold text-white">
-                                {tx.provider} • {tx.status}
-                              </span>
-                              <span className="block text-[10px] text-slate-400">
-                                Order: {tx.providerOrderId || "--"} • Pay:{" "}
-                                {tx.providerPaymentId || "--"}
-                                {tx.providerRefundId
-                                  ? ` • Refund: ${tx.providerRefundId}`
-                                  : ""}
-                              </span>
-                            </div>
-                            <span className="font-bold text-emerald-300">
-                              {fmt(tx.amount)}
-                              {tx.refundedAmount > 0
-                                ? ` (Refunded ${fmt(tx.refundedAmount)})`
-                                : ""}
-                            </span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              )}
+              {detail.invoice.status}
+            </span>
+          ) : undefined
+        }
+        onClose={() => setDetail(null)}
+        footer={
+          detail ? (
+            <div className="flex items-center justify-between gap-2">
+              <Link
+                href={`/live-orders?order=${encodeURIComponent(detail.invoice.orderId)}`}
+                className="text-xs font-medium text-zinc-300 hover:text-white"
+              >
+                Open Order {detail.invoice.orderId} →
+              </Link>
+              <button
+                type="button"
+                onClick={() => window.print()}
+                className="h-8 rounded-md bg-zinc-100 px-3 text-xs font-semibold text-zinc-950 hover:bg-white"
+              >
+                Print / Save PDF
+              </button>
             </div>
+          ) : undefined
+        }
+      >
+        {detailLoading || !detail ? (
+          <p className="py-12 text-center text-xs text-zinc-500">
+            Loading Indian GST Tax Invoice...
+          </p>
+        ) : (
+          <div className="space-y-4 text-xs">
+            {detail.invoice.status === "CREDIT_NOTE" && (
+              <div className="rounded-lg border border-amber-500/35 bg-amber-500/10 p-3 text-amber-200">
+                <p className="font-semibold">GST Credit Note Issued</p>
+                <p className="mt-0.5 text-[11px]">
+                  Credited {formatDate(detail.invoice.voidedAt)} ·{" "}
+                  {detail.invoice.voidReason || "Cancelled before prep"}
+                </p>
+              </div>
+            )}
+
+            <div className="grid grid-cols-2 gap-px overflow-hidden rounded-lg border border-white/[0.06] bg-white/[0.06] font-mono text-[11px]">
+              <div className="bg-[#151519] p-2.5">
+                <p className="text-[10px] text-zinc-500">Seller GSTIN</p>
+                <p className="mt-0.5 font-semibold text-zinc-100">
+                  {detail.invoice.sellerGstin}
+                </p>
+              </div>
+              <div className="bg-[#151519] p-2.5">
+                <p className="text-[10px] text-zinc-500">FSSAI License</p>
+                <p className="mt-0.5 font-semibold text-zinc-100">
+                  {detail.invoice.sellerFssai}
+                </p>
+              </div>
+              <div className="bg-[#151519] p-2.5">
+                <p className="text-[10px] text-zinc-500">Supply States</p>
+                <p className="mt-0.5 text-zinc-200">
+                  {detail.invoice.sellerStateCode} (
+                  {getIndianStateName(detail.invoice.sellerStateCode)}) →{" "}
+                  {detail.invoice.placeOfSupplyStateCode} (
+                  {getIndianStateName(detail.invoice.placeOfSupplyStateCode)})
+                </p>
+              </div>
+              <div className="bg-[#151519] p-2.5">
+                <p className="text-[10px] text-zinc-500">Customer</p>
+                <p className="mt-0.5 text-zinc-200">
+                  {detail.invoice.customerName || "Walk-In Guest"}
+                </p>
+              </div>
+            </div>
+
+            {detail.order && (
+              <div className="overflow-hidden rounded-lg border border-white/[0.06]">
+                <table className="w-full text-left text-xs">
+                  <thead className="border-b border-white/[0.06] bg-[#151519] text-[10px] font-medium uppercase text-zinc-500">
+                    <tr>
+                      <th className="px-3 py-2">Item (SAC 996331)</th>
+                      <th className="px-3 py-2 text-right">Qty</th>
+                      <th className="px-3 py-2 text-right">Rate</th>
+                      <th className="px-3 py-2 text-right">Amount</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-white/[0.06] bg-[#0e0e11]">
+                    {detail.order.items.map((item) => (
+                      <tr key={item.id}>
+                        <td className="px-3 py-2 text-zinc-200">{item.name}</td>
+                        <td className="px-3 py-2 text-right font-mono tabular-nums">
+                          {item.quantity}
+                        </td>
+                        <td className="px-3 py-2 text-right font-mono tabular-nums">
+                          {fmt(item.price ?? 0)}
+                        </td>
+                        <td className="px-3 py-2 text-right font-mono font-medium text-zinc-100 tabular-nums">
+                          {fmt((item.price ?? 0) * item.quantity)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            <div className="space-y-1.5 rounded-lg border border-white/[0.06] bg-[#151519] p-3 font-mono text-[11px] tabular-nums">
+              <div className="flex justify-between text-zinc-300">
+                <span>
+                  Taxable Value (incl. packaging {fmt(detail.invoice.packagingFee)})
+                </span>
+                <span>{fmt(detail.invoice.taxableSubtotal)}</span>
+              </div>
+              {detail.invoice.igstAmount > 0 ? (
+                <div className="flex justify-between text-cyan-300">
+                  <span>IGST ({detail.invoice.igstRate}%)</span>
+                  <span>{fmt(detail.invoice.igstAmount)}</span>
+                </div>
+              ) : (
+                <>
+                  <div className="flex justify-between text-emerald-300">
+                    <span>CGST ({detail.invoice.cgstRate}%)</span>
+                    <span>{fmt(detail.invoice.cgstAmount)}</span>
+                  </div>
+                  <div className="flex justify-between text-emerald-300">
+                    <span>SGST ({detail.invoice.sgstRate}%)</span>
+                    <span>{fmt(detail.invoice.sgstAmount)}</span>
+                  </div>
+                </>
+              )}
+              <div className="flex justify-between border-t border-white/[0.06] pt-2 text-xs font-semibold text-zinc-100">
+                <span>Grand Total (INR)</span>
+                <span>{fmt(detail.invoice.grandTotal)}</span>
+              </div>
+            </div>
+
+            {detail.paymentTransactions.length > 0 && (
+              <div className="overflow-hidden rounded-lg border border-white/[0.06] bg-[#151519]">
+                <div className="border-b border-white/[0.06] px-3 py-2 text-[11px] font-medium text-zinc-400">
+                  Payment Transactions
+                </div>
+                <div className="divide-y divide-white/[0.06]">
+                  {detail.paymentTransactions.map((tx) => (
+                    <div
+                      key={tx.id}
+                      className="flex items-center justify-between gap-2 px-3 py-2 font-mono text-[11px]"
+                    >
+                      <div className="min-w-0">
+                        <p className="font-medium text-zinc-100">
+                          {tx.provider} · {tx.status}
+                        </p>
+                        <p className="truncate text-[10px] text-zinc-500">
+                          {tx.providerPaymentId || tx.providerOrderId || "--"}
+                        </p>
+                      </div>
+                      <span className="shrink-0 font-semibold text-emerald-300 tabular-nums">
+                        {fmt(tx.amount)}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         )}
-      </div>
+      </SplitInspector>
     </AppShell>
   );
 }

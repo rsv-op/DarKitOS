@@ -1,372 +1,414 @@
 "use client";
 
-import React, {
-  useCallback,
-  useEffect,
-  useMemo,
-  useState,
-} from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
-import GuideIcon, { type GuideIconName } from "@/components/GuideIcon";
+import { usePathname, useRouter } from "next/navigation";
+import { CommandPalette } from "./CommandPalette";
 import { DEMO_ROLES } from "@/lib/getting-started";
-import {
-  usePathname,
-  useRouter,
-} from "next/navigation";
-import type {
-  Employee,
-  PermissionCode,
-  SystemSettings,
-} from "@/lib/db";
 
-interface SessionData {
-  authenticated: boolean;
-  employee: Employee | null;
-  permissions: PermissionCode[];
-  employees: Employee[];
-  settings?: SystemSettings;
-  demoSandboxEnabled?: boolean;
+interface SessionEmployee {
+  id: string;
+  employeeCode: string;
+  name: string;
+  role: string;
+  kitchenId: string | null;
+  organizationId?: string;
+}
+
+export interface AppShellProps {
+  title?: string;
+  subtitle?: string;
+  activeHub?: string;
+  onHubChange?: (hubId: string) => void;
+  toolbar?: React.ReactNode;
+  rightActions?: React.ReactNode;
+  /** Backwards-compatible alias for rightActions used by existing pages */
+  actions?: React.ReactNode;
+  fullBleed?: boolean;
+  children: React.ReactNode;
 }
 
 interface NavItem {
-  label: string;
   href: string;
   aliases?: string[];
-  group: "command" | "operations" | "enterprise";
-  permission?: PermissionCode;
-  icon: GuideIconName;
+  label: string;
+  shortCode: string;
+  permission?: string;
 }
 
-const NAV_ITEMS: NavItem[] = [
+const PRIMARY_NAV: NavItem[] = [
   {
-    label: "Owner Showcase",
-    href: "/dashboard",
-    aliases: ["/owner"],
-    group: "command",
+    href: "/owner",
+    aliases: ["/dashboard"],
+    label: "Command",
+    shortCode: "CMD",
     permission: "OWNER_VIEW",
-    icon: "home",
   },
   {
-    label: "Getting started",
-    href: "/",
-    group: "command",
-    icon: "info",
-  },
-  {
-    label: "Analytics & Margin",
-    href: "/analytics",
-    aliases: ["/performance"],
-    group: "command",
-    permission: "OWNER_VIEW",
-    icon: "chart",
-  },
-  {
-    label: "Sample Orders",
-    href: "/order-injection",
-    aliases: ["/dev"],
-    group: "operations",
-    permission: "ORDER_INJECT",
-    icon: "ticket",
-  },
-  {
-    label: "Live Orders",
     href: "/live-orders",
     aliases: ["/orders"],
-    group: "operations",
-    icon: "list",
+    label: "Orders",
+    shortCode: "ORD",
   },
   {
-    label: "Kitchen Board",
-    href: "/kds",
-    aliases: ["/cook"],
-    group: "operations",
+    href: "/cook",
+    aliases: ["/kds"],
+    label: "Cook KDS",
+    shortCode: "KDS",
     permission: "COOK_ORDERS",
-    icon: "cook",
   },
   {
-    label: "Dispatch",
     href: "/dispatch",
-    group: "operations",
+    label: "Dispatch",
+    shortCode: "DSP",
     permission: "DISPATCH_ORDERS",
-    icon: "truck",
   },
   {
-    label: "Inventory",
     href: "/inventory",
-    group: "operations",
+    label: "Inventory",
+    shortCode: "INV",
     permission: "INVENTORY_VIEW",
-    icon: "box",
   },
   {
-    label: "Brands & Menus",
-    href: "/brands",
-    group: "enterprise",
-    permission: "OWNER_VIEW",
-    icon: "brand",
-  },
-  {
-    label: "Kitchens",
-    href: "/kitchens",
-    group: "enterprise",
-    permission: "OWNER_VIEW",
-    icon: "home",
-  },
-  {
-    label: "GST Invoices",
     href: "/invoices",
-    group: "enterprise",
+    label: "GST Invoices",
+    shortCode: "GST",
     permission: "OWNER_VIEW",
-    icon: "ticket",
   },
   {
-    label: "Staff & Access",
-    href: "/staff",
-    group: "enterprise",
-    permission: "STAFF_MANAGE",
-    icon: "staff",
-  },
-  {
-    label: "File Explorer",
-    href: "/explorer",
-    group: "enterprise",
+    href: "/analytics",
+    aliases: ["/performance"],
+    label: "Analytics",
+    shortCode: "ANL",
     permission: "OWNER_VIEW",
-    icon: "folder",
-  },
-  {
-    label: "Settings",
-    href: "/settings",
-    group: "enterprise",
-    permission: "OWNER_VIEW",
-    icon: "settings",
   },
 ];
 
-export default function AppShell({
+const ADMIN_NAV: NavItem[] = [
+  {
+    href: "/brands",
+    label: "Brands & Menus",
+    shortCode: "BRD",
+    permission: "OWNER_VIEW",
+  },
+  {
+    href: "/kitchens",
+    label: "Kitchens",
+    shortCode: "KIT",
+    permission: "OWNER_VIEW",
+  },
+  {
+    href: "/staff",
+    label: "Staff & RBAC",
+    shortCode: "STF",
+    permission: "STAFF_MANAGE",
+  },
+  {
+    href: "/settings",
+    label: "Settings",
+    shortCode: "SET",
+    permission: "OWNER_VIEW",
+  },
+];
+
+export function AppShell({
   title,
   subtitle,
+  activeHub,
+  onHubChange,
+  toolbar,
+  rightActions,
   actions,
+  fullBleed = false,
   children,
-}: {
-  title: string;
-  subtitle?: string;
-  actions?: React.ReactNode;
-  children: React.ReactNode;
-}) {
+}: AppShellProps) {
   const pathname = usePathname();
   const router = useRouter();
-  const [session, setSession] = useState<SessionData | null>(null);
-  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const [adrModalOpen, setAdrModalOpen] = useState(false);
-  const [switchingCode, setSwitchingCode] = useState<string | null>(null);
-  const [clock, setClock] = useState<string>("");
+  const [employee, setEmployee] = useState<SessionEmployee | null>(null);
+  const [permissions, setPermissions] = useState<string[]>([]);
+  const [demoSandboxEnabled, setDemoSandboxEnabled] = useState(false);
+  const [switchingRole, setSwitchingRole] = useState<string | null>(null);
+  const [selectedHub, setSelectedHub] = useState<string>(activeHub ?? "ALL");
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  const [signingOut, setSigningOut] = useState(false);
 
-  const loadSession = useCallback(async () => {
-    try {
-      const res = await fetch("/api/session", {
-        cache: "no-store",
+  useEffect(() => {
+    if (activeHub) setSelectedHub(activeHub);
+  }, [activeHub]);
+
+  useEffect(() => {
+    let mounted = true;
+    fetch("/api/session", { cache: "no-store" })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (!mounted || !data) return;
+        setDemoSandboxEnabled(Boolean(data.demoSandboxEnabled));
+        if (Array.isArray(data.permissions)) {
+          setPermissions(data.permissions);
+        }
+        if (data.employee) {
+          setEmployee(data.employee as SessionEmployee);
+          if (
+            data.employee.role !== "OWNER" &&
+            data.employee.kitchenId &&
+            !activeHub
+          ) {
+            setSelectedHub(data.employee.kitchenId);
+          }
+        }
+      })
+      .catch(() => {
+        // ignore transient network failure
       });
-      if (res.ok) {
-        const data = (await res.json()) as SessionData;
-        setSession(data);
+    return () => {
+      mounted = false;
+    };
+  }, [activeHub]);
+
+  useEffect(() => {
+    const onHubEvent = (event: Event) => {
+      const custom = event as CustomEvent<{ kitchenId?: string }>;
+      if (custom.detail?.kitchenId) {
+        setSelectedHub(custom.detail.kitchenId);
       }
-    } catch {
-      // Ignore transient network errors
-    }
+    };
+    window.addEventListener("darkit:hub-changed", onHubEvent);
+    return () => window.removeEventListener("darkit:hub-changed", onHubEvent);
   }, []);
 
   useEffect(() => {
-    void loadSession();
-  }, [loadSession, pathname]);
-
-  // Listen for live settings updates (theme/currency/SLA) emitted by /settings
-  useEffect(() => {
-    const handleSettingsUpdated = (event: Event) => {
-      const custom = event as CustomEvent<SystemSettings>;
-      if (custom.detail) {
-        setSession((prev) =>
-          prev ? { ...prev, settings: custom.detail } : prev,
-        );
-      } else {
-        void loadSession();
-      }
-    };
-    window.addEventListener("darkit:settings-updated", handleSettingsUpdated);
-    return () => {
-      window.removeEventListener(
-        "darkit:settings-updated",
-        handleSettingsUpdated,
-      );
-    };
-  }, [loadSession]);
-
-  // Escape key closes System Details modal or mobile drawer
-  useEffect(() => {
-    if (!adrModalOpen && !mobileMenuOpen) return;
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        setAdrModalOpen(false);
-        setMobileMenuOpen(false);
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        setPaletteOpen((prev) => !prev);
       }
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [adrModalOpen, mobileMenuOpen]);
-
-  useEffect(() => {
-    const updateClock = () => {
-      setClock(
-        new Date().toLocaleTimeString("en-IN", {
-          hour: "2-digit",
-          minute: "2-digit",
-          second: "2-digit",
-        }),
-      );
-    };
-    updateClock();
-    const timer = window.setInterval(updateClock, 1000);
-    return () => window.clearInterval(timer);
   }, []);
 
-  async function handleQuickSwitch(code: string) {
-    setSwitchingCode(code);
-    try {
-      const res = await fetch("/api/login", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          employeeCode: code,
-          redirect: pathname,
-        }),
-      });
-      if (res.ok) {
-        await loadSession();
-        window.location.reload();
-      }
-    } finally {
-      setSwitchingCode(null);
-    }
-  }
+  const handleHubSelect = useCallback(
+    (hubId: string) => {
+      setSelectedHub(hubId);
+      onHubChange?.(hubId);
+      window.dispatchEvent(
+        new CustomEvent("darkit:hub-changed", { detail: { kitchenId: hubId } }),
+      );
+    },
+    [onHubChange],
+  );
 
-  async function handleLogout() {
-    await fetch("/api/login", {
-      method: "DELETE",
-    });
-    router.replace("/login");
-    router.refresh();
-  }
+  const handleDemoRoleSwitch = useCallback(
+    async (code: string) => {
+      if (!demoSandboxEnabled || switchingRole) return;
+      setSwitchingRole(code);
+      try {
+        const res = await fetch("/api/login", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ employeeCode: code, redirect: pathname }),
+        });
+        if (res.ok) {
+          window.location.reload();
+        }
+      } finally {
+        setSwitchingRole(null);
+      }
+    },
+    [demoSandboxEnabled, switchingRole, pathname],
+  );
+
+  const handleSignOut = async () => {
+    if (signingOut) return;
+    setSigningOut(true);
+    try {
+      await fetch("/api/login", { method: "DELETE" });
+    } finally {
+      router.push("/login");
+      router.refresh();
+    }
+  };
+
+  const canSee = (item: NavItem) => {
+    if (!item.permission || permissions.length === 0) return true;
+    return (
+      permissions.includes(item.permission) ||
+      permissions.includes("OWNER_VIEW")
+    );
+  };
+
+  const visiblePrimary = PRIMARY_NAV.filter(canSee);
+  const visibleAdmin = ADMIN_NAV.filter(canSee);
 
   const isRouteActive = (item: NavItem) => {
     if (pathname === item.href) return true;
-    if (item.aliases?.some((a) => pathname === a)) return true;
+    if (item.aliases?.some((alias) => pathname === alias)) return true;
+    if (pathname?.startsWith(`${item.href}/`)) return true;
     return false;
   };
 
-  const currentEmp = session?.employee;
-  const demoSandboxEnabled = session?.demoSandboxEnabled ?? false;
+  const hubOptions =
+    employee?.role !== "OWNER" && employee?.kitchenId
+      ? [employee.kitchenId]
+      : ["ALL", "K1", "K2", "K3", "K4"];
 
-  const visibleNavItems = useMemo(() => {
-    if (!session) return NAV_ITEMS;
-    const permSet = new Set(session.permissions || []);
-    return NAV_ITEMS.filter(
-      (item) => !item.permission || permSet.has(item.permission),
-    );
-  }, [session]);
-
-  const commandItems = visibleNavItems.filter((i) => i.group === "command");
-  const operationsItems = visibleNavItems.filter(
-    (i) => i.group === "operations",
-  );
-  const enterpriseItems = visibleNavItems.filter(
-    (i) => i.group === "enterprise",
-  );
-
-  const theme = session?.settings?.theme || "obsidian";
-  const currency = session?.settings?.currency || "INR";
-
-  const themeBg =
-    theme === "midnight"
-      ? "bg-[#070B19]"
-      : theme === "cyber-emerald"
-        ? "bg-[#04110E]"
-        : theme === "titanium"
-          ? "bg-slate-900"
-          : "bg-[#070A12]";
+  const combinedRightActions = rightActions ?? actions;
 
   return (
-    <div
-      className={`min-h-screen ${themeBg} text-slate-100 flex flex-col selection:bg-sky-500/30 selection:text-sky-200`}
-    >
-      {/* Workspace toolbar */}
-      <header className="sticky top-0 z-40 border-b border-slate-800/80 bg-slate-950/85 backdrop-blur-xl">
-        <div className="mx-auto flex h-14 max-w-[1600px] items-center justify-between gap-3 px-4 sm:px-6">
-          {/* Brand and mobile navigation */}
-          <div className="flex items-center gap-3">
-            <button
-              type="button"
-              onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-              className="flex h-9 w-9 items-center justify-center rounded-lg border border-slate-800 bg-slate-900 text-slate-300 lg:hidden"
-              aria-label="Open workspace navigation"
-              aria-expanded={mobileMenuOpen}
-            >
-              ☰
-            </button>
+    <div className="flex min-h-screen bg-[#09090b] text-zinc-100 selection:bg-indigo-500/30">
+      {/* 52px Native Desktop Icon Rail */}
+      <aside
+        aria-label="Primary Navigation"
+        className="sticky top-0 hidden h-screen w-[52px] shrink-0 flex-col items-center justify-between border-r border-white/[0.06] bg-[#09090b] py-2.5 md:flex"
+      >
+        <div className="flex flex-col items-center gap-1.5">
+          <Link
+            href={
+              permissions.includes("OWNER_VIEW")
+                ? "/owner"
+                : permissions.includes("COOK_ORDERS")
+                  ? "/cook"
+                  : permissions.includes("DISPATCH_ORDERS")
+                    ? "/dispatch"
+                    : "/live-orders"
+            }
+            title="DarKitOS"
+            className="mb-2 flex h-8 w-8 items-center justify-center rounded-lg border border-white/[0.08] bg-[#151519] text-[11px] font-bold tracking-tighter text-zinc-100 transition-colors hover:border-white/[0.2]"
+          >
+            DK
+          </Link>
 
-            <Link
-              href={
-                session?.permissions?.includes("OWNER_VIEW")
-                  ? "/dashboard"
-                  : session?.permissions?.includes("COOK_ORDERS")
-                    ? "/kds"
-                    : session?.permissions?.includes("DISPATCH_ORDERS")
-                      ? "/dispatch"
-                      : "/live-orders"
-              }
-              className="flex items-center gap-2.5 group"
+          {visiblePrimary.map((item) => {
+            const active = isRouteActive(item);
+            return (
+              <Link
+                key={item.href}
+                href={item.href}
+                title={item.label}
+                aria-current={active ? "page" : undefined}
+                className={`group relative flex h-9 w-9 items-center justify-center rounded-lg text-[10px] font-semibold tracking-tight transition-colors ${
+                  active
+                    ? "bg-[#1d1d22] text-zinc-100 ring-1 ring-white/[0.12]"
+                    : "text-zinc-500 hover:bg-[#151519] hover:text-zinc-200"
+                }`}
+              >
+                {active && (
+                  <span className="absolute -left-[9px] h-4 w-[2px] rounded-r bg-zinc-100" />
+                )}
+                {item.shortCode}
+              </Link>
+            );
+          })}
+        </div>
+
+        <div className="flex flex-col items-center gap-1.5 border-t border-white/[0.06] pt-2.5">
+          {visibleAdmin.map((item) => {
+            const active = isRouteActive(item);
+            return (
+              <Link
+                key={item.href}
+                href={item.href}
+                title={item.label}
+                aria-current={active ? "page" : undefined}
+                className={`relative flex h-8 w-8 items-center justify-center rounded-lg text-[10px] font-medium tracking-tight transition-colors ${
+                  active
+                    ? "bg-[#1d1d22] text-zinc-100 ring-1 ring-white/[0.12]"
+                    : "text-zinc-500 hover:bg-[#151519] hover:text-zinc-200"
+                }`}
+              >
+                {active && (
+                  <span className="absolute -left-[9px] h-3.5 w-[2px] rounded-r bg-zinc-100" />
+                )}
+                {item.shortCode}
+              </Link>
+            );
+          })}
+        </div>
+      </aside>
+
+      {/* Main Viewport Column */}
+      <div className="flex min-w-0 flex-1 flex-col">
+        {/* 44px Unified Top Bar */}
+        <header className="sticky top-0 z-30 flex min-h-11 flex-wrap items-center justify-between gap-2 border-b border-white/[0.06] bg-[#09090b]/95 px-4 py-1.5 backdrop-blur-md">
+          <div className="flex min-w-0 items-center gap-2.5">
+            <span className="text-xs font-semibold tracking-tight text-zinc-100 md:hidden">
+              DarKitOS
+            </span>
+
+            {/* Kitchen Hub Segmented Selector */}
+            <div
+              role="group"
+              aria-label="Kitchen Hub Scope"
+              className="flex items-center rounded-md border border-white/[0.06] bg-[#151519] p-0.5"
             >
-              <span className="grid h-9 w-9 place-items-center rounded-xl border border-cyan-300/20 bg-cyan-300/10 text-cyan-200 transition group-hover:border-cyan-300/45">
-                <GuideIcon name="brand" />
-              </span>
-              <div>
-                <span className="text-sm font-bold tracking-tight text-white">
-                  DarKit<span className="text-cyan-200">OS</span>
-                </span>
-                <p className="hidden text-[10px] text-slate-400 sm:block">
-                  Cloud kitchen workspace · {currency}
-                </p>
+              {hubOptions.map((hub) => {
+                const active = selectedHub === hub;
+                return (
+                  <button
+                    key={hub}
+                    type="button"
+                    onClick={() => handleHubSelect(hub)}
+                    className={`rounded-[5px] px-2 py-0.5 text-[11px] font-medium tabular-nums transition-colors ${
+                      active
+                        ? "bg-[#27272e] text-zinc-100"
+                        : "text-zinc-400 hover:text-zinc-200"
+                    }`}
+                  >
+                    {hub}
+                  </button>
+                );
+              })}
+            </div>
+
+            {title && (
+              <>
+                <span className="hidden text-zinc-700 sm:inline">/</span>
+                <div className="hidden min-w-0 items-baseline gap-2 sm:flex">
+                  <h1 className="truncate text-xs font-semibold text-zinc-100">
+                    {title}
+                  </h1>
+                  {subtitle && (
+                    <span className="hidden max-w-xs truncate text-[11px] text-zinc-500 xl:inline">
+                      {subtitle}
+                    </span>
+                  )}
+                </div>
+              </>
+            )}
+
+            {toolbar && (
+              <div className="hidden lg:flex lg:items-center lg:gap-1.5">
+                {toolbar}
               </div>
-            </Link>
+            )}
           </div>
 
-          {/* Demo roles (Sandbox only), System Roadmap details, and account */}
-          <div className="flex items-center gap-2 sm:gap-3">
+          {/* Right Utility Strip */}
+          <div className="flex flex-wrap items-center gap-1.5">
+            {combinedRightActions}
+
             {demoSandboxEnabled && (
               <div
                 role="group"
                 aria-label="Demo role"
-                className="hidden lg:flex items-center gap-1 rounded-xl border border-slate-800 bg-slate-900/90 p-1"
+                className="hidden items-center rounded-md border border-white/[0.06] bg-[#151519] p-0.5 2xl:flex"
               >
-                <span className="px-2 font-mono text-[10px] uppercase tracking-wider text-slate-400">
-                  Demo role:
-                </span>
-                {DEMO_ROLES.map((p) => {
-                  const active = currentEmp?.employeeCode === p.code;
+                {DEMO_ROLES.map((r) => {
+                  const active = employee?.employeeCode === r.code;
                   return (
                     <button
-                      key={p.code}
+                      key={r.code}
                       type="button"
-                      disabled={switchingCode !== null}
-                      onClick={() => void handleQuickSwitch(p.code)}
-                      className={`rounded-lg px-2 py-1 font-mono text-[10px] font-bold transition ${
+                      disabled={switchingRole !== null}
+                      onClick={() => void handleDemoRoleSwitch(r.code)}
+                      className={`rounded-[5px] px-2 py-0.5 text-[10px] font-medium transition-colors ${
                         active
-                          ? "bg-sky-500 text-slate-950 shadow-sm"
-                          : "text-slate-300 hover:bg-slate-800 hover:text-white"
+                          ? "bg-[#27272e] text-zinc-100"
+                          : "text-zinc-500 hover:text-zinc-200"
                       }`}
-                      aria-pressed={active}
-                      title={`Switch to ${p.label}`}
+                      title={`Switch demo role to ${r.label}`}
                     >
-                      {p.label}
+                      {r.label}
                     </button>
                   );
                 })}
@@ -375,435 +417,87 @@ export default function AppShell({
 
             <button
               type="button"
-              onClick={() => setAdrModalOpen(true)}
-              className="hidden rounded-xl border border-slate-700 bg-slate-900 px-3 py-1.5 text-xs font-semibold text-slate-300 transition hover:bg-slate-800 sm:inline-flex"
+              onClick={() => setPaletteOpen(true)}
+              className="inline-flex h-7 items-center gap-1.5 rounded-md border border-white/[0.07] bg-[#151519] px-2 text-[11px] text-zinc-400 transition-colors hover:border-white/[0.16] hover:text-zinc-100"
             >
-              System details
+              <span className="hidden sm:inline">Command</span>
+              <kbd className="rounded bg-[#1d1d22] px-1 py-0.5 font-mono text-[10px] text-zinc-400">
+                ⌘K
+              </kbd>
             </button>
 
-            {currentEmp && (
-              <div className="flex items-center gap-2 rounded-xl border border-slate-800 bg-slate-900/90 px-3 py-1.5">
-                <div className="hidden text-right sm:block">
-                  <p className="text-xs font-bold leading-none text-white">
-                    {currentEmp.name}
-                  </p>
-                  <p className="mt-0.5 font-mono text-[10px] text-emerald-400">
-                    {DEMO_ROLES.find(({ role }) => role === currentEmp.role)
-                      ?.label ?? currentEmp.role}{" "}
-                    • {currentEmp.kitchenId || "GLOBAL"}
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => void handleLogout()}
-                  className="ml-1 rounded-lg border border-slate-700 bg-slate-800 px-2 py-1 font-mono text-[10px] font-semibold text-slate-300 hover:border-red-500/40 hover:bg-red-500/10 hover:text-red-300"
-                  title="Sign out of station"
-                >
-                  Sign out
-                </button>
-              </div>
-            )}
-
-            {clock && (
-              <span className="hidden lg:inline-block font-mono text-xs text-slate-400">
-                {clock}
-              </span>
-            )}
-          </div>
-        </div>
-      </header>
-
-      {/* Main Layout: Role-Filtered Sidebar + Content */}
-      <div className="mx-auto flex w-full max-w-[1600px] flex-1">
-        {/* Desktop Sidebar */}
-        <aside className="hidden lg:flex w-64 shrink-0 flex-col justify-between border-r border-slate-800/80 bg-slate-950/50 p-4">
-          <div className="space-y-6">
-            {commandItems.length > 0 && (
-              <div>
-                <p className="px-3 font-mono text-[10px] font-bold uppercase tracking-widest text-slate-400">
-                  Workspace
-                </p>
-                <nav aria-label="Workspace" className="mt-2 space-y-1">
-                  {commandItems.map((item) => {
-                    const active = isRouteActive(item);
-                    return (
-                      <Link
-                        key={item.href}
-                        href={item.href}
-                        aria-current={active ? "page" : undefined}
-                        className={`flex items-center justify-between rounded-xl px-3 py-2.5 text-sm font-medium transition-all ${
-                          active
-                            ? "bg-gradient-to-r from-sky-500/20 to-emerald-500/10 text-white border border-sky-500/40 shadow-[0_0_20px_rgba(14,165,233,0.12)]"
-                            : "text-slate-400 hover:bg-slate-900 hover:text-slate-200"
-                        }`}
-                      >
-                        <span className="flex items-center gap-2.5">
-                          <GuideIcon
-                            name={item.icon}
-                            className="h-4 w-4 shrink-0 text-sky-300"
-                          />
-                          {item.label}
-                        </span>
-                      </Link>
-                    );
-                  })}
-                </nav>
-              </div>
-            )}
-
-            {operationsItems.length > 0 && (
-              <div>
-                <p className="px-3 font-mono text-[10px] font-bold uppercase tracking-widest text-slate-400">
-                  Orders &amp; stock
-                </p>
-                <nav aria-label="Orders and stock" className="mt-2 space-y-1">
-                  {operationsItems.map((item) => {
-                    const active = isRouteActive(item);
-                    return (
-                      <Link
-                        key={item.href}
-                        href={item.href}
-                        aria-current={active ? "page" : undefined}
-                        className={`flex items-center justify-between rounded-xl px-3 py-2.5 text-sm font-medium transition-all ${
-                          active
-                            ? "bg-gradient-to-r from-sky-500/20 to-emerald-500/10 text-white border border-sky-500/40 shadow-[0_0_20px_rgba(14,165,233,0.12)]"
-                            : "text-slate-400 hover:bg-slate-900 hover:text-slate-200"
-                        }`}
-                      >
-                        <span className="flex items-center gap-2.5">
-                          <GuideIcon
-                            name={item.icon}
-                            className="h-4 w-4 shrink-0 text-emerald-300"
-                          />
-                          {item.label}
-                        </span>
-                      </Link>
-                    );
-                  })}
-                </nav>
-              </div>
-            )}
-
-            {enterpriseItems.length > 0 && (
-              <div>
-                <p className="px-3 font-mono text-[10px] font-bold uppercase tracking-widest text-slate-400">
-                  Team &amp; setup
-                </p>
-                <nav aria-label="Team and setup" className="mt-2 space-y-1">
-                  {enterpriseItems.map((item) => {
-                    const active = isRouteActive(item);
-                    return (
-                      <Link
-                        key={item.href}
-                        href={item.href}
-                        aria-current={active ? "page" : undefined}
-                        className={`flex items-center justify-between rounded-xl px-3 py-2.5 text-sm font-medium transition-all ${
-                          active
-                            ? "bg-gradient-to-r from-sky-500/20 to-emerald-500/10 text-white border border-sky-500/40 shadow-[0_0_20px_rgba(14,165,233,0.12)]"
-                            : "text-slate-400 hover:bg-slate-900 hover:text-slate-200"
-                        }`}
-                      >
-                        <span className="flex items-center gap-2.5">
-                          <GuideIcon
-                            name={item.icon}
-                            className="h-4 w-4 shrink-0 text-amber-300"
-                          />
-                          {item.label}
-                        </span>
-                      </Link>
-                    );
-                  })}
-                </nav>
-              </div>
-            )}
-          </div>
-
-          <div className="mt-6 rounded-xl border border-slate-800 bg-slate-900/60 p-3.5">
-            <p className="text-xs font-semibold text-slate-200">
-              {demoSandboxEnabled
-                ? "DarKitOS Demo Sandbox"
-                : "DarKitOS Multi-Tenant Cloud"}
-            </p>
-            <p className="mt-1 text-xs leading-5 text-slate-400">
-              {demoSandboxEnabled
-                ? "Demo role switcher enabled. Multi-tenant RBAC, PostgreSQL persistence, and Realtime KDS active."
-                : "Two-level Organization & Kitchen RBAC with instant account revocation enforced server-side."}
-            </p>
-          </div>
-        </aside>
-
-        {/* Mobile Drawer */}
-        {mobileMenuOpen && (
-          <div className="fixed inset-0 z-50 flex lg:hidden">
-            <div
-              className="fixed inset-0 bg-black/70 backdrop-blur-sm"
-              onClick={() => setMobileMenuOpen(false)}
-            />
-            <div className="relative z-10 flex w-72 flex-col justify-between bg-slate-950 p-4 border-r border-slate-800 overflow-y-auto">
-              <div>
-                <div className="mb-4 flex items-center justify-between">
-                  <span className="font-mono text-base font-bold text-white">
-                    Workspace navigation
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => setMobileMenuOpen(false)}
-                    aria-label="Close workspace navigation"
-                    className="rounded-lg border border-slate-800 px-2.5 py-1 text-xs text-slate-400"
-                  >
-                    ✕
-                  </button>
-                </div>
-
-                {/* Mobile Persona Switcher (Sandbox only) */}
-                {demoSandboxEnabled && (
-                  <div
-                    role="group"
-                    aria-label="Demo role"
-                    className="mb-4 rounded-xl border border-slate-800 bg-slate-900 p-2.5"
-                  >
-                    <p className="mb-2 font-mono text-[10px] uppercase text-slate-400">
-                      Switch demo role
-                    </p>
-                    <div className="grid grid-cols-2 gap-1.5">
-                      {DEMO_ROLES.map((p) => (
-                        <button
-                          key={p.code}
-                          type="button"
-                          disabled={switchingCode !== null}
-                          aria-pressed={currentEmp?.employeeCode === p.code}
-                          onClick={() => void handleQuickSwitch(p.code)}
-                          className={`rounded-lg px-2 py-1.5 font-mono text-[10px] font-bold ${
-                            currentEmp?.employeeCode === p.code
-                              ? "bg-sky-500 text-slate-950"
-                              : "bg-slate-800 text-slate-300"
-                          }`}
-                        >
-                          {p.label}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                <nav aria-label="Workspace" className="space-y-1">
-                  {visibleNavItems.map((item) => (
-                    <Link
-                      key={item.href}
-                      href={item.href}
-                      aria-current={isRouteActive(item) ? "page" : undefined}
-                      onClick={() => setMobileMenuOpen(false)}
-                      className={`flex items-center justify-between rounded-xl px-3 py-2.5 text-sm font-medium ${
-                        isRouteActive(item)
-                          ? "bg-sky-500/20 text-white border border-sky-500/40"
-                          : "text-slate-400 hover:bg-slate-900"
-                      }`}
-                    >
-                      <span className="flex items-center gap-2">
-                        <GuideIcon
-                          name={item.icon}
-                          className="h-4 w-4 shrink-0 text-cyan-300"
-                        />
-                        {item.label}
-                      </span>
-                    </Link>
-                  ))}
-                </nav>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setMobileMenuOpen(false);
-                    setAdrModalOpen(true);
-                  }}
-                  className="mt-4 rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-xs font-semibold text-slate-300 sm:hidden"
-                >
-                  System details
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Main Workspace */}
-        <main className="flex-1 min-w-0 p-4 sm:p-6 lg:p-8">
-          {/* Page Header */}
-          <div className="mb-6 flex flex-wrap items-start justify-between gap-4 border-b border-slate-800/80 pb-5">
-            <div>
-              <div className="flex items-center gap-2">
-                <span className="font-mono text-[11px] font-semibold uppercase tracking-widest text-sky-400">
-                  DarKitOS · Cloud kitchen workspace
+            {employee && (
+              <div className="hidden items-center gap-1.5 rounded-md border border-white/[0.06] bg-[#151519] px-2 py-1 text-[11px] sm:flex">
+                <span className="max-w-[110px] truncate font-medium text-zinc-200">
+                  {employee.name}
+                </span>
+                <span className="text-zinc-600">·</span>
+                <span className="font-mono text-[10px] text-zinc-400">
+                  {employee.role}
                 </span>
               </div>
-              <h1 className="mt-1 text-2xl font-black tracking-tight text-white sm:text-3xl">
-                {title}
-              </h1>
-              {subtitle && (
-                <p className="mt-1 text-sm text-slate-400">{subtitle}</p>
-              )}
-            </div>
-
-            {actions && (
-              <div className="flex flex-wrap items-center gap-2.5">
-                {actions}
-              </div>
             )}
-          </div>
 
+            <button
+              type="button"
+              onClick={handleSignOut}
+              disabled={signingOut}
+              className="inline-flex h-7 items-center rounded-md border border-white/[0.07] bg-[#151519] px-2 text-[11px] font-medium text-zinc-400 transition-colors hover:border-rose-500/40 hover:text-rose-300 disabled:opacity-50"
+            >
+              {signingOut ? "..." : "Exit"}
+            </button>
+          </div>
+        </header>
+
+        {/* Main Work Surface */}
+        <main
+          className={`flex-1 bg-[#0e0e11] pb-16 md:pb-0 ${
+            fullBleed
+              ? "flex min-h-0 flex-col"
+              : "mx-auto w-full max-w-[1440px] px-4 py-5 sm:px-6"
+          }`}
+        >
           {children}
         </main>
       </div>
 
-      {/* Honest Architecture & Roadmap Reference Modal */}
-      {adrModalOpen && (
-        <div
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="system-details-modal-title"
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4 backdrop-blur-sm"
-          onClick={(e) => {
-            if (e.target === e.currentTarget) setAdrModalOpen(false);
-          }}
-        >
-          <div className="max-h-[88vh] w-full max-w-4xl overflow-y-auto rounded-2xl border border-slate-700 bg-slate-900 p-6 shadow-2xl">
-            <div className="flex items-start justify-between gap-4 border-b border-slate-800 pb-4">
-              <div>
-                <span className="font-mono text-xs font-bold uppercase tracking-wider text-sky-400">
-                  Architecture &amp; Production Readiness
-                </span>
-                <h2
-                  id="system-details-modal-title"
-                  className="mt-1 text-xl font-black text-white"
-                >
-                  DarKitOS — Sprint 0 Verified Baseline &amp; Rollout Plan
-                </h2>
-              </div>
-              <button
-                type="button"
-                onClick={() => setAdrModalOpen(false)}
-                className="rounded-lg border border-slate-700 bg-slate-800 px-3 py-1.5 text-xs font-bold text-slate-300 hover:text-white"
-              >
-                Close ✕
-              </button>
-            </div>
+      {/* Mobile Bottom Station Dock */}
+      <nav
+        aria-label="Mobile Station Navigation"
+        className="fixed inset-x-0 bottom-0 z-30 flex items-center justify-around border-t border-white/[0.06] bg-[#09090b]/95 py-1.5 backdrop-blur-md md:hidden"
+      >
+        {visiblePrimary.slice(0, 5).map((item) => {
+          const active = isRouteActive(item);
+          return (
+            <Link
+              key={item.href}
+              href={item.href}
+              className={`rounded-md px-2.5 py-1 text-[11px] font-medium transition-colors ${
+                active ? "bg-[#1d1d22] text-zinc-100" : "text-zinc-400"
+              }`}
+            >
+              {item.shortCode}
+            </Link>
+          );
+        })}
+      </nav>
 
-            <div className="mt-5 grid gap-4 md:grid-cols-3">
-              <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/5 p-4">
-                <p className="font-mono text-xs font-bold uppercase text-emerald-400">
-                  Active Now • Sprint 0
-                </p>
-                <h3 className="mt-1 font-bold text-white">
-                  INR Showcase &amp; Core Engine
-                </h3>
-                <ul className="mt-2 space-y-1.5 text-xs text-slate-300">
-                  <li>
-                    • Single canonical store boundary (
-                    <code className="text-emerald-300">
-                      UI → /api/* → lib/store.ts
-                    </code>
-                    ).
-                  </li>
-                  <li>
-                    • Atomic recipe depletion on{" "}
-                    <code className="text-emerald-300">
-                      PENDING → PREPARING
-                    </code>
-                    .
-                  </li>
-                  <li>
-                    • Stage-aware cancellations (Pre-Prep, Mid-Prep ₹ Loss,
-                    Post-Pickup Claim).
-                  </li>
-                  <li>
-                    • Signed JWT auth, server-side RBAC, kitchen isolation, and
-                    Owner Brief `.md` export.
-                  </li>
-                </ul>
-              </div>
-
-              <div className="rounded-xl border border-sky-500/30 bg-sky-500/5 p-4">
-                <p className="font-mono text-xs font-bold uppercase text-sky-400">
-                  Next • Sprints 1 &amp; 2
-                </p>
-                <h3 className="mt-1 font-bold text-white">
-                  Database, Auth &amp; Realtime
-                </h3>
-                <ul className="mt-2 space-y-1.5 text-xs text-slate-300">
-                  <li>
-                    • Supabase PostgreSQL (Mumbai{" "}
-                    <code className="text-sky-300">ap-south-1</code>) + Drizzle
-                    ORM.
-                  </li>
-                  <li>
-                    • Per-kitchen{" "}
-                    <code className="text-sky-300">
-                      (kitchenId, ingredientId)
-                    </code>{" "}
-                    ledgers &amp; stock transfers.
-                  </li>
-                  <li>
-                    • Supabase Auth (Email/OTP) + PostgreSQL RLS tenant
-                    isolation.
-                  </li>
-                  <li>
-                    • Supabase Realtime replacing HTTP polling (&lt;500ms KDS
-                    updates).
-                  </li>
-                </ul>
-              </div>
-
-              <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/5 p-4">
-                <p className="font-mono text-xs font-bold uppercase text-emerald-400">
-                  Complete • Sprints 3 &amp; 4
-                </p>
-                <h3 className="mt-1 font-bold text-white">
-                  India GST, Aggregators, Hardware &amp; AI
-                </h3>
-                <ul className="mt-2 space-y-1.5 text-xs text-slate-300">
-                  <li>
-                    • Sprint 3A: Day-1 GST invoicing (CGST/SGST/FSSAI), Tally
-                    CSV, Razorpay Direct UPI.
-                  </li>
-                  <li>
-                    • Sprint 3B: UrbanPiper Swiggy/Zomato webhooks, Outbox +
-                    Upstash QStash, Interakt WhatsApp alerts.
-                  </li>
-                  <li>
-                    • Sprint 4: 80mm thermal KOT print bridge, Web Audio SLA
-                    chimes, USB scale station &amp; Gemini{" "}
-                    <code className="text-emerald-300">/api/ai/diagnose</code>{" "}
-                    copilot.
-                  </li>
-                </ul>
-              </div>
-            </div>
-
-            <div className="mt-5 rounded-xl border border-slate-800 bg-slate-950 p-4">
-              <p className="font-mono text-xs font-bold uppercase text-slate-400">
-                Canonical Order Lifecycle
-              </p>
-              <div className="mt-3 flex flex-wrap items-center gap-2 font-mono text-xs">
-                {[
-                  "PENDING",
-                  "PREPARING (Deplete Stock)",
-                  "READY_FOR_PICKUP",
-                  "DRIVER_ASSIGNED",
-                  "PICKED_UP",
-                  "DISPATCHED",
-                ].map((step, i, arr) => (
-                  <React.Fragment key={step}>
-                    <span className="rounded-lg border border-slate-800 bg-slate-900 px-2.5 py-1.5 text-slate-200">
-                      {step}
-                    </span>
-                    {i < arr.length - 1 && (
-                      <span className="text-sky-400">→</span>
-                    )}
-                  </React.Fragment>
-                ))}
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* Global Command Palette */}
+      <CommandPalette
+        open={paletteOpen}
+        onClose={() => setPaletteOpen(false)}
+        permissions={permissions}
+        allowedKitchens={
+          employee?.role !== "OWNER" && employee?.kitchenId
+            ? [employee.kitchenId]
+            : undefined
+        }
+        onSelectHub={handleHubSelect}
+        demoSandboxEnabled={demoSandboxEnabled}
+        onSwitchDemoRole={(code) => void handleDemoRoleSwitch(code)}
+      />
     </div>
   );
 }
+
+export default AppShell;

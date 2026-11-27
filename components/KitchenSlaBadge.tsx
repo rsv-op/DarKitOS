@@ -53,14 +53,14 @@ export default function KitchenSlaBadge({
 
   const badgeClass =
     state === "BREACHED"
-      ? "border-red-500/60 bg-red-500/20 text-red-200 animate-pulse"
+      ? "border-rose-500/45 bg-rose-500/15 text-rose-300"
       : state === "DUE_SOON"
-        ? "border-amber-500/50 bg-amber-500/15 text-amber-200"
-        : "border-emerald-500/35 bg-emerald-500/10 text-emerald-300";
+        ? "border-amber-500/40 bg-amber-500/12 text-amber-300"
+        : "border-emerald-500/30 bg-emerald-500/10 text-emerald-300";
 
   const statusText =
     state === "BREACHED"
-      ? "SLA BREACHED"
+      ? "BREACHED"
       : state === "DUE_SOON"
         ? "DUE SOON"
         : "ON TRACK";
@@ -68,8 +68,17 @@ export default function KitchenSlaBadge({
   return (
     <span
       title={`${labelPrefix}: ${elapsedMins}m elapsed vs ${safeSla}m target`}
-      className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 font-mono text-[10px] font-bold uppercase ${badgeClass}`}
+      className={`inline-flex items-center gap-1.5 rounded-md border px-2 py-0.5 font-mono text-[10px] font-semibold uppercase tracking-tight tabular-nums ${badgeClass}`}
     >
+      <span
+        className={`h-1.5 w-1.5 rounded-full ${
+          state === "BREACHED"
+            ? "bg-rose-400"
+            : state === "DUE_SOON"
+              ? "bg-amber-400"
+              : "bg-emerald-400"
+        }`}
+      />
       <span>{statusText}</span>
       <span className="opacity-85">
         {elapsedMins}m/{safeSla}m
