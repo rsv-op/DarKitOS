@@ -249,7 +249,7 @@ export default function InvoicesPage() {
 
   return (
     <AppShell
-      title="GST Tax Invoices"
+      title="GST & Tally"
       subtitle={`SAC ${DEFAULT_SAC_RESTAURANT_SERVICE} · ${fyFilter === "ALL" ? "All FYs" : fyFilter}`}
       activeHub={kitchenFilter}
       onHubChange={setKitchenFilter}
@@ -257,15 +257,15 @@ export default function InvoicesPage() {
         <>
           <a
             href={`/api/invoices/export?${buildQueryString({ format: "tally_csv" })}`}
-            className="inline-flex h-7 items-center rounded-md border border-emerald-500/35 bg-emerald-500/10 px-2.5 text-[11px] font-medium text-emerald-300 transition-colors hover:bg-emerald-500/20"
+            className="inline-flex h-7 items-center rounded-md bg-emerald-500 px-2.5 text-[11px] font-semibold text-zinc-950 transition-colors hover:bg-emerald-400"
           >
-            Tally CSV
+            Export Tally CSV
           </a>
           <a
             href={`/api/invoices/export?${buildQueryString({ format: "zoho_csv" })}`}
-            className="inline-flex h-7 items-center rounded-md border border-sky-500/35 bg-sky-500/10 px-2.5 text-[11px] font-medium text-sky-300 transition-colors hover:bg-sky-500/20"
+            className="inline-flex h-7 items-center rounded-md border border-sky-500/40 bg-sky-500/15 px-2.5 text-[11px] font-semibold text-sky-200 transition-colors hover:bg-sky-500/25"
           >
-            Zoho CSV
+            Export Zoho CSV
           </a>
           <button
             type="button"

@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import AppShell from "@/components/AppShell";
 import HardwareScanScaleInput from "@/components/HardwareScanScaleInput";
 import RealtimeSyncBadge from "@/components/RealtimeSyncBadge";
@@ -82,6 +83,21 @@ function movementBadgeClass(type: InventoryMovement["type"]): string {
   return "bg-sky-500/15 text-sky-300";
 }
 
+function InventoryFilterParamReader({
+  onLowStockFilter,
+}: {
+  onLowStockFilter: () => void;
+}) {
+  const params = useSearchParams();
+  const filter = params.get("filter");
+  useEffect(() => {
+    if (filter === "low_stock") {
+      onLowStockFilter();
+    }
+  }, [filter, onLowStockFilter]);
+  return null;
+}
+
 export default function InventoryPage() {
   const [inventory, setInventory] = useState<InventoryItem[]>([]);
   const [movements, setMovements] = useState<InventoryMovement[]>([]);
@@ -96,6 +112,10 @@ export default function InventoryPage() {
   const [categoryFilter, setCategoryFilter] = useState<string>("ALL");
   const [statusFilter, setStatusFilter] = useState<string>("ALL");
   const [sortBy, setSortBy] = useState<SortKey>("health");
+
+  const activateLowStockFilter = useCallback(() => {
+    setStatusFilter("LOW");
+  }, []);
 
   // Slide-over drawers
   const [scanOpen, setScanOpen] = useState(false);
@@ -409,6 +429,23 @@ export default function InventoryPage() {
             lastEventAt={realtimeSync.lastEventAt}
             topic={realtimeSync.topic}
           />
+          <button
+            type="button"
+            aria-pressed={statusFilter === "LOW"}
+            onClick={() =>
+              setStatusFilter((prev) => (prev === "LOW" ? "ALL" : "LOW"))
+            }
+            className={`inline-flex h-7 items-center gap-1.5 rounded-md border px-2.5 text-[11px] font-medium transition-colors ${
+              statusFilter === "LOW"
+                ? "border-amber-500/50 bg-amber-500/20 text-amber-200"
+                : "border-white/[0.08] bg-[#151519] text-zinc-300 hover:border-white/[0.16] hover:text-zinc-100"
+            }`}
+          >
+            <span>Low Stock Only</span>
+            <span className="font-mono text-[10px] tabular-nums opacity-85">
+              {stats.lowStock + stats.outOfStock}
+            </span>
+          </button>
           {canManageInventory && (
             <button
               type="button"
@@ -422,7 +459,7 @@ export default function InventoryPage() {
             <button
               type="button"
               onClick={() => setTransferOpen(true)}
-              className="inline-flex h-7 items-center rounded-md border border-white/[0.1] bg-[#151519] px-2.5 text-[11px] font-medium text-zinc-200 transition-colors hover:border-white/[0.2] hover:text-white"
+              className="inline-flex h-7 items-center rounded-md bg-zinc-100 px-2.5 text-[11px] font-semibold text-zinc-950 transition-colors hover:bg-white"
             >
               Transfer Stock
             </button>
@@ -437,6 +474,12 @@ export default function InventoryPage() {
         </>
       }
     >
+      <Suspense fallback={null}>
+        <InventoryFilterParamReader
+          onLowStockFilter={activateLowStockFilter}
+        />
+      </Suspense>
+
       <div className="space-y-5">
         {/* Hairline Metric Strip */}
         <section className="grid grid-cols-2 divide-y divide-white/[0.06] overflow-hidden rounded-lg border border-white/[0.06] bg-[#151519] sm:grid-cols-5 sm:divide-x sm:divide-y-0">

@@ -366,7 +366,7 @@ export default function DispatchPage() {
               }
               className="h-10 w-full rounded-md bg-zinc-100 font-mono text-xs font-bold uppercase tracking-wider text-zinc-950 transition-colors hover:bg-white disabled:opacity-40"
             >
-              {isUpdating ? "Assigning..." : "Assign Driver"}
+              {isUpdating ? "Assigning..." : "Assign Rider"}
             </button>
           </div>
         )}
@@ -460,7 +460,7 @@ export default function DispatchPage() {
             href="/cook"
             className="inline-flex h-7 items-center rounded-md border border-white/[0.08] bg-[#151519] px-2.5 text-[11px] font-medium text-zinc-300 hover:border-white/[0.16] hover:text-zinc-100"
           >
-            Cook KDS
+            Kitchen Screen
           </Link>
           <button
             type="button"
@@ -495,7 +495,7 @@ export default function DispatchPage() {
             <div className="flex items-center justify-between border-b border-white/[0.06] bg-[#09090b]/40 px-4 py-2.5">
               <span className="flex items-center gap-2 text-xs font-semibold text-zinc-200">
                 <span className="h-2 w-2 rounded-full bg-emerald-400" />
-                READY FOR PICKUP
+                Ready for Pickup
               </span>
               <span className="rounded bg-emerald-500/15 px-2 py-0.5 font-mono text-[11px] font-semibold text-emerald-300 tabular-nums">
                 {readyForPickup.length}
@@ -516,7 +516,7 @@ export default function DispatchPage() {
             <div className="flex items-center justify-between border-b border-white/[0.06] bg-[#09090b]/40 px-4 py-2.5">
               <span className="flex items-center gap-2 text-xs font-semibold text-zinc-200">
                 <span className="h-2 w-2 rounded-full bg-violet-400" />
-                DRIVER ASSIGNED
+                Rider Assigned
               </span>
               <span className="rounded bg-violet-500/15 px-2 py-0.5 font-mono text-[11px] font-semibold text-violet-300 tabular-nums">
                 {driverAssigned.length}
@@ -537,7 +537,7 @@ export default function DispatchPage() {
             <div className="flex items-center justify-between border-b border-white/[0.06] bg-[#09090b]/40 px-4 py-2.5">
               <span className="flex items-center gap-2 text-xs font-semibold text-zinc-200">
                 <span className="h-2 w-2 rounded-full bg-indigo-400" />
-                PICKED UP
+                Picked Up
               </span>
               <span className="rounded bg-indigo-500/15 px-2 py-0.5 font-mono text-[11px] font-semibold text-indigo-300 tabular-nums">
                 {pickedUp.length}
