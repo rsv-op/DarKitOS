@@ -426,7 +426,7 @@ export default function OwnerPage() {
 
   return (
     <AppShell
-      title="Command Center"
+      title="Overview"
       subtitle={selectedKitchenLabel}
       activeHub={kitchenScope}
       onHubChange={setKitchenScope}
@@ -457,13 +457,13 @@ export default function OwnerPage() {
             onClick={() => setCopilotOpen(true)}
             className="inline-flex h-7 items-center gap-1.5 rounded-md border border-indigo-500/40 bg-indigo-500/15 px-2.5 text-[11px] font-medium text-indigo-200 transition-colors hover:bg-indigo-500/25"
           >
-            Diagnose with Gemini
+            Diagnose Bottleneck
           </button>
           <Link
             href="/live-orders?action=inject"
             className="inline-flex h-7 items-center rounded-md bg-zinc-100 px-2.5 text-[11px] font-semibold text-zinc-950 transition-colors hover:bg-white"
           >
-            + Inject Order
+            + Test Order
           </Link>
         </>
       }
@@ -541,6 +541,58 @@ export default function OwnerPage() {
             <p className="mt-0.5 text-[11px] text-zinc-500 tabular-nums">
               {analytics.completedOrders} dispatched
             </p>
+          </div>
+        </section>
+
+        {/* Owner "Solve a Pain Point" Quick-Jump Strip */}
+        <section
+          aria-label="Solve a Pain Point"
+          className="flex flex-wrap items-center gap-2 rounded-lg border border-white/[0.06] bg-[#151519]/50 px-3.5 py-2.5"
+        >
+          <span className="mr-1 text-[11px] font-medium uppercase tracking-wider text-zinc-500">
+            Solve a Pain Point
+          </span>
+          <div className="grid flex-1 grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-4">
+            <Link
+              href="/inventory?filter=low_stock"
+              className="flex items-center justify-between gap-2 rounded-md border border-white/[0.08] bg-[#151519] px-3 py-1.5 text-xs font-medium text-zinc-200 transition-colors hover:border-amber-500/40 hover:bg-[#1d1d22] hover:text-white"
+            >
+              <span className="truncate">Stop Mid-Rush Stockouts</span>
+              <span className="shrink-0 font-mono text-[10px] text-amber-300 tabular-nums">
+                {lowStockItems.length} low →
+              </span>
+            </Link>
+
+            <Link
+              href="/live-orders?status=CANCELLED"
+              className="flex items-center justify-between gap-2 rounded-md border border-white/[0.08] bg-[#151519] px-3 py-1.5 text-xs font-medium text-zinc-200 transition-colors hover:border-rose-500/40 hover:bg-[#1d1d22] hover:text-white"
+            >
+              <span className="truncate">Recover Cancelled Order Losses</span>
+              <span className="shrink-0 font-mono text-[10px] text-rose-300 tabular-nums">
+                {analytics.cancelledOrders} →
+              </span>
+            </Link>
+
+            <Link
+              href="/analytics"
+              className="flex items-center justify-between gap-2 rounded-md border border-white/[0.08] bg-[#151519] px-3 py-1.5 text-xs font-medium text-zinc-200 transition-colors hover:border-emerald-500/40 hover:bg-[#1d1d22] hover:text-white"
+            >
+              <span className="truncate">Compare Brand &amp; Hub Margins</span>
+              <span className="shrink-0 font-mono text-[10px] text-emerald-300">
+                Audit →
+              </span>
+            </Link>
+
+            <button
+              type="button"
+              onClick={() => setCopilotOpen(true)}
+              className="flex items-center justify-between gap-2 rounded-md border border-indigo-500/35 bg-indigo-500/10 px-3 py-1.5 text-left text-xs font-medium text-indigo-200 transition-colors hover:border-indigo-400/60 hover:bg-indigo-500/20"
+            >
+              <span className="truncate">Diagnose My Kitchen&apos;s Bottleneck</span>
+              <span className="shrink-0 font-mono text-[10px] text-indigo-300">
+                AI →
+              </span>
+            </button>
           </div>
         </section>
 

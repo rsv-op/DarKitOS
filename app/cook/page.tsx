@@ -411,7 +411,7 @@ export default function CookPage() {
               onClick={() => void updateOrder(order.id, "READY_FOR_PICKUP")}
               className="h-12 w-full rounded-md bg-emerald-500 font-mono text-xs font-bold uppercase tracking-wider text-zinc-950 transition-colors hover:bg-emerald-400 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-40"
             >
-              {isUpdating ? "Bumping..." : "Bump Ready"}
+              {isUpdating ? "Marking ready..." : "Mark Ready"}
             </button>
           )}
 
@@ -431,7 +431,7 @@ export default function CookPage() {
 
   return (
     <AppShell
-      title="Cook KDS"
+      title="Kitchen Screen"
       subtitle={`${activeOrders.length} active tickets`}
       activeHub={kitchenFilter}
       onHubChange={setKitchenFilter}
@@ -540,12 +540,12 @@ export default function CookPage() {
         </div>
       ) : (
         <div className="grid flex-1 divide-y divide-white/[0.06] lg:grid-cols-3 lg:divide-x lg:divide-y-0">
-          {/* Lane 1: PENDING */}
+          {/* Lane 1: New Orders (PENDING) */}
           <section className="flex min-h-[300px] flex-col">
             <div className="flex items-center justify-between border-b border-white/[0.06] bg-[#09090b]/40 px-4 py-2.5">
               <span className="flex items-center gap-2 text-xs font-semibold text-zinc-200">
                 <span className="h-2 w-2 rounded-full bg-amber-400" />
-                PENDING
+                New Orders
               </span>
               <span className="rounded bg-amber-500/15 px-2 py-0.5 font-mono text-[11px] font-semibold text-amber-300 tabular-nums">
                 {pendingOrders.length}
@@ -554,7 +554,7 @@ export default function CookPage() {
             <div className="flex-1 space-y-3 overflow-y-auto p-3.5">
               {pendingOrders.length === 0 ? (
                 <p className="py-10 text-center text-xs text-zinc-600">
-                  No pending tickets
+                  No new orders waiting
                 </p>
               ) : (
                 pendingOrders.map(renderTicket)
@@ -562,12 +562,12 @@ export default function CookPage() {
             </div>
           </section>
 
-          {/* Lane 2: PREPARING */}
+          {/* Lane 2: Cooking Now (PREPARING) */}
           <section className="flex min-h-[300px] flex-col">
             <div className="flex items-center justify-between border-b border-white/[0.06] bg-[#09090b]/40 px-4 py-2.5">
               <span className="flex items-center gap-2 text-xs font-semibold text-zinc-200">
                 <span className="h-2 w-2 rounded-full bg-sky-400" />
-                PREPARING
+                Cooking Now
               </span>
               <span className="rounded bg-sky-500/15 px-2 py-0.5 font-mono text-[11px] font-semibold text-sky-300 tabular-nums">
                 {preparingOrders.length}
@@ -576,7 +576,7 @@ export default function CookPage() {
             <div className="flex-1 space-y-3 overflow-y-auto p-3.5">
               {preparingOrders.length === 0 ? (
                 <p className="py-10 text-center text-xs text-zinc-600">
-                  No orders on line
+                  Nothing cooking on line
                 </p>
               ) : (
                 preparingOrders.map(renderTicket)
@@ -584,12 +584,12 @@ export default function CookPage() {
             </div>
           </section>
 
-          {/* Lane 3: READY_FOR_PICKUP */}
+          {/* Lane 3: Ready for Rider (READY_FOR_PICKUP) */}
           <section className="flex min-h-[300px] flex-col">
             <div className="flex items-center justify-between border-b border-white/[0.06] bg-[#09090b]/40 px-4 py-2.5">
               <span className="flex items-center gap-2 text-xs font-semibold text-zinc-200">
                 <span className="h-2 w-2 rounded-full bg-emerald-400" />
-                READY FOR PICKUP
+                Ready for Rider
               </span>
               <span className="rounded bg-emerald-500/15 px-2 py-0.5 font-mono text-[11px] font-semibold text-emerald-300 tabular-nums">
                 {readyOrders.length}
@@ -598,7 +598,7 @@ export default function CookPage() {
             <div className="flex-1 space-y-3 overflow-y-auto p-3.5">
               {readyOrders.length === 0 ? (
                 <p className="py-10 text-center text-xs text-zinc-600">
-                  No staged orders
+                  No orders ready for pickup
                 </p>
               ) : (
                 readyOrders.map(renderTicket)

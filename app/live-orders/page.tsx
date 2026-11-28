@@ -87,16 +87,28 @@ function formatTime(value?: string): string {
   });
 }
 
+const STATUS_TABS: Array<{ value: string; label: string }> = [
+  { value: "ALL", label: "All" },
+  { value: "PENDING", label: "Pending" },
+  { value: "PREPARING", label: "Cooking" },
+  { value: "READY_FOR_PICKUP", label: "Ready" },
+  { value: "DISPATCHED", label: "Dispatched" },
+  { value: "CANCELLED", label: "Cancelled" },
+];
+
 function SearchParamCoordinator({
   onSelectOrder,
   onOpenInject,
+  onSelectStatus,
 }: {
   onSelectOrder: (id: string | null) => void;
   onOpenInject: () => void;
+  onSelectStatus: (status: string) => void;
 }) {
   const params = useSearchParams();
   const orderId = params.get("order");
   const action = params.get("action");
+  const status = params.get("status");
 
   useEffect(() => {
     if (orderId) onSelectOrder(orderId);
@@ -105,6 +117,15 @@ function SearchParamCoordinator({
   useEffect(() => {
     if (action === "inject") onOpenInject();
   }, [action, onOpenInject]);
+
+  useEffect(() => {
+    if (status) {
+      const normalized = status.trim().toUpperCase();
+      if (normalized === "ALL" || STATUSES.includes(normalized as OrderStatus)) {
+        onSelectStatus(normalized);
+      }
+    }
+  }, [status, onSelectStatus]);
 
   return null;
 }
@@ -147,6 +168,11 @@ export default function LiveOrdersPage() {
   }, []);
 
   const openInjectDrawer = useCallback(() => setInjectOpen(true), []);
+
+  const applyStatusFilter = useCallback((status: string) => {
+    setStatusFilter(status);
+    setSelectedOrderId(null);
+  }, []);
 
   const fmt = useCallback(
     (amount: number) => formatCurrency(amount, currency),
@@ -307,6 +333,17 @@ export default function LiveOrdersPage() {
     [orders, selectedOrderId],
   );
 
+  // Auto-select first matching order when status filter changes (e.g. ?status=CANCELLED)
+  useEffect(() => {
+    if (loading || filteredOrders.length === 0) return;
+    if (
+      !selectedOrderId ||
+      !filteredOrders.some((o) => o.id === selectedOrderId)
+    ) {
+      setSelectedOrderId(filteredOrders[0].id);
+    }
+  }, [loading, filteredOrders, selectedOrderId]);
+
   async function handleTransition(
     orderId: string,
     nextStatus: OrderStatus,
@@ -402,7 +439,7 @@ export default function LiveOrdersPage() {
             onClick={() => setInjectOpen(true)}
             className="inline-flex h-7 items-center rounded-md bg-zinc-100 px-2.5 text-[11px] font-semibold text-zinc-950 transition-colors hover:bg-white"
           >
-            + Inject Order
+            + Test Order
           </button>
           <button
             type="button"
@@ -418,6 +455,7 @@ export default function LiveOrdersPage() {
         <SearchParamCoordinator
           onSelectOrder={openLinkedOrder}
           onOpenInject={openInjectDrawer}
+          onSelectStatus={applyStatusFilter}
         />
       </Suspense>
 
@@ -428,8 +466,48 @@ export default function LiveOrdersPage() {
           aria-label="Orders inbox"
           className="flex min-w-0 flex-1 flex-col bg-[#0e0e11]"
         >
-          {/* Compact Inline Filter Toolbar */}
-          <div className="flex flex-wrap items-center gap-2 border-b border-white/[0.06] bg-[#09090b]/50 px-4 py-2.5">
+          {/* Plain-English Status Filter Tabs */}
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-white/[0.06] bg-[#09090b]/60 px-4 py-2">
+            <div
+              role="tablist"
+              aria-label="Order status filter"
+              className="flex flex-wrap items-center rounded-md border border-white/[0.06] bg-[#151519] p-0.5"
+            >
+              {STATUS_TABS.map((tab) => {
+                const active = statusFilter === tab.value;
+                const count =
+                  tab.value === "ALL"
+                    ? orders.length
+                    : orders.filter((o) => o.status === tab.value).length;
+                return (
+                  <button
+                    key={tab.value}
+                    type="button"
+                    role="tab"
+                    aria-selected={active}
+                    onClick={() => applyStatusFilter(tab.value)}
+                    className={`inline-flex items-center gap-1.5 rounded-[5px] px-2.5 py-1 text-[11px] font-medium transition-colors ${
+                      active
+                        ? "bg-[#27272e] text-zinc-100"
+                        : "text-zinc-400 hover:text-zinc-200"
+                    }`}
+                  >
+                    <span>{tab.label}</span>
+                    <span className="font-mono text-[10px] text-zinc-500 tabular-nums">
+                      {count}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+
+            <span className="hidden font-mono text-[10px] text-zinc-500 xl:inline">
+              ↑/↓ navigate
+            </span>
+          </div>
+
+          {/* Compact Inline Search & Secondary Filter Toolbar */}
+          <div className="flex flex-wrap items-center gap-2 border-b border-white/[0.06] bg-[#09090b]/40 px-4 py-2">
             <input
               type="text"
               value={search}
@@ -437,20 +515,6 @@ export default function LiveOrdersPage() {
               placeholder="Search #ORD, customer, external ID, item..."
               className="h-7 min-w-[200px] flex-1 rounded-md border border-white/[0.08] bg-[#151519] px-2.5 text-xs text-zinc-100 placeholder:text-zinc-500 outline-none focus:border-white/[0.2]"
             />
-
-            <select
-              aria-label="Filter status"
-              value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value)}
-              className="h-7 rounded-md border border-white/[0.08] bg-[#151519] px-2 text-[11px] text-zinc-200 outline-none focus:border-white/[0.2]"
-            >
-              <option value="ALL">All Statuses ({orders.length})</option>
-              {STATUSES.map((s) => (
-                <option key={s} value={s}>
-                  {s.replaceAll("_", " ")}
-                </option>
-              ))}
-            </select>
 
             <select
               aria-label="Filter brand"
@@ -479,10 +543,6 @@ export default function LiveOrdersPage() {
                 </option>
               ))}
             </select>
-
-            <span className="hidden font-mono text-[10px] text-zinc-500 xl:inline">
-              ↑/↓ navigate
-            </span>
           </div>
 
           {error && (
@@ -509,7 +569,7 @@ export default function LiveOrdersPage() {
                   No orders match current filters
                 </p>
                 <p className="mt-1 text-xs text-zinc-500">
-                  Use &ldquo;+ Inject Order&rdquo; or clear active filters.
+                  Use &ldquo;+ Test Order&rdquo; or clear active filters.
                 </p>
               </div>
             ) : (
@@ -671,7 +731,7 @@ export default function LiveOrdersPage() {
                     }
                     className="h-8 flex-1 rounded-md bg-emerald-500 px-3 text-xs font-semibold text-zinc-950 transition-colors hover:bg-emerald-400 disabled:opacity-50"
                   >
-                    Bump Ready
+                    Mark Ready
                   </button>
                 )}
                 <button

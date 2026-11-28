@@ -3,6 +3,7 @@
 import React, { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
+import GuideIcon, { type GuideIconName } from "@/components/GuideIcon";
 import { CommandPalette } from "./CommandPalette";
 import { DEMO_ROLES } from "@/lib/getting-started";
 
@@ -32,84 +33,94 @@ interface NavItem {
   href: string;
   aliases?: string[];
   label: string;
-  shortCode: string;
+  mobileLabel?: string;
+  icon: GuideIconName;
   permission?: string;
 }
 
-const PRIMARY_NAV: NavItem[] = [
+const OPERATIONS_NAV: NavItem[] = [
   {
     href: "/owner",
     aliases: ["/dashboard"],
-    label: "Command",
-    shortCode: "CMD",
+    label: "Overview",
+    mobileLabel: "Overview",
+    icon: "home",
     permission: "OWNER_VIEW",
   },
   {
     href: "/live-orders",
     aliases: ["/orders"],
-    label: "Orders",
-    shortCode: "ORD",
+    label: "Live Orders",
+    mobileLabel: "Orders",
+    icon: "list",
   },
   {
     href: "/cook",
     aliases: ["/kds"],
-    label: "Cook KDS",
-    shortCode: "KDS",
+    label: "Kitchen Screen",
+    mobileLabel: "Kitchen",
+    icon: "cook",
     permission: "COOK_ORDERS",
   },
   {
     href: "/dispatch",
     label: "Dispatch",
-    shortCode: "DSP",
+    mobileLabel: "Dispatch",
+    icon: "truck",
     permission: "DISPATCH_ORDERS",
   },
   {
     href: "/inventory",
     label: "Inventory",
-    shortCode: "INV",
+    mobileLabel: "Stock",
+    icon: "box",
     permission: "INVENTORY_VIEW",
   },
   {
     href: "/invoices",
-    label: "GST Invoices",
-    shortCode: "GST",
+    label: "GST & Tally",
+    mobileLabel: "GST",
+    icon: "ticket",
     permission: "OWNER_VIEW",
   },
   {
     href: "/analytics",
     aliases: ["/performance"],
     label: "Analytics",
-    shortCode: "ANL",
+    mobileLabel: "Analytics",
+    icon: "chart",
     permission: "OWNER_VIEW",
   },
 ];
 
-const ADMIN_NAV: NavItem[] = [
+const SETUP_NAV: NavItem[] = [
   {
     href: "/brands",
     label: "Brands & Menus",
-    shortCode: "BRD",
+    icon: "brand",
     permission: "OWNER_VIEW",
   },
   {
     href: "/kitchens",
     label: "Kitchens",
-    shortCode: "KIT",
+    icon: "folder",
     permission: "OWNER_VIEW",
   },
   {
     href: "/staff",
-    label: "Staff & RBAC",
-    shortCode: "STF",
+    label: "Staff",
+    icon: "staff",
     permission: "STAFF_MANAGE",
   },
   {
     href: "/settings",
     label: "Settings",
-    shortCode: "SET",
+    icon: "settings",
     permission: "OWNER_VIEW",
   },
 ];
+
+const NAV_COLLAPSED_STORAGE_KEY = "darkit:nav-collapsed";
 
 export function AppShell({
   title,
@@ -131,6 +142,29 @@ export function AppShell({
   const [selectedHub, setSelectedHub] = useState<string>(activeHub ?? "ALL");
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
+  const [navCollapsed, setNavCollapsed] = useState(false);
+
+  useEffect(() => {
+    try {
+      if (window.localStorage.getItem(NAV_COLLAPSED_STORAGE_KEY) === "true") {
+        setNavCollapsed(true);
+      }
+    } catch {
+      // ignore storage failures
+    }
+  }, []);
+
+  const toggleNavCollapsed = useCallback(() => {
+    setNavCollapsed((prev) => {
+      const next = !prev;
+      try {
+        window.localStorage.setItem(NAV_COLLAPSED_STORAGE_KEY, String(next));
+      } catch {
+        // ignore storage failures
+      }
+      return next;
+    });
+  }, []);
 
   useEffect(() => {
     if (activeHub) setSelectedHub(activeHub);
@@ -237,8 +271,8 @@ export function AppShell({
     );
   };
 
-  const visiblePrimary = PRIMARY_NAV.filter(canSee);
-  const visibleAdmin = ADMIN_NAV.filter(canSee);
+  const visibleOperations = OPERATIONS_NAV.filter(canSee);
+  const visibleSetup = SETUP_NAV.filter(canSee);
 
   const isRouteActive = (item: NavItem) => {
     if (pathname === item.href) return true;
@@ -254,75 +288,189 @@ export function AppShell({
 
   const combinedRightActions = rightActions ?? actions;
 
+  const homeHref = permissions.includes("OWNER_VIEW")
+    ? "/owner"
+    : permissions.includes("COOK_ORDERS")
+      ? "/cook"
+      : permissions.includes("DISPATCH_ORDERS")
+        ? "/dispatch"
+        : "/live-orders";
+
   return (
     <div className="flex min-h-screen bg-[#09090b] text-zinc-100 selection:bg-indigo-500/30">
-      {/* 52px Native Desktop Icon Rail */}
+      {/* Collapsible Plain-English Desktop Navigation Rail (188px <-> 56px) */}
       <aside
         aria-label="Primary Navigation"
-        className="sticky top-0 hidden h-screen w-[52px] shrink-0 flex-col items-center justify-between border-r border-white/[0.06] bg-[#09090b] py-2.5 md:flex"
+        className={`sticky top-0 hidden h-screen shrink-0 flex-col justify-between border-r border-white/[0.06] bg-[#09090b] transition-[width] duration-200 ease-[cubic-bezier(0.22,1,0.36,1)] md:flex ${
+          navCollapsed ? "w-[56px]" : "w-[188px]"
+        }`}
       >
-        <div className="flex flex-col items-center gap-1.5">
-          <Link
-            href={
-              permissions.includes("OWNER_VIEW")
-                ? "/owner"
-                : permissions.includes("COOK_ORDERS")
-                  ? "/cook"
-                  : permissions.includes("DISPATCH_ORDERS")
-                    ? "/dispatch"
-                    : "/live-orders"
-            }
-            title="DarKitOS"
-            className="mb-2 flex h-8 w-8 items-center justify-center rounded-lg border border-white/[0.08] bg-[#151519] text-[11px] font-bold tracking-tighter text-zinc-100 transition-colors hover:border-white/[0.2]"
+        <div className="flex min-h-0 flex-1 flex-col overflow-y-auto px-2 py-2.5">
+          {/* Brand Header + Collapse Toggle */}
+          <div
+            className={`mb-3 flex items-center ${
+              navCollapsed ? "justify-center" : "justify-between px-1.5"
+            }`}
           >
-            DK
-          </Link>
+            <Link
+              href={homeHref}
+              title="DarKitOS"
+              className="flex items-center gap-2 text-zinc-100"
+            >
+              <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-white/[0.1] bg-[#151519] text-[11px] font-bold tracking-tighter text-zinc-100">
+                DK
+              </span>
+              {!navCollapsed && (
+                <span className="text-xs font-semibold tracking-tight text-zinc-100">
+                  DarKitOS
+                </span>
+              )}
+            </Link>
 
-          {visiblePrimary.map((item) => {
-            const active = isRouteActive(item);
-            return (
-              <Link
-                key={item.href}
-                href={item.href}
-                title={item.label}
-                aria-current={active ? "page" : undefined}
-                className={`group relative flex h-9 w-9 items-center justify-center rounded-lg text-[10px] font-semibold tracking-tight transition-colors ${
-                  active
-                    ? "bg-[#1d1d22] text-zinc-100 ring-1 ring-white/[0.12]"
-                    : "text-zinc-500 hover:bg-[#151519] hover:text-zinc-200"
-                }`}
+            {!navCollapsed && (
+              <button
+                type="button"
+                onClick={toggleNavCollapsed}
+                title="Collapse sidebar"
+                aria-label="Collapse sidebar"
+                className="flex h-6 w-6 items-center justify-center rounded-md text-zinc-500 transition-colors hover:bg-[#151519] hover:text-zinc-200"
               >
-                {active && (
-                  <span className="absolute -left-[9px] h-4 w-[2px] rounded-r bg-zinc-100" />
-                )}
-                {item.shortCode}
-              </Link>
-            );
-          })}
+                <svg
+                  aria-hidden="true"
+                  className="h-3.5 w-3.5"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.75"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <path d="M15 18l-6-6 6-6" />
+                </svg>
+              </button>
+            )}
+          </div>
+
+          {/* Operations Section */}
+          {visibleOperations.length > 0 && (
+            <div>
+              {!navCollapsed && (
+                <p className="mb-1 px-2 text-[10px] font-medium uppercase tracking-wider text-zinc-500">
+                  Operations
+                </p>
+              )}
+              <nav aria-label="Operations" className="space-y-0.5">
+                {visibleOperations.map((item) => {
+                  const active = isRouteActive(item);
+                  return (
+                    <Link
+                      key={item.href}
+                      href={item.href}
+                      title={item.label}
+                      aria-current={active ? "page" : undefined}
+                      className={`group relative flex h-8 items-center rounded-md text-xs font-medium transition-colors ${
+                        navCollapsed ? "justify-center px-0" : "gap-2.5 px-2"
+                      } ${
+                        active
+                          ? "bg-[#1d1d22] text-zinc-100 ring-1 ring-white/[0.08]"
+                          : "text-zinc-400 hover:bg-[#151519] hover:text-zinc-100"
+                      }`}
+                    >
+                      {active && (
+                        <span className="absolute -left-2 h-4 w-[2px] rounded-r bg-zinc-100" />
+                      )}
+                      <GuideIcon
+                        name={item.icon}
+                        className={`h-4 w-4 shrink-0 ${
+                          active
+                            ? "text-zinc-100"
+                            : "text-zinc-500 group-hover:text-zinc-300"
+                        }`}
+                      />
+                      {!navCollapsed && (
+                        <span className="truncate">{item.label}</span>
+                      )}
+                    </Link>
+                  );
+                })}
+              </nav>
+            </div>
+          )}
+
+          {/* Setup Section */}
+          {visibleSetup.length > 0 && (
+            <div className="mt-4 border-t border-white/[0.06] pt-3">
+              {!navCollapsed && (
+                <p className="mb-1 px-2 text-[10px] font-medium uppercase tracking-wider text-zinc-500">
+                  Setup
+                </p>
+              )}
+              <nav aria-label="Setup" className="space-y-0.5">
+                {visibleSetup.map((item) => {
+                  const active = isRouteActive(item);
+                  return (
+                    <Link
+                      key={item.href}
+                      href={item.href}
+                      title={item.label}
+                      aria-current={active ? "page" : undefined}
+                      className={`group relative flex h-8 items-center rounded-md text-xs font-medium transition-colors ${
+                        navCollapsed ? "justify-center px-0" : "gap-2.5 px-2"
+                      } ${
+                        active
+                          ? "bg-[#1d1d22] text-zinc-100 ring-1 ring-white/[0.08]"
+                          : "text-zinc-400 hover:bg-[#151519] hover:text-zinc-100"
+                      }`}
+                    >
+                      {active && (
+                        <span className="absolute -left-2 h-4 w-[2px] rounded-r bg-zinc-100" />
+                      )}
+                      <GuideIcon
+                        name={item.icon}
+                        className={`h-4 w-4 shrink-0 ${
+                          active
+                            ? "text-zinc-100"
+                            : "text-zinc-500 group-hover:text-zinc-300"
+                        }`}
+                      />
+                      {!navCollapsed && (
+                        <span className="truncate">{item.label}</span>
+                      )}
+                    </Link>
+                  );
+                })}
+              </nav>
+            </div>
+          )}
         </div>
 
-        <div className="flex flex-col items-center gap-1.5 border-t border-white/[0.06] pt-2.5">
-          {visibleAdmin.map((item) => {
-            const active = isRouteActive(item);
-            return (
-              <Link
-                key={item.href}
-                href={item.href}
-                title={item.label}
-                aria-current={active ? "page" : undefined}
-                className={`relative flex h-8 w-8 items-center justify-center rounded-lg text-[10px] font-medium tracking-tight transition-colors ${
-                  active
-                    ? "bg-[#1d1d22] text-zinc-100 ring-1 ring-white/[0.12]"
-                    : "text-zinc-500 hover:bg-[#151519] hover:text-zinc-200"
-                }`}
-              >
-                {active && (
-                  <span className="absolute -left-[9px] h-3.5 w-[2px] rounded-r bg-zinc-100" />
-                )}
-                {item.shortCode}
-              </Link>
-            );
-          })}
+        {/* Bottom Expand / Collapse Control */}
+        <div className="border-t border-white/[0.06] p-2">
+          <button
+            type="button"
+            onClick={toggleNavCollapsed}
+            title={navCollapsed ? "Expand sidebar" : "Compact sidebar"}
+            aria-label={navCollapsed ? "Expand sidebar" : "Compact sidebar"}
+            className={`flex h-7 w-full items-center rounded-md text-[11px] font-medium text-zinc-500 transition-colors hover:bg-[#151519] hover:text-zinc-200 ${
+              navCollapsed ? "justify-center" : "justify-between px-2"
+            }`}
+          >
+            {!navCollapsed && <span>Compact Rail</span>}
+            <svg
+              aria-hidden="true"
+              className={`h-3.5 w-3.5 transition-transform ${
+                navCollapsed ? "rotate-180" : ""
+              }`}
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.75"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="M15 18l-6-6 6-6" />
+            </svg>
+          </button>
         </div>
       </aside>
 
@@ -419,8 +567,9 @@ export function AppShell({
               type="button"
               onClick={() => setPaletteOpen(true)}
               className="inline-flex h-7 items-center gap-1.5 rounded-md border border-white/[0.07] bg-[#151519] px-2 text-[11px] text-zinc-400 transition-colors hover:border-white/[0.16] hover:text-zinc-100"
+              title="Open Quick Command Palette"
             >
-              <span className="hidden sm:inline">Command</span>
+              <span className="hidden sm:inline">Search</span>
               <kbd className="rounded bg-[#1d1d22] px-1 py-0.5 font-mono text-[10px] text-zinc-400">
                 ⌘K
               </kbd>
@@ -461,22 +610,24 @@ export function AppShell({
         </main>
       </div>
 
-      {/* Mobile Bottom Station Dock */}
+      {/* Plain-English Mobile Bottom Station Bar */}
       <nav
         aria-label="Mobile Station Navigation"
-        className="fixed inset-x-0 bottom-0 z-30 flex items-center justify-around border-t border-white/[0.06] bg-[#09090b]/95 py-1.5 backdrop-blur-md md:hidden"
+        className="fixed inset-x-0 bottom-0 z-30 flex items-center justify-around border-t border-white/[0.06] bg-[#09090b]/95 px-1 py-1.5 backdrop-blur-md md:hidden"
       >
-        {visiblePrimary.slice(0, 5).map((item) => {
+        {visibleOperations.slice(0, 5).map((item) => {
           const active = isRouteActive(item);
           return (
             <Link
               key={item.href}
               href={item.href}
-              className={`rounded-md px-2.5 py-1 text-[11px] font-medium transition-colors ${
+              aria-current={active ? "page" : undefined}
+              className={`flex flex-col items-center gap-0.5 rounded-md px-2 py-1 text-[10px] font-medium transition-colors ${
                 active ? "bg-[#1d1d22] text-zinc-100" : "text-zinc-400"
               }`}
             >
-              {item.shortCode}
+              <GuideIcon name={item.icon} className="h-3.5 w-3.5" />
+              <span>{item.mobileLabel ?? item.label}</span>
             </Link>
           );
         })}
